@@ -32,3 +32,18 @@ Abrir o `public/index.html` direto ativa o **modo local**: tudo fica salvo só n
 | `PORT` | Porta (o Render preenche sozinho) |
 | `DATA_DIR` | Pasta do `nexora.json` quando não há PostgreSQL |
 | `TURN_URL`, `TURN_USER`, `TURN_PASS` | Servidor TURN, para voz entre redes restritas (4G, empresas) |
+| `STEAM_API_KEY` | "Jogando agora" automático pela Steam (chave grátis em https://steamcommunity.com/dev/apikey) |
+
+## Amigos e mensagens privadas
+Na tela **Início**: **Amigos** (Online / Todos / Pendentes / Adicionar amigo) e **Mensagens diretas**.
+Dá para conversar no privado com amigos ou com quem está no mesmo servidor.
+
+## Controle remoto e co-op
+1. Quem transmite baixa o **NEXORA Agente** em Configurações › Controle remoto, abre o `NEXORA-Agente.bat`
+   e digita o código de 6 números no NEXORA.
+2. Quem assiste clica em 🎮 **Pedir controle** na transmissão.
+3. Quem transmite escolhe **Co-op** (só teclado/controle) ou **Controle total** (mouse e teclado).
+4. Fechar a janela do agente corta o controle na hora.
+
+O controle (gamepad) de quem joga vira teclas no PC de quem transmite (WASD ou setas).
+Um controle de Xbox virtual de verdade precisaria do driver ViGEm, que não está incluído.

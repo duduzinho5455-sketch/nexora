@@ -67,7 +67,13 @@ const P = {
   image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>',
   play: '<path d="m6 3 14 9-14 9z"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
-  bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/>'
+  bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/>',
+  gamepad: '<path d="M6 12h4M8 10v4M15 13h.01M18 11h.01"/><rect x="2" y="6" width="20" height="12" rx="6"/>',
+  pointer: '<path d="m4 4 7 17 2.5-7.5L21 11z"/>',
+  at: '<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/>',
+  userCheck: '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="m17 11 2 2 4-4"/>',
+  message: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  steam: '<circle cx="12" cy="12" r="10"/><circle cx="15.5" cy="9.5" r="2.5"/><path d="m2.5 14 5 2a3 3 0 1 0 1.6-3.9l3.7-2.6"/>'
 };
 const ic = (n, c = "") => `<svg class="ic ${c}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ""}</svg>`;
 const LOGO = '<svg viewBox="0 0 48 48" aria-hidden="true"><defs><linearGradient id="nxg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><path d="M14 35V13l20 22V13" fill="none" stroke="url(#nxg)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -79,6 +85,7 @@ const QUICK = ["👍", "😂", "❤️"];
 const SYS = { join: "entrou no servidor. Deem as boas-vindas! 🎉" };
 const QUALITY = {
   "720": { label: "720p", sub: "30 FPS · leve", w: 1280, h: 720, fps: 30, br: 2500000 },
+  "720-60": { label: "720p", sub: "60 FPS · jogo leve", w: 1280, h: 720, fps: 60, br: 4500000, tag: "COOP" },
   "1080": { label: "1080p", sub: "30 FPS · nítido", w: 1920, h: 1080, fps: 30, br: 4500000 },
   "1080-60": { label: "1080p", sub: "60 FPS · fluido", w: 1920, h: 1080, fps: 60, br: 8000000, tag: "GAMES" },
   "src": { label: "Fonte", sub: "até 1440p · 60 FPS", w: 2560, h: 1440, fps: 60, br: 12000000, tag: "MÁX" }
@@ -109,17 +116,26 @@ const S = {
   settings: Object.assign({}, DEFAULTS, store.get("settings", {})),
   muted: store.get("muted", false), deaf: store.get("deaf", false),
   volumes: store.get("volumes", {}), localMute: {}, order: store.get("order", []),
-  pendingInvite: null, voiceLimit: 12, ready: false
+  pendingInvite: null, voiceLimit: 12, ready: false,
+  friends: new Map(), dms: new Map(), friendsTab: "online", steamAuto: false
 };
 const V = {
   channelId: null, serverId: null, joining: false,
   mic: null, screen: null, screenCfg: null, cam: null,
   peers: new Map(), ctx: null, sink: null, meters: new Map(), speaking: new Set(),
-  loop: null, statsTimer: null, ping: null, watching: new Set(), viewers: new Set(), focus: null
+  loop: null, statsTimer: null, ping: null, watching: new Set(), viewers: new Set(), focus: null,
+  granted: new Map(),   // quem pode controlar meu PC: sock -> { uid, mode }
+  controlling: null     // PC que eu controlo: { uid, sock, mode, kb }
 };
 
 const srv = () => S.servers.get(S.serverId);
-function chan(cid = S.channelId) { for (const s of S.servers.values()) { const c = s.channels.find(x => x.id === cid); if (c) return c; } return null; }
+function chan(cid = S.channelId) {
+  const d = S.dms.get(cid);
+  if (d) { d.type = "text"; d.dm = true; d.name = user(d.userId).username; d.topic = ""; return d; }
+  for (const s of S.servers.values()) { const c = s.channels.find(x => x.id === cid); if (c) return c; }
+  return null;
+}
+const isDm = cid => typeof cid === "string" && cid.startsWith("d.");
 function serverOf(cid) { for (const s of S.servers.values()) if (s.channels.some(c => c.id === cid)) return s; return null; }
 const user = id => S.users.get(id) || { id, username: "Usuário removido", color: "#4b5068", avatar: "", status: "offline", about: "", created: 0 };
 function userByName(n) { n = n.toLowerCase(); for (const u of S.users.values()) if (u.username.toLowerCase() === n) return u; return null; }
@@ -200,6 +216,7 @@ function renderText(raw) {
 function mentionsMe(m) {
   if (!S.me || m.sys || m.a === S.me.id) return false;
   if (m.re && m.re.a === S.me.id) return true;
+  if (m.dm) return true;
   const t = m.t.toLowerCase(), n = "@" + S.me.username.toLowerCase();
   if (/(^|\s)@(everyone|todos|here)\b/.test(t)) return true;
   for (let i = t.indexOf(n); i >= 0; i = t.indexOf(n, i + 1)) {
@@ -231,7 +248,7 @@ function flushRender() {
 const RENDER = {
   rail: () => renderRail(), side: () => renderSide(), top: () => renderTop(), members: () => renderMembers(),
   user: () => renderUserPanel(), vpanel: () => renderVoicePanel(), stage: () => renderStage(),
-  home: () => { if (S.view === "home") renderHome(); }, title: () => renderTitle(), typing: () => renderTyping()
+  home: () => { if (S.view === "home") renderHome(); if (S.view === "friends") renderFriends(); }, title: () => renderTitle(), typing: () => renderTyping()
 };
 const renderAll = () => schedule("rail", "side", "top", "members", "user", "vpanel", "stage", "home", "title");
 
@@ -248,13 +265,22 @@ function serverUnread(s) {
   return { mentions, unread };
 }
 function renderRail() {
-  const inServer = S.view === "chat" || S.view === "stage";
+  const inServer = (S.view === "chat" && !isDm(S.channelId)) || S.view === "stage";
   $("#serverList").innerHTML = sortedServers().map(s => {
     const { mentions, unread } = serverUnread(s);
     const flag = mentions ? `<b class="badge">${mentions > 99 ? "99+" : mentions}</b>` : V.serverId === s.id ? `<span class="vc-dot">${ic("volume")}</span>` : "";
     return `<div class="rail-item${inServer && s.id === S.serverId ? " on" : ""}${unread ? " unread" : ""}" data-act="server" data-id="${s.id}" data-tip="${esc(s.name)}" role="button" tabindex="0" draggable="true"><span class="pill"></span>${serverIcon(s)}${flag}</div>`;
   }).join("");
-  $(".rail-item.home").classList.toggle("on", S.view === "home");
+  const home = $(".rail-item.home");
+  const inHome = S.view === "home" || S.view === "friends" || (S.view === "chat" && isDm(S.channelId));
+  home.classList.toggle("on", inHome);
+  let dmPings = 0;
+  for (const d of S.dms.values()) dmPings += S.mentions.get(d.id) || 0;
+  const pending = [...S.friends.values()].filter(v => v === "in").length;
+  const total = dmPings + pending;
+  const old = home.querySelector(".badge");
+  if (old) old.remove();
+  if (total) home.insertAdjacentHTML("beforeend", `<b class="badge">${total > 99 ? "99+" : total}</b>`);
   $('.rail-item[data-act="discover"]').classList.toggle("on", S.view === "discover");
 }
 
@@ -270,7 +296,8 @@ function vcUser(v) {
 function renderSide() {
   const head = $("#sideHead"), body = $("#sideBody");
   const s = srv();
-  const key = (S.view === "chat" || S.view === "stage") && s ? s.id : S.view;
+  const homeLike = S.view === "home" || S.view === "friends" || (S.view === "chat" && isDm(S.channelId));
+  const key = homeLike ? "home" : (S.view === "chat" || S.view === "stage") && s ? s.id : S.view;
   const anim = key !== lastSideKey;
   lastSideKey = key;
   body.classList.toggle("anim", anim);
@@ -279,15 +306,22 @@ function renderSide() {
   if (!(S.view === "chat" || S.view === "stage") || !s) {
     head.className = "side-head";
     delete head.dataset.act;
-    head.innerHTML = `<span class="title">${S.view === "discover" ? "Explorar" : "Início"}</span>`;
     if (S.view === "discover") {
+      head.innerHTML = `<span class="title">Explorar</span>`;
       body.innerHTML = `<div class="cat">Descobrir</div><div class="ch on">${ic("compass")}<span class="ch-name">Comunidades</span></div><div class="cat">Dica</div><p style="padding:0 8px;color:var(--muted);font-size:13.5px;margin:0">Torne seu servidor público em <b>Configurações do servidor</b> para ele aparecer aqui.</p>`;
       return;
     }
-    const friends = [...S.users.values()].filter(u => u.id !== S.me.id && u.status !== "offline").sort((a, b) => a.username.localeCompare(b.username, "pt-BR"));
-    body.innerHTML = `<div class="cat">Online agora — ${friends.length}</div>` + (friends.length
-      ? friends.map(u => { const v = S.voice.get(u.id); return `<div class="friend" data-act="profile" data-uid="${u.id}" data-voice-user="${u.id}">${avatar(u, 34, true)}<div style="min-width:0"><b style="font-weight:600">${esc(u.username)}</b><small>${v ? `${ic("volume", "xs")} Em chamada` : esc(u.about || STATUS[u.status])}</small></div></div>`; }).join("")
-      : `<p style="padding:0 8px;color:var(--muted);font-size:13.5px;margin:0">Ninguém online agora. Convide seus amigos para um servidor!</p>`);
+    head.innerHTML = `<button class="side-search" data-act="switcher">${ic("search", "sm")}Encontrar ou começar conversa</button>`;
+    const pending = [...S.friends.values()].filter(v => v === "in").length;
+    const dms = [...S.dms.values()].sort((a, b) => ((b.last && b.last.ts) || b.created || 0) - ((a.last && a.last.ts) || a.created || 0));
+    body.innerHTML = `<div class="ch${S.view === "home" ? " on" : ""}" data-act="home" role="button" tabindex="0">${ic("compass")}<span class="ch-name">Início</span></div>
+      <div class="ch${S.view === "friends" ? " on" : ""}" data-act="friends" role="button" tabindex="0">${ic("users")}<span class="ch-name">Amigos</span>${pending ? `<b class="badge">${pending}</b>` : ""}</div>
+      <div class="cat"><span>Mensagens diretas</span><button data-act="new-dm" data-tip="Nova mensagem">${ic("plus", "sm")}</button></div>` +
+      (dms.length ? dms.map(d => {
+        const u = user(d.userId), n = S.mentions.get(d.id) || 0;
+        const sub = u.game ? `${ic("gamepad", "xs")} ${esc(u.game.name)}` : esc(u.about || "");
+        return `<div class="dm-item${S.view === "chat" && S.channelId === d.id ? " on" : ""}${n ? " unread" : ""}" data-act="open-dm" data-id="${d.id}" data-uid="${u.id}" role="button" tabindex="0">${avatar(u, 32, true)}<div class="who"><b>${esc(u.username)}</b>${sub ? `<small>${sub}</small>` : ""}</div>${n ? `<b class="badge">${n}</b>` : ""}</div>`;
+      }).join("") : `<p style="padding:0 8px;color:var(--muted);font-size:13px;margin:0">Nenhuma conversa ainda. Adicione amigos e mande um oi! 👋</p>`);
     return;
   }
 
@@ -318,7 +352,13 @@ function renderTop() {
   const icon = $("#topIcon"), title = $("#topTitle"), topic = $("#topTopic"), actions = $("#topActions");
   const c = chan();
   const search = `<button class="icon-btn" data-act="switcher" data-tip="Ir para… (Ctrl+K)">${ic("search")}</button>`;
-  if (S.view === "chat" && c) {
+  if (S.view === "chat" && c && c.dm) {
+    const u = user(c.userId), f = S.friends.get(u.id);
+    icon.innerHTML = ic("at");
+    title.textContent = u.username;
+    topic.textContent = u.game ? `🎮 Jogando ${u.game.name}` : STATUS[u.status] || "";
+    actions.innerHTML = `${f === "friend" ? "" : `<button class="icon-btn" data-act="add-friend" data-uid="${u.id}" data-tip="${f === "out" ? "Pedido enviado" : "Adicionar amigo"}">${ic(f === "out" ? "userCheck" : "userPlus")}</button>`}<button class="icon-btn" data-act="profile" data-uid="${u.id}" data-tip="Perfil">${ic("users")}</button>${search}`;
+  } else if (S.view === "chat" && c) {
     icon.innerHTML = ic("hash");
     title.textContent = c.name;
     topic.textContent = c.topic || "";
@@ -331,6 +371,8 @@ function renderTop() {
     actions.innerHTML = `<button class="icon-btn" data-act="invite" data-tip="Convidar pessoas">${ic("userPlus")}</button>${search}`;
   } else if (S.view === "discover") {
     icon.innerHTML = ic("compass"); title.textContent = "Explorar"; topic.textContent = "Comunidades públicas"; actions.innerHTML = search;
+  } else if (S.view === "friends") {
+    icon.innerHTML = ic("users"); title.textContent = "Amigos"; topic.textContent = ""; actions.innerHTML = search;
   } else {
     icon.innerHTML = ic("users"); title.textContent = "Início"; topic.textContent = ""; actions.innerHTML = search;
   }
@@ -345,7 +387,9 @@ function renderMembers() {
   const on = all.filter(u => u.status !== "offline"), off = all.filter(u => u.status === "offline");
   const row = u => {
     const v = S.voice.get(u.id);
-    const sub = v && v.serverId === s.id ? `<small>${ic("volume", "xs")} ${esc(chan(v.channelId)?.name || "Em chamada")}${v.screen ? " · ao vivo" : ""}</small>` : u.about ? `<small>${esc(u.about)}</small>` : "";
+    const sub = v && v.serverId === s.id ? `<small>${ic("volume", "xs")} ${esc(chan(v.channelId)?.name || "Em chamada")}${v.screen ? " · ao vivo" : ""}</small>`
+      : u.game ? `<small class="playing">${ic("gamepad", "xs")} Jogando <b>${esc(u.game.name)}</b></small>`
+      : u.about ? `<small>${esc(u.about)}</small>` : "";
     return `<div class="member${u.status === "offline" ? " off" : ""}${V.speaking.has(u.id) ? " speaking" : ""}" data-act="profile" data-uid="${u.id}" data-voice-user="${u.id}">${avatar(u, 34, true)}<div class="who"><b>${esc(u.username)}${u.id === s.ownerId ? `<span data-tip="Dono do servidor">${ic("crown", "xs")}</span>` : ""}</b>${sub}</div></div>`;
   };
   el.innerHTML = `<div class="cat">Online — ${on.length}</div>${on.map(row).join("")}${off.length ? `<div class="cat">Offline — ${off.length}</div>${off.map(row).join("")}` : ""}`;
@@ -383,7 +427,7 @@ function renderTitle() {
 /* ------------------------------------------------------------------ */
 /* Navegação                                                           */
 /* ------------------------------------------------------------------ */
-const VIEWS = { chat: "#chatView", stage: "#stageView", home: "#homeView", discover: "#discoverView" };
+const VIEWS = { chat: "#chatView", stage: "#stageView", home: "#homeView", discover: "#discoverView", friends: "#friendsView" };
 function setView(view) {
   if (S.view === "chat" && S.channelId) S.drafts[S.channelId] = $("#input").value;
   const changed = S.view !== view;
@@ -408,6 +452,77 @@ function goDiscover() {
   S.serverId = null; S.channelId = null;
   loadDiscover(); renderAll(); updateMini();
 }
+function goFriends(tab) {
+  if (tab) S.friendsTab = tab;
+  setView("friends");
+  S.serverId = null; S.channelId = null;
+  renderFriends(); renderAll(); updateMini();
+  if (S.friendsTab === "add") setTimeout(() => $("#addFriendInput")?.focus(), 80);
+}
+function openDM(id) {
+  const d = S.dms.get(id);
+  if (!d) return;
+  if (S.view === "chat" && S.channelId) S.drafts[S.channelId] = $("#input").value;
+  S.serverId = null;
+  S.channelId = id;
+  setView("chat");
+  cancelReply(); cancelEdit();
+  openText(chan(id));
+  renderRail(); renderSide(); renderTop(); renderMembers(); updateMini();
+}
+async function startDM(userId) {
+  for (const d of S.dms.values()) if (d.userId === userId) { openDM(d.id); return; }
+  const r = await emit("dm:open", { userId });
+  if (r.error) { toast(r.error, "error"); return; }
+  if (r.user) S.users.set(r.user.id, r.user);
+  if (!S.dms.has(r.dm.id)) S.dms.set(r.dm.id, r.dm);
+  openDM(r.dm.id);
+}
+async function addFriend(username) {
+  const r = await emit("friend:request", { username });
+  if (r.error) { toast(r.error, "error"); return false; }
+  toast(r.state === "friend" ? "Vocês agora são amigos! 🎉" : `Pedido de amizade enviado para ${username}.`, "ok");
+  return true;
+}
+function friendRow(u, state) {
+  const v = S.voice.get(u.id);
+  const sub = state === "in" ? "Pedido de amizade recebido" : state === "out" ? "Pedido enviado" : v ? `${ic("volume", "xs")} Em chamada` : u.game ? `${ic("gamepad", "xs")} Jogando <b>${esc(u.game.name)}</b>` : esc(u.about || STATUS[u.status]);
+  const btns = state === "in"
+    ? `<button class="round ok" data-act="friend-accept" data-uid="${u.id}" data-tip="Aceitar">${ic("check")}</button><button class="round bad" data-act="friend-remove" data-uid="${u.id}" data-tip="Recusar">${ic("x")}</button>`
+    : state === "out" ? `<button class="round bad" data-act="friend-remove" data-uid="${u.id}" data-tip="Cancelar pedido">${ic("x")}</button>`
+    : `<button class="round" data-act="dm-user" data-uid="${u.id}" data-tip="Mensagem">${ic("message")}</button><button class="round" data-act="friend-more" data-uid="${u.id}" data-tip="Mais">${ic("chevron")}</button>`;
+  return `<div class="friend-row" data-uid="${u.id}">${avatar(u, 38, true, `data-act="profile" data-uid="${u.id}"`)}<div class="who"><b>${esc(u.username)}</b><small>${sub}</small></div><div class="acts">${btns}</div></div>`;
+}
+function renderFriends() {
+  const root = $("#friendsView");
+  if (!S.me) return;
+  const tab = S.friendsTab;
+  const all = [...S.friends].map(([id, st]) => ({ u: user(id), st })).sort((a, b) => a.u.username.localeCompare(b.u.username, "pt-BR"));
+  const friends = all.filter(x => x.st === "friend");
+  const pending = all.filter(x => x.st !== "friend");
+  const inCount = pending.filter(x => x.st === "in").length;
+  const tabs = [["online", "Online"], ["all", "Todos"], ["pending", `Pendentes${inCount ? ` <b class="badge">${inCount}</b>` : ""}`], ["add", "Adicionar amigo"]];
+  let body = "";
+  if (tab === "add") {
+    body = `<div class="add-friend"><h2>Adicionar amigo</h2><p>Você pode adicionar amigos pelo nome de usuário do NEXORA.</p>
+      <form class="add-box" id="addFriendForm"><input id="addFriendInput" placeholder="Digite o nome de usuário" maxlength="24" autocomplete="off" spellcheck="false"><button class="btn primary">Enviar pedido</button></form></div>
+      <div class="section-title">Sugestões dos seus servidores</div>` +
+      ([...S.users.values()].filter(u => u.id !== S.me.id && !S.friends.has(u.id)).slice(0, 12).map(u => `<div class="friend-row">${avatar(u, 38, true, `data-act="profile" data-uid="${u.id}"`)}<div class="who"><b>${esc(u.username)}</b><small>${esc(u.about || STATUS[u.status])}</small></div><div class="acts"><button class="btn sm" data-act="add-friend" data-uid="${u.id}">${ic("userPlus", "sm")}Adicionar</button></div></div>`).join("") || `<p style="color:var(--muted)">Entre em servidores para ver sugestões.</p>`);
+  } else {
+    const list = tab === "online" ? friends.filter(x => x.u.status !== "offline") : tab === "all" ? friends : pending;
+    const label = tab === "online" ? "Online" : tab === "all" ? "Todos os amigos" : "Pendentes";
+    body = `<div class="section-title">${label} — ${list.length}</div>` + (list.length ? list.map(x => friendRow(x.u, x.st)).join("")
+      : `<div class="empty">${ic(tab === "pending" ? "userCheck" : "users")}<p>${tab === "pending" ? "Nenhum pedido pendente." : tab === "online" ? "Nenhum amigo online agora." : "Você ainda não tem amigos aqui."}</p><button class="btn primary" data-act="friends-tab" data-tab="add">${ic("userPlus", "sm")}Adicionar amigo</button></div>`);
+  }
+  root.innerHTML = `<div class="page"><div class="tabs-row">${tabs.map(([k, n]) => `<button class="tab${k === tab ? " on" : ""}${k === "add" ? " add" : ""}" data-act="friends-tab" data-tab="${k}">${n}</button>`).join("")}</div>${body}</div>`;
+  const form = $("#addFriendForm");
+  if (form) form.onsubmit = async e => {
+    e.preventDefault();
+    const inp = $("#addFriendInput"), name = inp.value.trim();
+    if (!name) return;
+    if (await addFriend(name)) inp.value = "";
+  };
+}
 function openServer(id) {
   const s = S.servers.get(id);
   if (!s) return;
@@ -416,6 +531,7 @@ function openServer(id) {
   if (c) openChannel(c.id);
 }
 function openChannel(cid, join = true) {
+  if (isDm(cid)) { openDM(cid); return; }
   const s = serverOf(cid), c = chan(cid);
   if (!s || !c) return;
   if (S.view === "chat" && S.channelId) S.drafts[S.channelId] = $("#input").value;
@@ -450,7 +566,7 @@ function findMsg(id, cid = S.channelId) { const b = S.msgs.get(cid); return b ? 
 
 function openText(c) {
   const input = $("#input");
-  input.placeholder = `Conversar em #${c.name}`;
+  input.placeholder = c.dm ? `Mensagem para @${c.name}` : `Conversar em #${c.name}`;
   input.value = S.drafts[c.id] || "";
   autoGrow();
   S.newMarker = isUnread(c) && S.lastRead[c.id] ? { cid: c.id, ts: S.lastRead[c.id] } : null;
@@ -524,7 +640,8 @@ function renderMessages(toBottom) {
   if (!c) return;
   const b = S.msgs.get(c.id), list = b ? b.list : [];
   let h = "";
-  if (b && !b.more) h += `<div class="chan-intro"><div class="big">${ic("hash")}</div><h2>Bem-vindo(a) a #${esc(c.name)}!</h2><p>Este é o começo do canal #${esc(c.name)}.${c.topic ? " " + esc(c.topic) : ""}</p></div>`;
+  if (b && !b.more && c.dm) { const u = user(c.userId); h += `<div class="chan-intro">${avatar(u, 76)}<h2 style="margin-top:12px">${esc(u.username)}</h2><p>Este é o começo da sua conversa privada com <b>@${esc(u.username)}</b>. Só vocês dois veem estas mensagens.</p></div>`; }
+  else if (b && !b.more) h += `<div class="chan-intro"><div class="big">${ic("hash")}</div><h2>Bem-vindo(a) a #${esc(c.name)}!</h2><p>Este é o começo do canal #${esc(c.name)}.${c.topic ? " " + esc(c.topic) : ""}</p></div>`;
   else if (b && b.more) h += `<div class="skeleton"><i style="width:40px;height:40px;border-radius:50%;flex:none"></i><div style="flex:1;display:grid;gap:8px"><i style="width:120px;height:12px"></i><i style="width:60%;height:12px"></i></div></div>`;
   let prev = null, marked = false;
   const nm = S.newMarker && S.newMarker.cid === c.id ? S.newMarker.ts : 0;
@@ -676,12 +793,13 @@ function renderTyping() {
   el.innerHTML = `<span class="dots"><i></i><i></i><i></i></span><span>${txt}</span>`;
 }
 function computeMention() {
-  const ta = $("#input"), s = srv();
+  const ta = $("#input"), s = srv(), c = chan();
   const before = ta.value.slice(0, ta.selectionStart);
   const m = before.match(/(^|\s)@([\p{L}\p{N}_.-]{0,24})$/u);
-  if (!m || !s) { closeMention(); return; }
+  const members = s ? s.members : c && c.dm ? [S.me.id, c.userId] : null;
+  if (!m || !members) { closeMention(); return; }
   const q = m[2].toLowerCase();
-  const list = s.members.map(user).filter(u => u.username.toLowerCase().startsWith(q))
+  const list = members.map(user).filter(u => u.username.toLowerCase().startsWith(q))
     .sort((a, b) => (a.status === "offline") - (b.status === "offline") || a.username.localeCompare(b.username)).slice(0, 8);
   if (!list.length) { closeMention(); return; }
   S.mention = { start: ta.selectionStart - m[2].length - 1, end: ta.selectionStart, list, i: 0 };
@@ -1053,6 +1171,9 @@ function localSocket(token) {
         if (vs) { fire("voice:leave", { sock: sock.id, userId: uid, channelId: vs.cid, serverId: vs.sid }); vs = null; }
         return;
       }
+      case "friend:request": case "friend:accept": case "friend:remove": case "dm:open":
+        fail("Amigos e mensagens privadas funcionam na versão online do NEXORA.");
+        return;
       default: return { ok: true };
     }
   }
@@ -1090,9 +1211,22 @@ function connect() {
     u.status = status;
     schedule("members", "side", "home");
   });
+  sock.on("friend:update", ({ userId, state, user: u }) => {
+    if (u) S.users.set(u.id, u);
+    const prev = S.friends.get(userId);
+    if (state) S.friends.set(userId, state); else S.friends.delete(userId);
+    if (state === "in" && prev !== "in") { sfx("mention"); toast(`${user(userId).username} quer ser seu amigo!`, "info", 4500); }
+    if (state === "friend" && prev === "out") toast(`${user(userId).username} aceitou seu pedido! 🎉`, "ok");
+    schedule("rail", "side", "home", "top", "title");
+  });
+  sock.on("dm:add", ({ dm, user: u }) => {
+    if (u) S.users.set(u.id, u);
+    if (!S.dms.has(dm.id)) S.dms.set(dm.id, dm);
+    schedule("side");
+  });
   sock.on("user:update", ({ user: u, statusPref }) => {
     S.users.set(u.id, u);
-    if (S.me && u.id === S.me.id) { S.me = { ...u, statusPref }; schedule("user"); }
+    if (S.me && u.id === S.me.id) { S.me = { ...u, statusPref: statusPref || S.me.statusPref }; schedule("user"); }
     schedule("members", "side", "home", "stage");
     if (S.view === "chat") rerenderVisible();
   });
@@ -1189,12 +1323,16 @@ function onReady(d) {
   S.voice = new Map(d.voice.map(v => [v.userId, v]));
   S.ice = d.iceServers || [];
   S.voiceLimit = (d.limits && d.limits.voice) || 12;
+  S.friends = new Map(Object.entries(d.friends || {}));
+  S.dms = new Map((d.dms || []).map(x => [x.id, x]));
+  S.steamAuto = !!d.steamAuto;
   S.msgs.clear();
   for (const id of S.mentions.keys()) if (!chan(id)) S.mentions.delete(id);
   const first = !S.ready;
   S.ready = true;
   showApp();
-  if (S.serverId && S.servers.has(S.serverId) && S.channelId && chan(S.channelId)) openChannel(S.channelId, false);
+  if (S.channelId && chan(S.channelId) && (isDm(S.channelId) || S.servers.has(S.serverId))) openChannel(S.channelId, false);
+  else if (!first && S.view === "friends") goFriends();
   else if (first) {
     const last = store.get("last", {});
     if (last.server && S.servers.has(last.server)) openServer(last.server); else goHome();
@@ -1205,7 +1343,9 @@ function onReady(d) {
 }
 
 function onMsg({ channelId, serverId, m, nonce }) {
-  const s = S.servers.get(serverId), c = s && s.channels.find(x => x.id === channelId);
+  const dm = isDm(channelId) ? S.dms.get(channelId) : null;
+  const s = dm ? { id: null, name: "Mensagem privada" } : S.servers.get(serverId);
+  const c = dm ? chan(channelId) : s && s.channels.find(x => x.id === channelId);
   if (!c) return;
   c.last = { id: m.id, ts: m.ts, a: m.a };
   removeTyping(channelId, m.a);
@@ -1224,7 +1364,7 @@ function onMsg({ channelId, serverId, m, nonce }) {
     }
   }
   if (m.a === S.me.id || (visible && document.hasFocus() && atBottom())) markRead(channelId);
-  else if (mentionsMe(m)) {
+  else if (dm || mentionsMe(m)) {
     S.mentions.set(channelId, (S.mentions.get(channelId) || 0) + 1);
     persistRead();
     if (S.me.statusPref !== "dnd") { sfx("mention"); notify(m, s, c); }
@@ -1241,7 +1381,7 @@ function notify(m, s, c) {
   if (document.hasFocus() && S.channelId === c.id) return;
   const u = user(m.a);
   try {
-    const n = new Notification(`${u.username} em #${c.name} (${s.name})`, { body: m.t.slice(0, 160), tag: c.id, silent: true });
+    const n = new Notification(c.dm ? `${u.username} (privado)` : `${u.username} em #${c.name} (${s.name})`, { body: m.t.slice(0, 160), tag: c.id, silent: true });
     n.onclick = () => { window.focus(); openChannel(c.id); n.close(); };
   } catch {}
 }
@@ -1371,6 +1511,8 @@ function leaveVoice() {
   sfx("leave");
 }
 function teardownVoice(silent, keepMic) {
+  if (V.controlling) stopControlling();
+  for (const sock of [...V.granted.keys()]) endGrant(sock);
   for (const p of [...V.peers.values()]) closePeer(p);
   V.peers.clear();
   stopScreen(true); stopCam(true);
@@ -1404,6 +1546,8 @@ function createPeer(sock, userId, initiator) {
   };
   pc.onicecandidate = e => { if (e.candidate) sig(sock, { cand: e.candidate }); };
   pc.ontrack = e => onTrack(p, e);
+  pc.ondatachannel = e => setupDc(p, e.channel);
+  if (initiator) setupDc(p, pc.createDataChannel("nx", { ordered: true }));
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === "failed") { try { pc.restartIce(); } catch {} }
     schedule("vpanel");
@@ -1420,6 +1564,8 @@ function addBaseTracks(p) {
   if (V.cam) addCamTo(p);
 }
 function closePeer(p) {
+  endGrant(p.sock, true);
+  if (V.controlling && V.controlling.sock === p.sock) stopControlling(true);
   try { p.pc.close(); } catch {}
   for (const a of p.audios.values()) { a.pause(); a.srcObject = null; }
   p.audios.clear();
@@ -1451,7 +1597,11 @@ async function handleSignal(p, data) {
   const pc = p.pc;
   if (pc.signalingState === "closed") return;
   if (data.watch) { V.viewers.add(p.sock); addScreenTo(p); return; }
-  if (data.unwatch) { V.viewers.delete(p.sock); removeScreenFrom(p); rebalance(); return; }
+  if (data.unwatch) { V.viewers.delete(p.sock); removeScreenFrom(p); rebalance(); endGrant(p.sock, true); return; }
+  if (data.ctrlReq) { askControl(p); return; }
+  if (data.ctrlGrant) { onGranted(p, data.ctrlGrant); return; }
+  if (data.ctrlDeny) { toast(typeof data.ctrlDeny === "string" ? data.ctrlDeny : `${user(p.userId).username} recusou o pedido de controle.`, "warn", 4500); return; }
+  if (data.ctrlEnd) { if (V.controlling && V.controlling.sock === p.sock) stopControlling(true, `${user(p.userId).username} encerrou o controle.`); endGrant(p.sock, true); return; }
   if (data.desc) {
     const desc = data.desc;
     const collision = desc.type === "offer" && (p.makingOffer || pc.signalingState !== "stable");
@@ -1470,6 +1620,13 @@ async function handleSignal(p, data) {
 function onTrack(p, e) {
   const stream = e.streams[0] || new MediaStream([e.track]);
   p.streams.set(stream.id, stream);
+  if (e.track.kind === "video") {
+    // Baixa latência: o navegador mostra o quadro assim que chega (ideal para jogo e controle remoto).
+    try {
+      if ("jitterBufferTarget" in e.receiver) e.receiver.jitterBufferTarget = 0;
+      else if ("playoutDelayHint" in e.receiver) e.receiver.playoutDelayHint = 0;
+    } catch {}
+  }
   if (e.track.kind === "audio" && !p.audios.has(stream.id)) {
     const a = new Audio();
     a.autoplay = true;
@@ -1603,6 +1760,7 @@ async function startScreen(cfg) {
 }
 function stopScreen(silent) {
   if (!V.screen) return;
+  for (const sock of [...V.granted.keys()]) endGrant(sock);
   for (const p of V.peers.values()) removeScreenFrom(p);
   V.screen.getTracks().forEach(t => t.stop());
   V.screen = null;
@@ -1633,6 +1791,7 @@ function watch(uid) {
   schedule("stage");
 }
 function unwatch(uid) {
+  if (V.controlling && V.controlling.uid === uid) stopControlling();
   V.watching.delete(uid);
   const p = peerByUser(uid);
   if (p) sig(p.sock, { unwatch: true });
@@ -1669,7 +1828,279 @@ function stopCam(silent) {
   if (!silent) { emit("voice:update", { cam: null }); renderAll(); }
 }
 
-/* --- eventos de voz vindos do servidor --- */
+/* ------------------------------------------------------------------ */
+/* Controle remoto e co-op pela tela                                   */
+/* O vídeo vai pelo WebRTC; mouse/teclado/controle vão por um canal de */
+/* dados direto entre os dois PCs. Quem transmite precisa do NEXORA    */
+/* Agente aberto e aceitar o pedido — nada acontece sem permissão.     */
+/* ------------------------------------------------------------------ */
+const AG = { ws: null };
+const agentOk = () => !!(AG.ws && AG.ws.readyState === 1);
+function agentConnect(code = S.settings.agentCode) {
+  return new Promise((res, rej) => {
+    if (agentOk()) return res();
+    if (!code) return rej(new Error("Abra o NEXORA Agente e digite o código em Configurações › Controle remoto."));
+    let ws;
+    try { ws = new WebSocket(`ws://127.0.0.1:47800/?t=${encodeURIComponent(code)}`); }
+    catch { return rej(new Error("O navegador bloqueou a conexão com o NEXORA Agente.")); }
+    const t = setTimeout(() => { try { ws.close(); } catch {} rej(new Error("NEXORA Agente não respondeu. Ele está aberto?")); }, 4000);
+    ws.onopen = () => { clearTimeout(t); AG.ws = ws; res(); renderCtrlBar(); };
+    ws.onerror = () => { clearTimeout(t); rej(new Error("NEXORA Agente não encontrado ou código errado.")); };
+    ws.onclose = () => {
+      if (AG.ws !== ws) return;
+      AG.ws = null;
+      if (V.granted.size) { for (const sock of [...V.granted.keys()]) endGrant(sock); toast("O NEXORA Agente foi fechado — controle encerrado.", "warn"); }
+    };
+  });
+}
+const agentSend = line => { if (agentOk()) AG.ws.send(line); };
+
+// KeyboardEvent.code -> [código virtual do Windows, tecla estendida]
+const VK = (() => {
+  const m = {
+    Enter: [13], Escape: [27], Backspace: [8], Tab: [9], Space: [32], CapsLock: [20],
+    ShiftLeft: [160], ShiftRight: [161], ControlLeft: [162], ControlRight: [163, 1], AltLeft: [164], AltRight: [165, 1],
+    MetaLeft: [91, 1], MetaRight: [92, 1], ContextMenu: [93, 1],
+    ArrowLeft: [37, 1], ArrowUp: [38, 1], ArrowRight: [39, 1], ArrowDown: [40, 1],
+    Insert: [45, 1], Delete: [46, 1], Home: [36, 1], End: [35, 1], PageUp: [33, 1], PageDown: [34, 1],
+    Minus: [189], Equal: [187], BracketLeft: [219], BracketRight: [221], Backslash: [220], Semicolon: [186], Quote: [222],
+    Backquote: [192], Comma: [188], Period: [190], Slash: [191], IntlBackslash: [226], IntlRo: [193],
+    NumpadAdd: [107], NumpadSubtract: [109], NumpadMultiply: [106], NumpadDivide: [111, 1], NumpadDecimal: [110], NumpadEnter: [13, 1], NumpadComma: [194],
+    PrintScreen: [44, 1], ScrollLock: [145], Pause: [19], NumLock: [144, 1]
+  };
+  for (let i = 0; i < 26; i++) m["Key" + String.fromCharCode(65 + i)] = [65 + i];
+  for (let i = 0; i < 10; i++) { m["Digit" + i] = [48 + i]; m["Numpad" + i] = [96 + i]; }
+  for (let i = 1; i <= 12; i++) m["F" + i] = [111 + i];
+  return m;
+})();
+const PAD_PRESETS = {
+  wasd: { name: "WASD + Espaço", dir: [87, 83, 65, 68], btn: { 0: 32, 1: 69, 2: 81, 3: 82, 4: 160, 5: 162, 6: 70, 7: 71, 8: 9, 9: 27 } },
+  setas: { name: "Setas + J K L", dir: [38, 40, 37, 39], btn: { 0: 75, 1: 76, 2: 74, 3: 73, 4: 85, 5: 79, 6: 89, 7: 80, 8: 8, 9: 13 } }
+};
+const EXT_VK = new Set([33, 34, 35, 36, 37, 38, 39, 40, 45, 46, 91, 92, 93, 163, 165]);
+
+function setupDc(p, dc) {
+  p.dc = dc;
+  dc.onmessage = e => onRemoteInput(p, e.data);
+  dc.onclose = () => { if (p.dc === dc) p.dc = null; };
+}
+
+/* --- lado de quem transmite --- */
+function askControl(p) {
+  const u = user(p.userId);
+  if (!V.screen) { sig(p.sock, { ctrlDeny: "Essa pessoa não está transmitindo a tela agora." }); return; }
+  if (V.granted.has(p.sock)) { sig(p.sock, { ctrlGrant: V.granted.get(p.sock).mode }); return; }
+  const surface = (V.screen.getVideoTracks()[0]?.getSettings() || {}).displaySurface;
+  sfx("mention");
+  let mode = "coop", answered = false;
+  modal({
+    title: `${esc(u.username)} quer controlar`, sub: "Escolha o que essa pessoa pode fazer no seu PC.",
+    body: `<div class="invite-card" style="--c:${esc(u.color)}">${avatar(u, 48)}<div><b>${esc(u.username)}</b><small>está assistindo sua transmissão</small></div></div>
+      <label class="radio-card on">${ic("gamepad", "lg")}<span><b>Co-op (jogar junto)</b><small>Só teclado e controle — ideal para co-op local. Mouse bloqueado.</small></span><input type="radio" name="cm" value="coop" checked></label>
+      <label class="radio-card">${ic("pointer", "lg")}<span><b>Controle total</b><small>Mouse e teclado, como AnyDesk.${surface && surface !== "monitor" ? " <b style='color:var(--yellow)'>Transmita a tela inteira para o mouse cair no lugar certo.</b>" : ""}</small></span><input type="radio" name="cm" value="full"></label>
+      <div class="hint" style="margin:10px 0 0">${agentOk() ? "✅ NEXORA Agente conectado." : "⚠️ O NEXORA Agente precisa estar aberto neste PC (Configurações › Controle remoto)."} Você pode encerrar a qualquer momento.</div>
+      <div class="modal-foot"><button class="btn ghost" data-no>Recusar</button><button class="btn primary" data-yes>Permitir</button></div>`,
+    onMount(m, close) {
+      m.addEventListener("change", e => { if (e.target.name === "cm") { mode = e.target.value; $$(".radio-card", m).forEach(r => r.classList.toggle("on", r.querySelector("input").checked)); } });
+      m.querySelector("[data-no]").onclick = () => { answered = true; close(); sig(p.sock, { ctrlDeny: true }); };
+      m.querySelector("[data-yes]").onclick = async () => {
+        const b = m.querySelector("[data-yes]");
+        b.classList.add("loading");
+        try { await agentConnect(); }
+        catch (err) {
+          b.classList.remove("loading");
+          toast(err.message, "error", 6000);
+          return;
+        }
+        answered = true;
+        close();
+        if (!V.peers.has(p.sock) || !V.screen) return;
+        V.granted.set(p.sock, { uid: p.userId, mode, alt: false });
+        sig(p.sock, { ctrlGrant: mode });
+        toast(`${u.username} agora pode ${mode === "full" ? "controlar seu PC" : "jogar com você"}.`, "ok");
+        renderCtrlBar();
+      };
+    },
+    onClose() { if (!answered) sig(p.sock, { ctrlDeny: true }); }
+  });
+}
+function endGrant(sock, silent) {
+  const g = V.granted.get(sock);
+  if (!g) return;
+  V.granted.delete(sock);
+  agentSend("u 0\nu 1\nu 2");
+  if (!silent) sig(sock, { ctrlEnd: true });
+  renderCtrlBar();
+}
+function onRemoteInput(p, data) {
+  const g = V.granted.get(p.sock);
+  if (!g || !agentOk() || typeof data !== "string" || data.length > 2000) return;
+  const out = [];
+  for (const line of data.split("\n")) {
+    const a = line.split(" ");
+    if (a[0] === "m" && g.mode === "full") {
+      const x = +a[1], y = +a[2];
+      if (x >= 0 && x <= 1 && y >= 0 && y <= 1) out.push(`m ${x.toFixed(5)} ${y.toFixed(5)}`);
+    } else if ((a[0] === "d" || a[0] === "u") && g.mode === "full") {
+      const b = +a[1];
+      if (b === 0 || b === 1 || b === 2) out.push(`${a[0]} ${b}`);
+    } else if (a[0] === "w" && g.mode === "full") {
+      const d = Math.round(clamp(+a[1] || 0, -1200, 1200));
+      if (d) out.push(`w ${d}`);
+    } else if (a[0] === "k") {
+      const down = a[1] === "1", vk = Math.round(+a[2]);
+      if (!(vk > 0 && vk < 255)) continue;
+      if (vk === 164 || vk === 165) g.alt = down;
+      if (g.mode !== "full" && (vk === 91 || vk === 92 || vk === 93)) continue;           // tecla Windows bloqueada no co-op
+      if (g.mode !== "full" && vk === 115 && g.alt) continue;                              // Alt+F4 bloqueado no co-op
+      out.push(`k ${down ? 1 : 0} ${vk} ${EXT_VK.has(vk) || a[3] === "1" ? 1 : 0}`);
+    }
+  }
+  if (out.length) agentSend(out.join("\n"));
+}
+
+/* --- lado de quem controla --- */
+function requestControl(uid) {
+  const p = peerByUser(uid), st = S.voice.get(uid);
+  if (!p || !st || !st.screen) { toast("Essa pessoa não está transmitindo.", "warn"); return; }
+  if (!V.watching.has(uid)) watch(uid);
+  sig(p.sock, { ctrlReq: true });
+  toast(`Pedido enviado para ${user(uid).username}. Aguarde a resposta…`, "info");
+}
+function onGranted(p, mode) {
+  V.controlling = { uid: p.userId, sock: p.sock, mode: mode === "full" ? "full" : "coop", kb: false, keys: new Set(), padKeys: new Set(), preset: store.get("padPreset", "wasd") };
+  V.focus = p.userId + ":screen";
+  sfx("live");
+  toast(mode === "full" ? `Você está controlando o PC de ${user(p.userId).username}. Clique na transmissão para usar mouse e teclado.` : `Co-op liberado! Clique na transmissão e jogue com teclado ou controle.`, "ok", 6000);
+  if (S.view !== "stage" && V.channelId) openChannel(V.channelId, false);
+  schedule("stage");
+  renderCtrlBar();
+  padLoop();
+}
+function dcSend(line) {
+  const c = V.controlling, p = c && V.peers.get(c.sock);
+  if (p && p.dc && p.dc.readyState === "open") p.dc.send(line);
+}
+function stopControlling(silent, msg) {
+  const c = V.controlling;
+  if (!c) return;
+  const ups = [...c.keys, ...c.padKeys].map(vk => `k 0 ${vk} 0`);
+  if (ups.length) dcSend(ups.join("\n"));
+  if (c.mode === "full") dcSend("u 0\nu 1\nu 2");
+  if (!silent) { const p = V.peers.get(c.sock); if (p) sig(p.sock, { ctrlEnd: true }); }
+  V.controlling = null;
+  if (msg) toast(msg, "info");
+  schedule("stage");
+  renderCtrlBar();
+}
+function ctrlVideo() {
+  const c = V.controlling;
+  return c ? $(`#stageGrid .tile[data-key="${c.uid}:screen"] video`) : null;
+}
+function videoPoint(video, e) {
+  const r = video.getBoundingClientRect(), vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return null;
+  const sc = Math.min(r.width / vw, r.height / vh), w = vw * sc, h = vh * sc;
+  const x = (e.clientX - (r.left + (r.width - w) / 2)) / w, y = (e.clientY - (r.top + (r.height - h) / 2)) / h;
+  return x < 0 || y < 0 || x > 1 || y > 1 ? null : { x, y };
+}
+let pendingMove = null, moveRaf = 0;
+function wireControlInput() {
+  const grid = () => $("#stageGrid");
+  const onTarget = e => { const v = ctrlVideo(); return v && (e.target === v || (e.target.closest && e.target.closest(".tile") === v.closest(".tile") && !e.target.closest("button"))) ? v : null; };
+  document.addEventListener("pointermove", e => {
+    const c = V.controlling;
+    if (!c || c.mode !== "full") return;
+    const v = onTarget(e); if (!v) return;
+    const pt = videoPoint(v, e); if (!pt) return;
+    pendingMove = pt;
+    if (!moveRaf) moveRaf = requestAnimationFrame(() => { moveRaf = 0; if (pendingMove) dcSend(`m ${pendingMove.x.toFixed(5)} ${pendingMove.y.toFixed(5)}`); pendingMove = null; });
+  }, { passive: true });
+  document.addEventListener("pointerdown", e => {
+    const c = V.controlling;
+    if (!c) return;
+    const v = onTarget(e);
+    c.kb = !!v;
+    v && v.closest(".tile").classList.add("kb");
+    if (!v) { $$(".tile.kb").forEach(t => t.classList.remove("kb")); releaseKeys(); return; }
+    if (c.mode !== "full") return;
+    const pt = videoPoint(v, e);
+    if (!pt) return;
+    e.preventDefault();
+    dcSend(`m ${pt.x.toFixed(5)} ${pt.y.toFixed(5)}\nd ${e.button === 2 ? 2 : e.button === 1 ? 1 : 0}`);
+  }, true);
+  document.addEventListener("pointerup", e => {
+    const c = V.controlling;
+    if (!c || c.mode !== "full" || !onTarget(e)) return;
+    dcSend(`u ${e.button === 2 ? 2 : e.button === 1 ? 1 : 0}`);
+  }, true);
+  document.addEventListener("contextmenu", e => { if (V.controlling && onTarget(e)) e.preventDefault(); }, true);
+  document.addEventListener("wheel", e => {
+    const c = V.controlling;
+    if (!c || c.mode !== "full" || !onTarget(e)) return;
+    e.preventDefault();
+    dcSend(`w ${-Math.sign(e.deltaY) * 120}`);
+  }, { passive: false, capture: true });
+  const key = down => e => {
+    const c = V.controlling;
+    if (!c || !c.kb) return;
+    const k = VK[e.code];
+    if (!k) return;
+    e.preventDefault(); e.stopPropagation();
+    if (down) c.keys.add(k[0]); else c.keys.delete(k[0]);
+    dcSend(`k ${down ? 1 : 0} ${k[0]} ${k[1] ? 1 : 0}`);
+  };
+  window.addEventListener("keydown", key(true), true);
+  window.addEventListener("keyup", key(false), true);
+  window.addEventListener("blur", () => releaseKeys());
+  void grid;
+}
+function releaseKeys() {
+  const c = V.controlling;
+  if (!c) return;
+  c.kb = false;
+  if (c.keys.size) dcSend([...c.keys].map(vk => `k 0 ${vk} 0`).join("\n"));
+  c.keys.clear();
+}
+// Controle (gamepad) de quem controla -> teclas no PC de quem transmite
+function padLoop(ref) {
+  const c = V.controlling;
+  if (!c || (ref && ref !== c) || (!ref && c.looping)) return;
+  c.looping = true;
+  const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [];
+  const gp = pads[0];
+  if (gp) {
+    const pr = PAD_PRESETS[c.preset] || PAD_PRESETS.wasd;
+    const want = new Set();
+    const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0, b = i => gp.buttons[i] && gp.buttons[i].pressed;
+    if (ay < -0.5 || b(12)) want.add(pr.dir[0]);
+    if (ay > 0.5 || b(13)) want.add(pr.dir[1]);
+    if (ax < -0.5 || b(14)) want.add(pr.dir[2]);
+    if (ax > 0.5 || b(15)) want.add(pr.dir[3]);
+    for (const [i, vk] of Object.entries(pr.btn)) if (b(+i)) want.add(vk);
+    const lines = [];
+    for (const vk of want) if (!c.padKeys.has(vk)) lines.push(`k 1 ${vk} ${EXT_VK.has(vk) ? 1 : 0}`);
+    for (const vk of c.padKeys) if (!want.has(vk)) lines.push(`k 0 ${vk} ${EXT_VK.has(vk) ? 1 : 0}`);
+    if (lines.length) dcSend(lines.join("\n"));
+    c.padKeys = want;
+    if (!c.padSeen) { c.padSeen = true; renderCtrlBar(); }
+    requestAnimationFrame(() => padLoop(c));     // controle ligado: lê a cada quadro
+  } else setTimeout(() => padLoop(c), 500);      // sem controle: verifica de vez em quando (economiza CPU)
+}
+function renderCtrlBar() {
+  const el = $("#ctrlBar");
+  const c = V.controlling;
+  let h = "";
+  for (const [sock, g] of V.granted) {
+    h += `<div class="cb-row host">${ic(g.mode === "full" ? "pointer" : "gamepad", "sm")}<span><b>${esc(user(g.uid).username)}</b> ${g.mode === "full" ? "está controlando seu PC" : "está jogando com você (co-op)"}</span><button class="btn danger sm" data-act="ctrl-revoke" data-sock="${esc(sock)}">Encerrar</button></div>`;
+  }
+  if (c) {
+    const pr = PAD_PRESETS[c.preset] || PAD_PRESETS.wasd;
+    h += `<div class="cb-row">${ic(c.mode === "full" ? "pointer" : "gamepad", "sm")}<span>${c.mode === "full" ? "Controlando" : "Co-op com"} <b>${esc(user(c.uid).username)}</b> · clique na tela para usar o teclado${c.padSeen ? ` · 🎮 ${pr.name}` : ""}</span><button class="btn sm" data-act="pad-preset" data-tip="Teclas do controle">${ic("gamepad", "sm")}</button><button class="btn sm" data-act="ctrl-stop">Parar</button></div>`;
+  }
+  el.innerHTML = h;
+  el.classList.toggle("hidden", !h);
+}
 function onVoiceState(st) {
   const prev = S.voice.get(st.userId);
   S.voice.set(st.userId, st);
@@ -1753,7 +2184,9 @@ function updateTile(el, t) {
     if (!video) { video = document.createElement("video"); video.autoplay = true; video.playsInline = true; video.muted = true; el.prepend(video); }
     if (video.srcObject !== t.stream) { video.srcObject = t.stream; video.play().catch(() => {}); }
   } else if (video) { video.srcObject = null; video.remove(); }
-  const sig = [t.kind, hasVideo, t.v.muted, t.v.deaf, u.username, u.avatar, u.color, t.watching, V.focus === t.key].join("|");
+  const ctrl = t.kind === "screen" && V.controlling && V.controlling.uid === u.id;
+  el.classList.toggle("controlling", !!ctrl);
+  const sig = [t.kind, hasVideo, t.v.muted, t.v.deaf, u.username, u.avatar, u.color, t.watching, V.focus === t.key, ctrl && V.controlling.mode].join("|");
   if (el._sig === sig) return;
   el._sig = sig;
   for (const n of [...el.children]) if (n.tagName !== "VIDEO") n.remove();
@@ -1767,7 +2200,8 @@ function updateTile(el, t) {
         : `<div class="tile-watch">${avatar(u, 56)}<button class="btn primary sm" data-act="watch" data-uid="${u.id}">${ic("eye", "sm")}Assistir transmissão</button><small>A transmissão só é enviada quando você assiste</small></div>`;
     }
     h += `<div class="tile-name">${ic("monitor", "scr")}<span>${esc(u.username)}${mine ? " (você)" : ""}</span></div>`;
-    h += `<div class="tile-btns">${hasVideo ? btn("tile-focus", "focus", V.focus === t.key ? "Sair do foco" : "Focar") + btn("fullscreen", "maximize", "Tela cheia") : ""}${mine ? btn("share-stop", "stop", "Parar transmissão") : hasVideo ? btn("unwatch", "eyeOff", "Parar de assistir") : ""}</div>`;
+    if (ctrl) h += `<div class="tile-ctrl">${ic(V.controlling.mode === "full" ? "pointer" : "gamepad", "xs")}${V.controlling.mode === "full" ? "Controlando" : "Co-op"}</div>`;
+    h += `<div class="tile-btns">${!mine && hasVideo ? (ctrl ? btn("ctrl-stop", "x", "Parar de controlar") : btn("ctrl-request", "gamepad", "Pedir controle / jogar junto")) : ""}${hasVideo ? btn("tile-focus", "focus", V.focus === t.key ? "Sair do foco" : "Focar") + btn("fullscreen", "maximize", "Tela cheia") : ""}${mine ? btn("share-stop", "stop", "Parar transmissão") : hasVideo ? btn("unwatch", "eyeOff", "Parar de assistir") : ""}</div>`;
   } else {
     if (!hasVideo) h += `<div class="tile-av">${avatar(u, 84)}</div>`;
     h += `<div class="tile-name">${t.v.deaf ? ic("headOff") : t.v.muted ? ic("micOff") : ""}<span>${esc(u.username)}${mine ? " (você)" : ""}</span></div>`;
@@ -1946,11 +2380,20 @@ function emojiPicker(anchor, onPick) {
   });
 }
 function profilePop(uid, anchor) {
-  const u = user(uid), v = S.voice.get(uid), mine = S.me && uid === S.me.id;
-  popover(anchor, `<div class="pb" style="--c:${esc(u.color)}"></div><div class="pc">${avatar(u, 76, true)}<h3>${esc(u.username)}</h3><div class="status-line"><i class="dot st-${esc(u.status)}"></i>${STATUS[u.status] || ""}</div>${u.about ? `<div class="sec"><span class="label">Sobre mim</span>${esc(u.about)}</div>` : ""}<div class="sec"><span class="label">No NEXORA desde</span>${u.created ? new Date(u.created).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</div>${v ? `<div class="sec"><span class="label">Em chamada</span><a data-go-voice="${v.channelId}" style="cursor:pointer">${esc(chan(v.channelId)?.name || "Sala de voz")}</a>${v.screen ? ' <b class="live-tag">AO VIVO</b>' : ""}</div>` : ""}<div class="sec" style="display:flex;gap:8px">${mine ? `<button class="btn sm" data-edit-profile>Editar perfil</button>` : S.view === "chat" ? `<button class="btn sm" data-mention>Mencionar</button>` : ""}</div></div>`, "profile-pop", (el, close) => {
+  const u = user(uid), v = S.voice.get(uid), mine = S.me && uid === S.me.id, f = S.friends.get(uid);
+  const steamId = /^\d{17}$/.test(u.steam || "") ? u.steam : "";
+  const appid = u.game && /^\d+$/.test(u.game.appid || "") ? u.game.appid : "";
+  const game = u.game ? `<div class="sec game-card"><span class="label">Jogando agora</span><div class="gc">${appid ? `<img src="https://cdn.cloudflare.steamstatic.com/steam/apps/${appid}/capsule_184x69.jpg" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : `<span class="gi">${ic("gamepad")}</span>`}<b>${esc(u.game.name)}</b></div>${appid ? `<div class="gl"><a href="steam://run/${appid}">${ic("play", "xs")} Jogar também</a><a href="https://store.steampowered.com/app/${appid}" target="_blank" rel="noopener">Ver na loja</a></div>` : ""}</div>` : "";
+  const steam = steamId ? `<div class="sec"><span class="label">Steam</span><div class="gl"><a href="https://steamcommunity.com/profiles/${steamId}" target="_blank" rel="noopener">${ic("steam", "xs")} Perfil Steam</a>${mine ? "" : `<a href="steam://friends/message/${steamId}">Conversar na Steam</a>`}</div></div>` : "";
+  const acts = mine ? `<button class="btn sm" data-edit-profile>Editar perfil</button>`
+    : `<button class="btn sm primary" data-dm>${ic("message", "sm")}Mensagem</button>${f === "friend" ? "" : f === "out" ? `<button class="btn sm" disabled>Pedido enviado</button>` : f === "in" ? `<button class="btn sm green" data-accept>Aceitar amizade</button>` : `<button class="btn sm" data-addf>${ic("userPlus", "sm")}Adicionar</button>`}${S.view === "chat" && !isDm(S.channelId) ? `<button class="btn sm ghost" data-mention>@</button>` : ""}`;
+  popover(anchor, `<div class="pb" style="--c:${esc(u.color)}"></div><div class="pc">${avatar(u, 76, true)}<h3>${esc(u.username)}</h3><div class="status-line"><i class="dot st-${esc(u.status)}"></i>${STATUS[u.status] || ""}${f === "friend" ? " · Amigo" : ""}</div>${game}${u.about ? `<div class="sec"><span class="label">Sobre mim</span>${esc(u.about)}</div>` : ""}${steam}<div class="sec"><span class="label">No NEXORA desde</span>${u.created ? new Date(u.created).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</div>${v ? `<div class="sec"><span class="label">Em chamada</span><a data-go-voice="${v.channelId}" style="cursor:pointer">${esc(chan(v.channelId)?.name || "Sala de voz")}</a>${v.screen ? ' <b class="live-tag">AO VIVO</b>' : ""}</div>` : ""}<div class="sec" style="display:flex;gap:8px;flex-wrap:wrap">${acts}</div></div>`, "profile-pop", (el, close) => {
     el.addEventListener("click", e => {
       if (e.target.closest("[data-mention]")) { close(); insertAtCaret(`@${u.username} `); }
       if (e.target.closest("[data-edit-profile]")) { close(); userSettings("account"); }
+      if (e.target.closest("[data-dm]")) { close(); startDM(uid); }
+      if (e.target.closest("[data-addf]")) { close(); addFriend(u.username); }
+      if (e.target.closest("[data-accept]")) { close(); emit("friend:accept", { userId: uid }).then(r => r.error && toast(r.error, "error")); }
       const g = e.target.closest("[data-go-voice]");
       if (g) { close(); openChannel(g.dataset.goVoice); }
     });
@@ -2322,6 +2765,8 @@ function userSettings(initial) {
     { id: "account", name: "Minha conta", render: renderAccount, mount: mountAccount },
     { id: "voice", name: "Voz e vídeo", render: renderVoiceSettings, mount: mountVoiceSettings },
     { id: "stream", name: "Transmissão", render: () => `<p style="color:var(--muted);margin-top:-8px">Padrão usado ao entrar ao vivo. Você pode mudar durante a transmissão.</p><span class="label">Qualidade padrão</span><div class="qgrid" style="margin-top:8px">${Object.entries(QUALITY).map(([k, v]) => `<button type="button" class="qopt${k === S.settings.shareQuality ? " on" : ""}" data-q="${k}">${v.tag ? `<span class="tag">${v.tag}</span>` : ""}<b>${v.label}</b><small>${v.sub}</small></button>`).join("")}</div>${toggleRow("shareAudio", "Transmitir áudio por padrão", "Inclui o som da aba ou do sistema", S.settings.shareAudio)}<div class="hint" style="margin-top:16px">Como o NEXORA economiza recursos: a tela só é codificada para quem está assistindo, a taxa de bits se divide entre os espectadores, o codec é escolhido pelo modo (VP9 para texto nítido, H.264 com aceleração por hardware para movimento) e o áudio usa Opus com supressão de silêncio.</div>`, mount: p => { p.addEventListener("click", e => { const b = e.target.closest("[data-q]"); if (b) { S.settings.shareQuality = b.dataset.q; saveSettings(); $$("[data-q]", p).forEach(x => x.classList.toggle("on", x === b)); } }); bindToggles(p); } },
+    { id: "games", name: "Jogos e Steam", render: renderGames, mount: mountGames },
+    { id: "remote", name: "Controle remoto", render: renderRemote, mount: mountRemote },
     { label: "Aplicativo" },
     { id: "look", name: "Aparência", render: renderLook, mount: mountLook },
     { id: "notif", name: "Notificações", render: () => toggleRow("sounds", "Sons do aplicativo", "Entrar/sair da sala, menções, mutar", S.settings.sounds) + toggleRow("notify", "Notificações na área de trabalho", "Avisa quando alguém menciona você", S.settings.notify && "Notification" in window && Notification.permission === "granted"), mount: p => bindToggles(p, async (k, v, inp) => { if (k === "notify" && v) { if (!("Notification" in window)) { inp.checked = false; S.settings.notify = false; saveSettings(); toast("Seu navegador não suporta notificações.", "warn"); return; } const perm = await Notification.requestPermission(); if (perm !== "granted") { inp.checked = false; S.settings.notify = false; saveSettings(); toast("Permissão de notificação negada.", "warn"); } } }) },
@@ -2329,6 +2774,46 @@ function userSettings(initial) {
     "-",
     { id: "logout", name: "Sair", danger: true, action: async close => { if (await confirmBox({ title: "Sair", html: "Tem certeza de que quer sair da sua conta?", ok: "Sair" })) { close(); logout(); } } }
   ], initial);
+}
+function renderGames() {
+  const me = S.me, steamId = me.steam || "";
+  return `<p style="color:var(--muted);margin-top:-8px">Mostre para os amigos o que você está jogando. Eles podem abrir o mesmo jogo direto pelo seu perfil.</p>
+    <div class="profile-card" style="--c:#1b2838"><div class="pb" style="background:linear-gradient(135deg,#1b2838,#2a475e)"></div><div class="pc"><span class="av" style="--c:#171a21;--s:72px">${ic("steam", "lg")}</span><div class="info"><b>Steam</b><small>${steamId ? `Conectada · <a href="https://steamcommunity.com/profiles/${esc(steamId)}" target="_blank" rel="noopener">ver perfil</a>` : "Não conectada"}</small></div></div></div>
+    <label class="field"><span>Link do seu perfil Steam</span><input id="steamLink" placeholder="https://steamcommunity.com/profiles/7656119…" value="${steamId ? `https://steamcommunity.com/profiles/${esc(steamId)}` : ""}" spellcheck="false"></label>
+    <div class="hint">${S.steamAuto ? "✅ O “Jogando agora” é atualizado sozinho a cada minuto. Seu perfil e os “Detalhes de jogo” na Steam precisam estar <b>públicos</b>." : "Para o “Jogando agora” automático, o dono do servidor precisa configurar a chave <b>STEAM_API_KEY</b> no Render. Enquanto isso, use o campo abaixo."}</div>
+    <div style="display:flex;gap:10px;margin-bottom:22px"><button class="btn primary" data-save-steam>Conectar Steam</button>${steamId ? `<button class="btn ghost" data-clear-steam>Desconectar</button>` : ""}</div>
+    <label class="field"><span>Jogando agora (manual)</span><input id="gameName" maxlength="64" placeholder="Ex.: Minecraft, Stardew Valley…" value="${esc(me.game && !me.game.steam ? me.game.name : "")}"></label>
+    <div style="display:flex;gap:10px"><button class="btn" data-save-game>Mostrar</button><button class="btn ghost" data-clear-game>Limpar</button></div>`;
+}
+function mountGames(p, rerender) {
+  const upd = async (data, ok) => { const r = await emit("profile:update", data); if (r.error) { toast(r.error, "error", 6000); return; } if (ok) toast(ok, "ok"); setTimeout(rerender, 120); };
+  p.addEventListener("click", e => {
+    if (e.target.closest("[data-save-steam]")) { const v = p.querySelector("#steamLink").value.trim(); if (v) upd({ steam: v }, "Steam conectada!"); }
+    if (e.target.closest("[data-clear-steam]")) upd({ steam: "" }, "Steam desconectada.");
+    if (e.target.closest("[data-save-game]")) upd({ game: p.querySelector("#gameName").value }, "Atualizado.");
+    if (e.target.closest("[data-clear-game]")) upd({ game: "" });
+  });
+}
+function renderRemote() {
+  const local = LOCAL || location.protocol === "file:";
+  return `<p style="color:var(--muted);margin-top:-8px">Deixe um amigo controlar seu PC (como AnyDesk) ou jogar com você em co-op local pela transmissão — como o Remote Play Together da Steam.</p>
+    <div class="steps">
+      <div class="step"><b>1</b><div><b>Baixe o NEXORA Agente</b><small>Um programinha do Windows que move o mouse e o teclado quando você permite. Não precisa instalar.</small>${local ? `<small style="color:var(--yellow)">Disponível na versão online do NEXORA.</small>` : `<a class="btn sm" href="/agente/NEXORA-Agente.zip" download>${ic("arrowDown", "sm")}Baixar NEXORA-Agente.zip</a>`}</div></div>
+      <div class="step"><b>2</b><div><b>Abra o agente</b><small>Descompacte e dê dois cliques em <span class="kbd">NEXORA-Agente.bat</span>. Ele mostra um código de 6 números.</small></div></div>
+      <div class="step"><b>3</b><div><b>Conecte aqui</b><div class="invite-box" style="margin-top:8px"><input id="agCode" inputmode="numeric" maxlength="6" placeholder="Código de 6 números" value="${esc(S.settings.agentCode || "")}"><button class="btn primary sm" data-ag>Conectar</button></div><small data-ag-status style="margin-top:6px;display:block">${agentOk() ? "✅ Agente conectado" : "Agente desconectado"}</small></div></div>
+      <div class="step"><b>4</b><div><b>Transmita a tela e aceite</b><small>Quando alguém clicar em ${ic("gamepad", "xs")} <b>Pedir controle</b> na sua transmissão, você escolhe: <b>Co-op</b> (só teclado/controle) ou <b>Controle total</b> (mouse e teclado). Fechar a janela do agente corta tudo na hora.</small></div></div>
+    </div>
+    <div class="hint" style="margin-top:16px">Para jogar co-op: transmita no modo <b>Movimento</b> com <b>720p ou 1080p 60 FPS</b>. Quem joga pode usar teclado ou controle — o controle vira teclas (WASD ou setas) no seu PC.</div>`;
+}
+function mountRemote(p, rerender) {
+  p.querySelector("[data-ag]").onclick = async () => {
+    const code = p.querySelector("#agCode").value.replace(/\D/g, "");
+    if (code.length !== 6) { toast("O código tem 6 números.", "warn"); return; }
+    S.settings.agentCode = code; saveSettings();
+    if (AG.ws) { try { AG.ws.close(); } catch {} AG.ws = null; }
+    try { await agentConnect(code); toast("NEXORA Agente conectado!", "ok"); rerender(); }
+    catch (e) { toast(e.message, "error", 6000); }
+  };
 }
 function bindToggles(p, extra) {
   p.addEventListener("change", e => {
@@ -2566,11 +3051,17 @@ function memberMenu(uid, at) {
   const vol = Math.round((S.volumes[uid] ?? 1) * 100);
   menu(at, [
     { label: "Perfil", icon: "users", run: () => profilePop(uid, at instanceof Element ? at : { x: at.x, y: at.y }) },
-    S.view === "chat" && !mine && { label: "Mencionar", icon: "reply", run: () => insertAtCaret(`@${u.username} `) },
+    !mine && { label: "Enviar mensagem", icon: "message", run: () => startDM(uid) },
+    !mine && !S.friends.has(uid) && { label: "Adicionar amigo", icon: "userPlus", run: () => addFriend(u.username) },
+    !mine && S.friends.get(uid) === "in" && { label: "Aceitar amizade", icon: "userCheck", run: () => emit("friend:accept", { userId: uid }) },
+    S.view === "chat" && !isDm(S.channelId) && !mine && { label: "Mencionar", icon: "at", run: () => insertAtCaret(`@${u.username} `) },
+    inMyVoice && S.voice.get(uid)?.screen && { label: V.controlling && V.controlling.uid === uid ? "Parar de controlar" : "Pedir controle / jogar junto", icon: "gamepad", run: () => (V.controlling && V.controlling.uid === uid ? stopControlling() : requestControl(uid)) },
     inMyVoice && "-",
     inMyVoice && { html: `<span class="label"><span>Volume</span><span data-v>${vol}%</span></span><input type="range" min="0" max="100" value="${vol}">`, mount: el => { const r = el.querySelector("input"), out = el.querySelector("[data-v]"); r.addEventListener("input", () => { S.volumes[uid] = r.value / 100; out.textContent = r.value + "%"; applyVolumes(); store.set("volumes", S.volumes); }); } },
     inMyVoice && { label: S.localMute[uid] ? "Reativar áudio dessa pessoa" : "Silenciar para mim", icon: S.localMute[uid] ? "volume" : "micOff", run: () => { S.localMute[uid] = !S.localMute[uid]; applyVolumes(); } },
     inMyVoice && S.voice.get(uid)?.screen && { label: V.watching.has(uid) ? "Parar de assistir" : "Assistir transmissão", icon: "eye", run: () => (V.watching.has(uid) ? unwatch(uid) : (openChannel(V.channelId, false), watch(uid))) },
+    !mine && S.friends.get(uid) === "friend" && "-",
+    !mine && S.friends.get(uid) === "friend" && { label: "Desfazer amizade", icon: "x", danger: true, run: async () => { if (await confirmBox({ title: "Desfazer amizade", html: `Remover <b>${esc(u.username)}</b> dos seus amigos?`, ok: "Remover" })) emit("friend:remove", { userId: uid }); } },
     isOwner(s) && !mine && s.members.includes(uid) && "-",
     isOwner(s) && !mine && s.members.includes(uid) && { label: `Expulsar ${u.username}`, icon: "logout", danger: true, run: async () => { if (await confirmBox({ title: "Expulsar membro", html: `Expulsar <b>${esc(u.username)}</b> de ${esc(s.name)}?`, ok: "Expulsar" })) { const r = await emit("server:kick", { serverId: s.id, userId: uid }); if (r.error) toast(r.error, "error"); } } }
   ]);
@@ -2591,6 +3082,19 @@ function statusMenu(at) {
 const msgIdOf = a => a.closest(".msg")?.dataset.id;
 const ACTIONS = {
   home: goHome,
+  friends: () => goFriends(),
+  "friends-tab": a => goFriends(a.dataset.tab),
+  "new-dm": () => goFriends(S.friends.size ? "all" : "add"),
+  "open-dm": a => openDM(a.dataset.id),
+  "dm-user": a => startDM(a.dataset.uid),
+  "add-friend": async a => { if (await addFriend(user(a.dataset.uid).username)) schedule("home", "top"); },
+  "friend-accept": async a => { const r = await emit("friend:accept", { userId: a.dataset.uid }); if (r.error) toast(r.error, "error"); else toast(`Agora você e ${user(a.dataset.uid).username} são amigos! 🎉`, "ok"); },
+  "friend-remove": a => emit("friend:remove", { userId: a.dataset.uid }).then(r => r.error && toast(r.error, "error")),
+  "friend-more": a => memberMenu(a.dataset.uid, a),
+  "ctrl-request": a => requestControl(a.dataset.uid),
+  "ctrl-stop": () => stopControlling(false, "Você parou de controlar."),
+  "ctrl-revoke": a => { const g = V.granted.get(a.dataset.sock); endGrant(a.dataset.sock); if (g) toast(`Controle de ${user(g.uid).username} encerrado.`, "ok"); },
+  "pad-preset": a => menu(a, Object.entries(PAD_PRESETS).map(([k, p]) => ({ label: p.name, icon: V.controlling && V.controlling.preset === k ? "check" : null, run: () => { if (V.controlling) { V.controlling.preset = k; store.set("padPreset", k); renderCtrlBar(); } } }))),
   discover: goDiscover,
   "add-server": addServerModal,
   "create-server": createServerModal,
@@ -2657,6 +3161,7 @@ const ACTIONS = {
 };
 
 function wire() {
+  wireControlInput();
   document.addEventListener("click", e => {
     const sp = e.target.closest(".spoiler");
     if (sp) { sp.classList.toggle("show"); return; }

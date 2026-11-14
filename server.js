@@ -43,7 +43,7 @@ if (process.env.TURN_URL) {
 /* ------------------------------------------------------------------ */
 const DATABASE_URL = process.env.DATABASE_URL || "";
 let pg = null;
-const db = { users: {}, sessions: {}, servers: {}, invites: {}, messages: {} };
+const db = { users: {}, sessions: {}, servers: {}, invites: {}, messages: {}, dms: {} };
 const byName = new Map();          // nome em minúsculas -> id do usuário
 const chanIndex = new Map();       // id do canal -> id do servidor
 
@@ -149,9 +149,22 @@ function presence(u) {
   if (!online.has(u.id)) return "offline";
   return u.status === "invisible" ? "offline" : (u.status || "online");
 }
-function pubUser(u) {
-  return { id: u.id, username: u.username, color: u.color, avatar: u.avatar || "", about: u.about || "", status: presence(u), created: u.created };
+function gameOf(u) {
+  if (u.steamGame) return u.steamGame;
+  return u.game ? { name: u.game } : null;
 }
+function pubUser(u) {
+  return { id: u.id, username: u.username, color: u.color, avatar: u.avatar || "", about: u.about || "", status: presence(u), created: u.created, steam: u.steam || "", game: presence(u) === "offline" ? null : gameOf(u) };
+}
+/* amigos e mensagens privadas */
+const friendsOf = u => (u && u.friends) || {};
+const dmIdOf = (a, b) => "d." + [a, b].sort().join(".");
+function dmView(d, viewer) {
+  const list = db.messages[d.id];
+  const last = list && list.length ? list[list.length - 1] : null;
+  return { id: d.id, userId: d.members.find(x => x !== viewer) || viewer, created: d.created, last: last ? { id: last.id, ts: last.ts, a: last.a } : null };
+}
+const dmsOf = uid => Object.values(db.dms || {}).filter(d => d.members.includes(uid));
 function chanView(c) {
   const list = db.messages[c.id];
   const last = list && list.length ? list[list.length - 1] : null;
@@ -314,10 +327,57 @@ io.use((socket, next) => {
 });
 
 function emitToPeers(uid, ev, data) {
-  const rooms = userServers(uid).map(s => "s:" + s.id);
-  rooms.push("u:" + uid);
-  io.to(rooms).emit(ev, data);
+  const rooms = new Set(userServers(uid).map(s => "s:" + s.id));
+  rooms.add("u:" + uid);
+  for (const id of Object.keys(friendsOf(db.users[uid]))) rooms.add("u:" + id);
+  for (const d of dmsOf(uid)) for (const id of d.members) rooms.add("u:" + id);
+  io.to([...rooms]).emit(ev, data);
 }
+function setFriend(a, b, state) {
+  const ua = db.users[a];
+  if (!ua) return;
+  ua.friends = ua.friends || {};
+  if (state) ua.friends[b] = state; else delete ua.friends[b];
+  io.to("u:" + a).emit("friend:update", { userId: b, state: state || null, user: db.users[b] ? pubUser(db.users[b]) : null });
+}
+
+/* ------------------------------------------------------------------ */
+/* Steam: mostra "Jogando X" sozinho (precisa de STEAM_API_KEY)        */
+/* ------------------------------------------------------------------ */
+const STEAM_KEY = process.env.STEAM_API_KEY || "";
+async function resolveSteam(input) {
+  const s = str(input, 200);
+  if (!s) return "";
+  let m = s.match(/(\d{17})/);
+  if (m) return m[1];
+  m = s.match(/steamcommunity\.com\/id\/([^/?#\s]+)/i);
+  const vanity = m ? m[1] : /^[A-Za-z0-9_-]{2,32}$/.test(s) ? s : "";
+  if (!vanity) fail("Link da Steam inválido. Cole o link do seu perfil Steam.");
+  if (!STEAM_KEY) fail("Cole o link com números (steamcommunity.com/profiles/765…). Links com nome precisam da chave STEAM_API_KEY no servidor.");
+  const r = await fetch(`https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${STEAM_KEY}&vanityurl=${encodeURIComponent(vanity)}`).then(x => x.json()).catch(() => null);
+  if (!r || !r.response || r.response.success !== 1) fail("Perfil Steam não encontrado.");
+  return r.response.steamid;
+}
+async function pollSteam() {
+  if (!STEAM_KEY) return;
+  const users = [...online.keys()].map(id => db.users[id]).filter(u => u && u.steam);
+  for (let i = 0; i < users.length; i += 100) {
+    const batch = users.slice(i, i + 100);
+    try {
+      const r = await fetch(`https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key=${STEAM_KEY}&steamids=${batch.map(u => u.steam).join(",")}`).then(x => x.json());
+      const byId = new Map(((r.response && r.response.players) || []).map(p => [p.steamid, p]));
+      for (const u of batch) {
+        const p = byId.get(u.steam);
+        const g = p && p.gameextrainfo ? { name: String(p.gameextrainfo).slice(0, 80), appid: String(p.gameid || "").replace(/\D/g, "").slice(0, 12), steam: true } : null;
+        if (JSON.stringify(g) !== JSON.stringify(u.steamGame || null)) {
+          u.steamGame = g;
+          emitToPeers(u.id, "user:update", { user: pubUser(u) });
+        }
+      }
+    } catch (e) { console.error("Steam:", e.message); }
+  }
+}
+setInterval(pollSteam, 60000).unref();
 function leaveVoice(sock) {
   const v = voice.get(sock);
   if (!v) return;
@@ -385,12 +445,20 @@ io.on("connection", socket => {
 
   {
     const users = new Map([[uid, pubUser(me())]]);
-    for (const s of mine) for (const id of s.members) if (!users.has(id) && db.users[id]) users.set(id, pubUser(db.users[id]));
+    const addU = id => { if (!users.has(id) && db.users[id]) users.set(id, pubUser(db.users[id])); };
+    for (const s of mine) for (const id of s.members) addU(id);
+    const friends = friendsOf(me());
+    for (const id of Object.keys(friends)) addU(id);
+    const dms = dmsOf(uid);
+    for (const d of dms) for (const id of d.members) addU(id);
     const ids = new Set(mine.map(s => s.id));
     socket.emit("ready", {
       me: { ...pubUser(me()), statusPref: me().status || "online" },
       servers: mine.map(serverView),
       users: [...users.values()],
+      friends: Object.fromEntries(Object.entries(friends).filter(([id]) => db.users[id])),
+      dms: dms.map(d => dmView(d, uid)),
+      steamAuto: !!STEAM_KEY,
       voice: [...voice].filter(([, v]) => ids.has(v.sid)).map(([k, v]) => vView(k, v)),
       iceServers: ICE_SERVERS,
       limits: { voice: VOICE_LIMIT }
@@ -424,16 +492,31 @@ io.on("connection", socket => {
     if (!c || (type && c.type !== type)) fail("Canal não encontrado.");
     return { s, c };
   };
-  const findMsg = (channelId, id) => {
+  // Canal de texto de servidor ou conversa privada ("d.…")
+  const getTarget = channelId => {
+    if (typeof channelId === "string" && channelId.startsWith("d.")) {
+      const d = db.dms && db.dms[channelId];
+      if (!d || !d.members.includes(uid)) fail("Conversa não encontrada.");
+      return { s: null, c: { id: d.id }, rooms: d.members.map(x => "u:" + x), dm: d };
+    }
     const { s, c } = getChannel(channelId, "text");
-    const m = (db.messages[c.id] || []).find(x => x.id === id);
+    return { s, c, rooms: "s:" + s.id, dm: null };
+  };
+  const findMsg = (channelId, id) => {
+    const t = getTarget(channelId);
+    const m = (db.messages[t.c.id] || []).find(x => x.id === id);
     if (!m || m.sys) fail("Mensagem não encontrada.");
-    return { s, c, m };
+    return { ...t, m };
+  };
+  const canDm = other => {
+    if (!other || other.id === uid) return false;
+    if (friendsOf(me())[other.id] === "friend") return true;
+    return userServers(uid).some(s => s.members.includes(other.id));
   };
 
   /* ---------- Mensagens ---------- */
   on("history", ({ channelId, before }) => {
-    const { c } = getChannel(channelId, "text");
+    const { c } = getTarget(channelId);
     const list = db.messages[c.id] || [];
     let end = list.length;
     if (typeof before === "string") { const i = list.findIndex(m => m.id === before); if (i >= 0) end = i; }
@@ -442,7 +525,7 @@ io.on("connection", socket => {
   });
 
   on("send", ({ channelId, text, replyTo, nonce }) => {
-    const { s, c } = getChannel(channelId, "text");
+    const { s, c, rooms, dm } = getTarget(channelId);
     text = typeof text === "string" ? text.replace(/\r\n?/g, "\n").replace(/\n{4,}/g, "\n\n\n").trim().slice(0, 2000) : "";
     if (!text) fail("A mensagem está vazia.");
     if (!chat()) fail("Devagar! Espere um instante antes de enviar de novo.");
@@ -452,35 +535,42 @@ io.on("connection", socket => {
       const r = list.find(x => x.id === replyTo && !x.sys);
       if (r) m.re = { id: r.id, a: r.a, t: r.t.slice(0, 140) };
     }
+    if (dm && !list.length) {
+      // primeira mensagem: a conversa aparece para a outra pessoa
+      for (const id of dm.members) {
+        const other = db.users[dm.members.find(x => x !== id) || id];
+        io.to("u:" + id).emit("dm:add", { dm: dmView(dm, id), user: other ? pubUser(other) : null });
+      }
+    }
     list.push(m);
     if (list.length > HISTORY_KEEP) list.splice(0, list.length - HISTORY_KEEP);
     save();
-    io.to("s:" + s.id).emit("msg", { channelId: c.id, serverId: s.id, m, nonce: str(nonce, 40) });
+    io.to(rooms).emit("msg", { channelId: c.id, serverId: s ? s.id : null, m, nonce: str(nonce, 40) });
     return { id: m.id };
   });
 
   on("edit", ({ channelId, id, text }) => {
-    const { s, c, m } = findMsg(channelId, id);
+    const { c, m, rooms } = findMsg(channelId, id);
     if (m.a !== uid) fail("Você só pode editar suas mensagens.");
     text = typeof text === "string" ? text.replace(/\r\n?/g, "\n").trim().slice(0, 2000) : "";
     if (!text) fail("A mensagem está vazia.");
     if (text === m.t) return { ok: true };
     m.t = text; m.e = Date.now();
     save();
-    io.to("s:" + s.id).emit("msg:update", { channelId: c.id, m });
+    io.to(rooms).emit("msg:update", { channelId: c.id, m });
   });
 
   on("delete", ({ channelId, id }) => {
-    const { s, c, m } = findMsg(channelId, id);
-    if (m.a !== uid && s.ownerId !== uid) fail("Sem permissão para apagar esta mensagem.");
+    const { s, c, m, rooms } = findMsg(channelId, id);
+    if (m.a !== uid && !(s && s.ownerId === uid)) fail("Sem permissão para apagar esta mensagem.");
     const list = db.messages[c.id];
     list.splice(list.indexOf(m), 1);
     save();
-    io.to("s:" + s.id).emit("msg:delete", { channelId: c.id, id: m.id });
+    io.to(rooms).emit("msg:delete", { channelId: c.id, id: m.id });
   });
 
   on("react", ({ channelId, id, emoji }) => {
-    const { s, c, m } = findMsg(channelId, id);
+    const { c, m, rooms } = findMsg(channelId, id);
     emoji = str(emoji, 32);
     if (!emoji || /[\s<>&"'`]/.test(emoji) || /^[\x20-\x7e]+$/.test(emoji)) fail("Reação inválida.");
     m.r = m.r || {};
@@ -494,11 +584,16 @@ io.on("connection", socket => {
     }
     if (!Object.keys(m.r).length) delete m.r;
     save();
-    io.to("s:" + s.id).emit("msg:update", { channelId: c.id, m });
+    io.to(rooms).emit("msg:update", { channelId: c.id, m });
   });
 
   socket.on("typing", data => {
     if (!data || typeof data.channelId !== "string" || !typing()) return;
+    if (data.channelId.startsWith("d.")) {
+      const d = db.dms && db.dms[data.channelId];
+      if (d && d.members.includes(uid)) for (const id of d.members) if (id !== uid) io.to("u:" + id).emit("typing", { channelId: d.id, userId: uid });
+      return;
+    }
     const sid = chanIndex.get(data.channelId);
     const s = sid && db.servers[sid];
     if (!s || !s.members.includes(uid)) return;
@@ -666,14 +761,60 @@ io.on("connection", socket => {
   });
 
   /* ---------- Perfil ---------- */
-  on("profile:update", ({ color, avatar, about, status }) => {
+  on("profile:update", async ({ color, avatar, about, status, steam, game }) => {
     const u = me();
+    if (steam !== undefined) {
+      const sid = await resolveSteam(steam);
+      if (sid !== (u.steam || "")) { u.steam = sid; u.steamGame = null; }
+    }
     if (color !== undefined && isColor(color)) u.color = color;
     if (avatar !== undefined) u.avatar = cleanPic(avatar);
     if (about !== undefined) u.about = str(about, 190);
+    if (game !== undefined) u.game = str(game, 64);
     if (status !== undefined && ["online", "idle", "dnd", "invisible"].includes(status)) u.status = status;
     save();
-    emitToPeers(uid, "user:update", { user: pubUser(u), statusPref: u.status });
+    emitToPeers(uid, "user:update", { user: pubUser(u) });
+    io.to("u:" + uid).emit("user:update", { user: pubUser(u), statusPref: u.status });
+    if (steam) pollSteam();
+  });
+
+  /* ---------- Amigos ---------- */
+  on("friend:request", ({ username }) => {
+    const id = byName.get(str(username, 40).replace(/^@/, "").toLowerCase());
+    const other = id && db.users[id];
+    if (!other) fail("Ninguém com esse nome de usuário. Confira se está escrito certinho.");
+    if (other.id === uid) fail("Esse é você! 😄");
+    const mineF = friendsOf(me());
+    if (mineF[other.id] === "friend") fail(`Você e ${other.username} já são amigos.`);
+    if (mineF[other.id] === "out") fail("Pedido já enviado. Aguarde a resposta.");
+    if (Object.keys(mineF).length >= 500) fail("Limite de amigos atingido.");
+    if (mineF[other.id] === "in") { setFriend(uid, other.id, "friend"); setFriend(other.id, uid, "friend"); }
+    else { setFriend(uid, other.id, "out"); setFriend(other.id, uid, "in"); }
+    save();
+    return { state: friendsOf(me())[other.id] };
+  });
+
+  on("friend:accept", ({ userId }) => {
+    if (friendsOf(me())[userId] !== "in") fail("Pedido não encontrado.");
+    setFriend(uid, userId, "friend");
+    setFriend(userId, uid, "friend");
+    save();
+  });
+
+  on("friend:remove", ({ userId }) => {
+    if (!friendsOf(me())[userId]) return { ok: true };
+    setFriend(uid, userId, null);
+    setFriend(userId, uid, null);
+    save();
+  });
+
+  on("dm:open", ({ userId }) => {
+    const other = typeof userId === "string" ? db.users[userId] : null;
+    if (!canDm(other)) fail("Adicione essa pessoa como amiga para conversar no privado.");
+    db.dms = db.dms || {};
+    const id = dmIdOf(uid, other.id);
+    if (!db.dms[id]) { db.dms[id] = { id, members: [uid, other.id], created: Date.now() }; save(); }
+    return { dm: dmView(db.dms[id], uid), user: pubUser(other) };
   });
 
   on("logout", () => {
