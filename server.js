@@ -53,6 +53,7 @@ async function loadDb() {
     const ssl = process.env.NODE_ENV === "production" || /render\.com|sslmode=require/.test(DATABASE_URL) ? { rejectUnauthorized: false } : false;
     pg = new Pool({ connectionString: DATABASE_URL, ssl, max: 3 });
     await pg.query("CREATE TABLE IF NOT EXISTS nexora_state (id INT PRIMARY KEY, data JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
+    await pg.query("CREATE TABLE IF NOT EXISTS nexora_files (id TEXT PRIMARY KEY, data BYTEA NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
     const r = await pg.query("SELECT data FROM nexora_state WHERE id = 1");
     if (r.rows[0]) Object.assign(db, r.rows[0].data);
     console.log("  Banco: PostgreSQL");
@@ -69,6 +70,8 @@ async function loadDb() {
     }
     console.log("  Banco:", DB_FILE);
   }
+  db.files = db.files || {};
+  db.dms = db.dms || {};
   for (const u of Object.values(db.users)) byName.set(u.username.toLowerCase(), u.id);
   for (const s of Object.values(db.servers)) for (const c of s.channels) chanIndex.set(c.id, s.id);
   const now = Date.now();
@@ -84,6 +87,27 @@ async function writeDb() {
     await fsp.writeFile(tmp, json);
     await fsp.rename(tmp, DB_FILE);
   }
+}
+
+/* Arquivos enviados: conteúdo no PostgreSQL (ou pasta data/files), dados em db.files */
+const MAX_FILE = 8 * 1024 * 1024;
+const FILES_DIR = path.join(DATA_DIR, "files");
+const fileCacheMem = new Map();   // cache pequeno dos arquivos mais vistos (economiza o banco)
+let fileCacheBytes = 0;
+async function putFileData(id, buf) {
+  if (pg) await pg.query("INSERT INTO nexora_files (id, data) VALUES ($1, $2)", [id, buf]);
+  else { await fsp.mkdir(FILES_DIR, { recursive: true }); await fsp.writeFile(path.join(FILES_DIR, id), buf); }
+}
+async function getFileData(id) {
+  if (fileCacheMem.has(id)) return fileCacheMem.get(id);
+  let buf = null;
+  if (pg) { const r = await pg.query("SELECT data FROM nexora_files WHERE id = $1", [id]); buf = r.rows[0] ? r.rows[0].data : null; }
+  else { try { buf = await fsp.readFile(path.join(FILES_DIR, id)); } catch { buf = null; } }
+  if (buf && buf.length < 2 * 1024 * 1024) {
+    fileCacheMem.set(id, buf); fileCacheBytes += buf.length;
+    while (fileCacheBytes > 40 * 1024 * 1024) { const [k, v] = fileCacheMem.entries().next().value; fileCacheMem.delete(k); fileCacheBytes -= v.length; }
+  }
+  return buf;
 }
 
 let saveTimer = null, saving = false, dirty = false;
@@ -116,11 +140,15 @@ const pick = a => a[Math.floor(Math.random() * a.length)];
 const str = (v, max) => (typeof v === "string" ? v.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").trim().slice(0, max) : "");
 const isColor = c => typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c);
 const IMG_RE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/;
+const FILE_URL_RE = /^\/f\/([A-Za-z0-9_-]{12,40})\/[^/?#]{1,120}$/;
 function cleanPic(v) {
   if (typeof v !== "string") return "";
   if (v.startsWith("data:")) return v.length <= 60000 && IMG_RE.test(v) ? v : "";
+  const m = v.match(FILE_URL_RE);
+  if (m) { const f = db.files[m[1]]; return f && /^image\//.test(f.t) ? v : ""; }
   return str(v, 16);
 }
+const fileUrl = (id, name) => `/f/${id}/${encodeURIComponent(name).replace(/%20/g, "+")}`;
 const CODE_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 function randomCode(n = 8) {
   const b = crypto.randomBytes(n);
@@ -154,7 +182,13 @@ function gameOf(u) {
   return u.game ? { name: u.game } : null;
 }
 function pubUser(u) {
-  return { id: u.id, username: u.username, color: u.color, avatar: u.avatar || "", about: u.about || "", status: presence(u), created: u.created, steam: u.steam || "", game: presence(u) === "offline" ? null : gameOf(u) };
+  const off = presence(u) === "offline";
+  return {
+    id: u.id, username: u.username, color: u.color, avatar: u.avatar || "", about: u.about || "", status: presence(u), created: u.created,
+    steam: u.steam || "", game: off ? null : gameOf(u),
+    // Perfil Turbo
+    banner: u.banner || "", theme: u.theme || null, pron: u.pron || "", cs: off ? null : u.cs || null, fx: u.fx || "", pfx: u.pfx || ""
+  };
 }
 /* amigos e mensagens privadas */
 const friendsOf = u => (u && u.friends) || {};
@@ -162,7 +196,9 @@ const dmIdOf = (a, b) => "d." + [a, b].sort().join(".");
 function dmView(d, viewer) {
   const list = db.messages[d.id];
   const last = list && list.length ? list[list.length - 1] : null;
-  return { id: d.id, userId: d.members.find(x => x !== viewer) || viewer, created: d.created, last: last ? { id: last.id, ts: last.ts, a: last.a } : null };
+  const v = { id: d.id, userId: d.members.find(x => x !== viewer) || viewer, created: d.created, last: last ? { id: last.id, ts: last.ts, a: last.a } : null };
+  if (d.group) Object.assign(v, { group: true, name: d.name || "", members: d.members.slice(), ownerId: d.owner, icon: d.icon || "" });
+  return v;
 }
 const dmsOf = uid => Object.values(db.dms || {}).filter(d => d.members.includes(uid));
 function chanView(c) {
@@ -211,7 +247,7 @@ async function serveStatic(req, res, pathname) {
   }
   const headers = {
     "content-type": entry.type, "cache-control": "no-cache", etag: entry.etag,
-    "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", vary: "accept-encoding"
+    "x-content-type-options": "nosniff", "referrer-policy": "strict-origin-when-cross-origin", vary: "accept-encoding"
   };
   if (req.headers["if-none-match"] === entry.etag) { res.writeHead(304, headers); res.end(); return; }
   const gzip = entry.gz && /\bgzip\b/.test(req.headers["accept-encoding"] || "");
@@ -288,6 +324,75 @@ async function handleAuth(req, res, kind) {
   sendJson(res, 200, { token });
 }
 
+/* ---------- envio e download de arquivos ---------- */
+const uploadQuota = new Map(); // userId -> { bytes, n, reset }
+const INLINE_TYPES = /^(image\/(png|jpeg|gif|webp|avif)|video\/(mp4|webm|ogg)|audio\/(mpeg|ogg|wav|webm|mp4|aac|x-m4a))$/;
+async function handleUpload(req, res) {
+  const auth = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const sess = auth && auth.length < 100 ? db.sessions[tokenKey(auth)] : null;
+  const user = sess && db.users[sess.userId];
+  if (!user) return sendJson(res, 401, { error: "Entre novamente para enviar arquivos." });
+  const size = Number(req.headers["content-length"] || 0);
+  if (!size) return sendJson(res, 400, { error: "Arquivo vazio." });
+  if (size > MAX_FILE) return sendJson(res, 413, { error: "Arquivo muito grande (máximo 8 MB)." });
+  const now = Date.now();
+  let q = uploadQuota.get(user.id);
+  if (!q || q.reset < now) { q = { bytes: 0, n: 0, reset: now + 3600e3 }; uploadQuota.set(user.id, q); }
+  if (q.n >= 80 || q.bytes + size > 250 * 1024 * 1024) return sendJson(res, 429, { error: "Limite de envios por hora atingido. Tente mais tarde." });
+  let name = "arquivo";
+  try { name = decodeURIComponent(String(req.headers["x-file-name"] || "arquivo")); } catch {}
+  name = name.replace(/[\u0000-\u001f\\/:*?"<>|]+/g, "_").trim().slice(0, 100) || "arquivo";
+  let type = String(req.headers["content-type"] || "application/octet-stream").split(";")[0].trim().toLowerCase();
+  if (!/^[a-z]+\/[a-z0-9.+-]+$/.test(type)) type = "application/octet-stream";
+  const chunks = [];
+  let got = 0;
+  try {
+    await new Promise((resolve, reject) => {
+      req.on("data", c => { got += c.length; if (got > MAX_FILE) { reject(new Error("grande")); req.destroy(); } else chunks.push(c); });
+      req.on("end", resolve);
+      req.on("error", reject);
+    });
+  } catch { return sendJson(res, 413, { error: "Arquivo muito grande (máximo 8 MB)." }); }
+  const buf = Buffer.concat(chunks);
+  if (!buf.length) return sendJson(res, 400, { error: "Arquivo vazio." });
+  const id = crypto.randomBytes(15).toString("base64url");
+  await putFileData(id, buf);
+  q.n++; q.bytes += buf.length;
+  db.files[id] = { o: user.id, n: name, t: type, s: buf.length, c: now };
+  save();
+  sendJson(res, 200, { id, name, type, size: buf.length, url: fileUrl(id, name) });
+}
+async function serveFile(req, res, rawPath) {
+  const m = rawPath.match(/^\/f\/([A-Za-z0-9_-]{12,40})(\/|$)/);
+  const meta = m && db.files[m[1]];
+  if (!meta) { res.writeHead(404, { "content-type": "text/plain; charset=utf-8" }); res.end("Arquivo não encontrado"); return; }
+  const etag = `"${m[1]}"`;
+  const headers = {
+    "cache-control": "public, max-age=31536000, immutable", etag,
+    "x-content-type-options": "nosniff", "content-security-policy": "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'",
+    "cross-origin-resource-policy": "same-origin"
+  };
+  if (req.headers["if-none-match"] === etag) { res.writeHead(304, headers); res.end(); return; }
+  const buf = await getFileData(m[1]);
+  if (!buf) { res.writeHead(404); res.end(); return; }
+  const inline = INLINE_TYPES.test(meta.t);
+  headers["content-type"] = inline ? meta.t : "application/octet-stream";
+  headers["content-disposition"] = `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(meta.n)}`;
+  // suporte a "Range" para vídeos e áudios poderem avançar
+  const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ""));
+  if (range && inline) {
+    let start = range[1] ? +range[1] : 0, end = range[2] ? +range[2] : buf.length - 1;
+    if (!range[1] && range[2]) { start = Math.max(0, buf.length - +range[2]); end = buf.length - 1; }
+    if (start >= buf.length || end < start) { res.writeHead(416, { "content-range": `bytes */${buf.length}` }); res.end(); return; }
+    end = Math.min(end, buf.length - 1);
+    res.writeHead(206, { ...headers, "accept-ranges": "bytes", "content-range": `bytes ${start}-${end}/${buf.length}`, "content-length": end - start + 1 });
+    res.end(req.method === "HEAD" ? undefined : buf.subarray(start, end + 1));
+    return;
+  }
+  res.writeHead(200, { ...headers, "accept-ranges": "bytes", "content-length": buf.length });
+  res.end(req.method === "HEAD" ? undefined : buf);
+}
+
 const server = http.createServer(async (req, res) => {
   let u;
   try { u = new URL(req.url, "http://localhost"); } catch { res.writeHead(400); res.end(); return; }
@@ -297,6 +402,8 @@ const server = http.createServer(async (req, res) => {
     if (pathname === "/health") return sendJson(res, 200, { ok: true, users: Object.keys(db.users).length, online: online.size, voice: voice.size });
     if (req.method === "POST" && pathname === "/api/register") return await handleAuth(req, res, "register");
     if (req.method === "POST" && pathname === "/api/login") return await handleAuth(req, res, "login");
+    if (req.method === "POST" && pathname === "/api/upload") return await handleUpload(req, res);
+    if (pathname.startsWith("/f/") && (req.method === "GET" || req.method === "HEAD")) return await serveFile(req, res, u.pathname);
     if (pathname.startsWith("/api/")) return sendJson(res, 404, { error: "Rota inexistente." });
     if (req.method !== "GET" && req.method !== "HEAD") { res.writeHead(405); res.end(); return; }
     await serveStatic(req, res, pathname);
@@ -382,8 +489,17 @@ function leaveVoice(sock) {
   const v = voice.get(sock);
   if (!v) return;
   voice.delete(sock);
+  io.in(sock).socketsLeave("v:" + v.cid);
   io.to("s:" + v.sid).emit("voice:leave", { sock, userId: v.uid, channelId: v.cid, serverId: v.sid });
+  if (![...voice.values()].some(x => x.cid === v.cid) && acts.has(v.cid)) {
+    acts.delete(v.cid);
+    io.to("s:" + v.sid).emit("act:sum", { channelId: v.cid, type: null });
+  }
 }
+/* Atividades da call: um estado por sala de voz, guardado só na memória */
+const acts = new Map(); // channelId -> { type, state, by, strokes }
+const ACT_TYPES = ["yt", "board", "ttt"];
+const actView = (cid, a) => (a ? { channelId: cid, type: a.type, state: a.state, by: a.by, strokes: a.type === "board" ? a.strokes : undefined } : { channelId: cid, type: null });
 function systemMsg(s, userId, kind) {
   const ch = s.channels.find(c => c.type === "text");
   if (!ch) return;
@@ -459,6 +575,8 @@ io.on("connection", socket => {
       friends: Object.fromEntries(Object.entries(friends).filter(([id]) => db.users[id])),
       dms: dms.map(d => dmView(d, uid)),
       steamAuto: !!STEAM_KEY,
+      acts: [...acts].filter(([cid]) => ids.has(chanIndex.get(cid))).map(([cid, a]) => ({ channelId: cid, type: a.type })),
+      now: Date.now(),
       voice: [...voice].filter(([, v]) => ids.has(v.sid)).map(([k, v]) => vView(k, v)),
       iceServers: ICE_SERVERS,
       limits: { voice: VOICE_LIMIT }
@@ -494,7 +612,7 @@ io.on("connection", socket => {
   };
   // Canal de texto de servidor ou conversa privada ("d.…")
   const getTarget = channelId => {
-    if (typeof channelId === "string" && channelId.startsWith("d.")) {
+    if (typeof channelId === "string" && (channelId.startsWith("d.") || channelId.startsWith("g."))) {
       const d = db.dms && db.dms[channelId];
       if (!d || !d.members.includes(uid)) fail("Conversa não encontrada.");
       return { s: null, c: { id: d.id }, rooms: d.members.map(x => "u:" + x), dm: d };
@@ -524,18 +642,24 @@ io.on("connection", socket => {
     return { messages: list.slice(start, end), more: start > 0 };
   });
 
-  on("send", ({ channelId, text, replyTo, nonce }) => {
+  on("send", ({ channelId, text, replyTo, nonce, files }) => {
     const { s, c, rooms, dm } = getTarget(channelId);
     text = typeof text === "string" ? text.replace(/\r\n?/g, "\n").replace(/\n{4,}/g, "\n\n\n").trim().slice(0, 2000) : "";
-    if (!text) fail("A mensagem está vazia.");
+    const att = [];
+    if (Array.isArray(files)) for (const fid of files.slice(0, 10)) {
+      const f = typeof fid === "string" ? db.files[fid] : null;
+      if (f && f.o === uid && !f.u) { f.u = 1; att.push({ id: fid, n: f.n, t: f.t, s: f.s, w: undefined }); }
+    }
+    if (!text && !att.length) fail("A mensagem está vazia.");
     if (!chat()) fail("Devagar! Espere um instante antes de enviar de novo.");
     const list = db.messages[c.id] || (db.messages[c.id] = []);
     const m = { id: msgId(), a: uid, t: text, ts: Date.now() };
+    if (att.length) m.f = att.map(({ id, n, t, s: size }) => ({ id, n, t, s: size }));
     if (typeof replyTo === "string") {
       const r = list.find(x => x.id === replyTo && !x.sys);
       if (r) m.re = { id: r.id, a: r.a, t: r.t.slice(0, 140) };
     }
-    if (dm && !list.length) {
+    if (dm && !dm.group && !list.length) {
       // primeira mensagem: a conversa aparece para a outra pessoa
       for (const id of dm.members) {
         const other = db.users[dm.members.find(x => x !== id) || id];
@@ -589,7 +713,7 @@ io.on("connection", socket => {
 
   socket.on("typing", data => {
     if (!data || typeof data.channelId !== "string" || !typing()) return;
-    if (data.channelId.startsWith("d.")) {
+    if (data.channelId.startsWith("d.") || data.channelId.startsWith("g.")) {
       const d = db.dms && db.dms[data.channelId];
       if (d && d.members.includes(uid)) for (const id of d.members) if (id !== uid) io.to("u:" + id).emit("typing", { channelId: d.id, userId: uid });
       return;
@@ -761,8 +885,14 @@ io.on("connection", socket => {
   });
 
   /* ---------- Perfil ---------- */
-  on("profile:update", async ({ color, avatar, about, status, steam, game }) => {
+  on("profile:update", async ({ color, avatar, about, status, steam, game, banner, theme, pron, cs, fx, pfx }) => {
     const u = me();
+    if (banner !== undefined) u.banner = isColor(banner) ? banner : cleanPic(banner).startsWith("/f/") ? cleanPic(banner) : "";
+    if (theme !== undefined) u.theme = Array.isArray(theme) && theme.length === 2 && theme.every(isColor) ? theme : null;
+    if (pron !== undefined) u.pron = str(pron, 24);
+    if (cs !== undefined) { const t = str(cs && cs.t, 60), e = str(cs && cs.e, 16); u.cs = t || e ? { t, e } : null; }
+    if (fx !== undefined) u.fx = ["", "grad", "glow", "rainbow"].includes(fx) ? fx : "";
+    if (pfx !== undefined) u.pfx = ["", "aurora", "stars", "fire", "neon"].includes(pfx) ? pfx : "";
     if (steam !== undefined) {
       const sid = await resolveSteam(steam);
       if (sid !== (u.steam || "")) { u.steam = sid; u.steamGame = null; }
@@ -808,6 +938,65 @@ io.on("connection", socket => {
     save();
   });
 
+  /* ---------- grupos de mensagem direta ---------- */
+  const groupSys = (d, userId, kind, extra) => {
+    const list = db.messages[d.id] || (db.messages[d.id] = []);
+    const m = { id: msgId(), a: userId, t: extra || "", ts: Date.now(), sys: kind };
+    list.push(m);
+    if (list.length > HISTORY_KEEP) list.splice(0, list.length - HISTORY_KEEP);
+    io.to(d.members.map(x => "u:" + x)).emit("msg", { channelId: d.id, serverId: null, m });
+  };
+  const sendGroup = d => {
+    for (const id of d.members) {
+      io.to("u:" + id).emit("dm:add", { dm: dmView(d, id), users: d.members.map(x => db.users[x]).filter(Boolean).map(pubUser) });
+    }
+  };
+  const getGroup = id => {
+    const d = typeof id === "string" && db.dms[id];
+    if (!d || !d.group || !d.members.includes(uid)) fail("Grupo não encontrado.");
+    return d;
+  };
+  on("group:create", ({ userIds, name }) => {
+    const mine = friendsOf(me());
+    const ids = [...new Set(Array.isArray(userIds) ? userIds : [])].filter(id => id !== uid && mine[id] === "friend" && db.users[id]);
+    if (!ids.length) fail("Escolha pelo menos um amigo.");
+    if (ids.length > 9) fail("Um grupo pode ter até 10 pessoas.");
+    const d = { id: "g." + newId(), members: [uid, ...ids], created: Date.now(), group: true, owner: uid, name: str(name, 40) };
+    db.dms[d.id] = d;
+    groupSys(d, uid, "gcreate");
+    save();
+    sendGroup(d);
+    return { id: d.id };
+  });
+  on("group:add", ({ id, userIds }) => {
+    const d = getGroup(id);
+    const mine = friendsOf(me());
+    const ids = [...new Set(Array.isArray(userIds) ? userIds : [])].filter(x => !d.members.includes(x) && mine[x] === "friend" && db.users[x]);
+    if (!ids.length) fail("Escolha amigos que ainda não estão no grupo.");
+    if (d.members.length + ids.length > 10) fail("Um grupo pode ter até 10 pessoas.");
+    d.members.push(...ids);
+    for (const x of ids) groupSys(d, x, "gjoin");
+    save();
+    sendGroup(d);
+  });
+  on("group:leave", ({ id }) => {
+    const d = getGroup(id);
+    d.members = d.members.filter(x => x !== uid);
+    io.to("u:" + uid).emit("dm:remove", { id: d.id });
+    if (!d.members.length) { delete db.dms[d.id]; delete db.messages[d.id]; save(); return; }
+    if (d.owner === uid) d.owner = d.members[0];
+    groupSys(d, uid, "gleave");
+    save();
+    sendGroup(d);
+  });
+  on("group:update", ({ id, name, icon }) => {
+    const d = getGroup(id);
+    if (name !== undefined) { d.name = str(name, 40); groupSys(d, uid, "gname", d.name); }
+    if (icon !== undefined) d.icon = cleanPic(icon);
+    save();
+    sendGroup(d);
+  });
+
   on("dm:open", ({ userId }) => {
     const other = typeof userId === "string" ? db.users[userId] : null;
     if (!canDm(other)) fail("Adicione essa pessoa como amiga para conversar no privado.");
@@ -834,8 +1023,56 @@ io.on("connection", socket => {
     if (peers.length >= VOICE_LIMIT) fail(`A sala está cheia (máximo de ${VOICE_LIMIT}).`);
     const st = { uid, sid: s.id, cid: c.id, muted: !!muted, deaf: !!deaf, screen: null, cam: null, at: Date.now() };
     voice.set(socket.id, st);
+    socket.join("v:" + c.id);
     io.to("s:" + s.id).emit("voice:state", vView(socket.id, st));
-    return { peers: peers.map(([k, v]) => vView(k, v)), iceServers: ICE_SERVERS };
+    return { peers: peers.map(([k, v]) => vView(k, v)), iceServers: ICE_SERVERS, act: actView(c.id, acts.get(c.id)), now: Date.now() };
+  });
+
+  /* ---------- atividades, sons e reações na call ---------- */
+  const myVoice = () => { const v = voice.get(socket.id); if (!v) fail("Entre numa sala de voz primeiro."); return v; };
+  const fxLimit = mk(12, 5000);
+  on("act:start", ({ type }) => {
+    const v = myVoice();
+    if (!ACT_TYPES.includes(type)) fail("Atividade inválida.");
+    const state = type === "yt" ? { vid: "", title: "", playing: false, pos: 0, at: Date.now(), queue: [] }
+      : type === "ttt" ? { b: Array(9).fill(""), x: "", o: "", turn: "X", win: "", score: { X: 0, O: 0 } } : {};
+    const a = { type, state, by: uid, strokes: [] };
+    acts.set(v.cid, a);
+    io.to("v:" + v.cid).emit("act", actView(v.cid, a));
+    io.to("s:" + v.sid).emit("act:sum", { channelId: v.cid, type });
+  });
+  on("act:stop", () => {
+    const v = myVoice();
+    acts.delete(v.cid);
+    io.to("v:" + v.cid).emit("act", actView(v.cid, null));
+    io.to("s:" + v.sid).emit("act:sum", { channelId: v.cid, type: null });
+  });
+  on("act:state", ({ state }) => {
+    const v = myVoice(), a = acts.get(v.cid);
+    if (!a || !state || typeof state !== "object") fail("Nenhuma atividade aberta.");
+    if (JSON.stringify(state).length > 20000) fail("Estado grande demais.");
+    if (a.type === "yt") state.at = Date.now();   // relógio do servidor para sincronizar
+    a.state = state;
+    io.to("v:" + v.cid).emit("act", actView(v.cid, a));
+  });
+  socket.on("act:ev", ev => {
+    const v = voice.get(socket.id), a = v && acts.get(v.cid);
+    if (!a || a.type !== "board" || !ev || !signals()) return;
+    if (ev.k === "clear") { a.strokes = []; }
+    else if (ev.k === "seg" && Array.isArray(ev.p) && ev.p.length <= 400) {
+      ev = { k: "seg", id: str(ev.id, 24), c: isColor(ev.c) ? ev.c : "#ffffff", w: Math.max(1, Math.min(60, +ev.w || 4)), e: !!ev.e, p: ev.p.map(Number).filter(Number.isFinite).slice(0, 400) };
+      a.strokes.push(ev);
+      if (a.strokes.length > 4000) a.strokes.splice(0, a.strokes.length - 4000);
+    } else return;
+    socket.to("v:" + v.cid).emit("act:ev", ev);
+  });
+  socket.on("call:fx", fx => {
+    const v = voice.get(socket.id);
+    if (!v || !fx || !fxLimit()) return;
+    const kind = fx.k === "sound" ? "sound" : fx.k === "emoji" ? "emoji" : null;
+    const val = str(fx.v, 16);
+    if (!kind || !val) return;
+    socket.to("v:" + v.cid).emit("call:fx", { k: kind, v: val, userId: uid });
   });
 
   on("voice:update", ({ muted, deaf, screen, cam }) => {

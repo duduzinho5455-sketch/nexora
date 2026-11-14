@@ -15,7 +15,7 @@ const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ESC[c]);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const pick = a => a[Math.floor(Math.random() * a.length)];
-const IS_IMG = s => typeof s === "string" && s.startsWith("data:image/");
+const IS_IMG = s => typeof s === "string" && (s.startsWith("data:image/") || s.startsWith("/f/"));
 const store = {
   get(k, d) { try { const v = localStorage.getItem("nx:" + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem("nx:" + k, JSON.stringify(v)); } catch {} },
@@ -73,7 +73,18 @@ const P = {
   at: '<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/>',
   userCheck: '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="m17 11 2 2 4-4"/>',
   message: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
-  steam: '<circle cx="12" cy="12" r="10"/><circle cx="15.5" cy="9.5" r="2.5"/><path d="m2.5 14 5 2a3 3 0 1 0 1.6-3.9l3.7-2.6"/>'
+  steam: '<circle cx="12" cy="12" r="10"/><circle cx="15.5" cy="9.5" r="2.5"/><path d="m2.5 14 5 2a3 3 0 1 0 1.6-3.9l3.7-2.6"/>',
+  clip: '<path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/>',
+  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+  music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  brush: '<path d="m9.1 11.3 9.4-9.4a2.1 2.1 0 0 1 3 3l-9.4 9.4M7 14a3 3 0 0 0-3 3c0 1.3-1 2-2 2 1 1.5 3 2.5 5 2.5a4.5 4.5 0 0 0 4.5-4.5 3 3 0 0 0-3-3"/>',
+  grid3: '<path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>',
+  speaker: '<rect x="4" y="2" width="16" height="20" rx="2"/><circle cx="12" cy="14" r="4"/><path d="M12 6h.01"/>',
+  rocket: '<path d="M4.5 16.5c-1.5 1.3-2 5-2 5s3.7-.5 5-2c.7-.8.7-2.1-.1-2.9a2.2 2.2 0 0 0-2.9-.1z"/><path d="m12 15-3-3a22 22 0 0 1 2-4A12.9 12.9 0 0 1 22 2c0 2.7-.8 7.5-6 11a22.4 22.4 0 0 1-4 2z"/><path d="M9 12H4s.6-3 2-4c1.6-1.1 5 0 5 0M12 15v5s3-.6 4-2c1.1-1.6 0-5 0-5"/>',
+  skip: '<path d="m5 4 10 8-10 8zM19 5v14"/>',
+  pause: '<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>',
+  sparkles: '<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/>'
 };
 const ic = (n, c = "") => `<svg class="ic ${c}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ""}</svg>`;
 const LOGO = '<svg viewBox="0 0 48 48" aria-hidden="true"><defs><linearGradient id="nxg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><path d="M14 35V13l20 22V13" fill="none" stroke="url(#nxg)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -88,7 +99,7 @@ const COLORS = ["#7c5cff", "#22d3ee", "#f472b6", "#34d399", "#fbbf24", "#f87171"
 const STATUS = { online: "Disponível", idle: "Ausente", dnd: "Não perturbe", invisible: "Invisível", offline: "Offline" };
 const EMOJIS = "😀 😂 🤣 😊 😍 🥰 😎 🤩 🥳 😅 😭 😤 😡 🤯 😱 🤔 🫡 😴 🙄 😏 🤡 💀 👻 👽 🤖 💩 👍 👎 👏 🙌 🙏 🤝 💪 👀 🫶 ❤️ 🧡 💛 💚 💙 💜 🖤 💯 🔥 ✨ ⚡ 🎉 🎮 🏆 🎧 🍕 🍔 ☕ 🍺 🚀 ✅ ❌ ⭐ 🌙".split(" ");
 const QUICK = ["👍", "😂", "❤️"];
-const SYS = { join: "entrou no servidor. Deem as boas-vindas! 🎉" };
+const SYS = { join: "entrou no servidor. Deem as boas-vindas! 🎉", gcreate: "criou o grupo. 🎉", gjoin: "entrou no grupo. 👋", gleave: "saiu do grupo.", gname: "mudou o nome do grupo." };
 const QUALITY = {
   "720": { label: "720p", sub: "30 FPS · leve", w: 1280, h: 720, fps: 30, br: 2500000 },
   "720-60": { label: "720p", sub: "60 FPS · jogo leve", w: 1280, h: 720, fps: 60, br: 4500000, tag: "COOP" },
@@ -108,7 +119,7 @@ const TEMPLATES = {
 /* ------------------------------------------------------------------ */
 const DEFAULTS = {
   theme: "dark", accent: "#7c5cff", reduceMotion: false, sounds: true, notify: false,
-  noise: true, echo: true, agc: true, inputId: "", outputId: "", sensitivity: 0.06,
+  noise: true, nsMode: "ai", nsGate: true, echo: true, agc: true, inputId: "", outputId: "", sensitivity: 0.06,
   shareQuality: "1080", shareMode: "detail", shareAudio: true
 };
 const S = {
@@ -123,7 +134,8 @@ const S = {
   muted: store.get("muted", false), deaf: store.get("deaf", false),
   volumes: store.get("volumes", {}), localMute: {}, order: store.get("order", []),
   pendingInvite: null, voiceLimit: 12, ready: false,
-  friends: new Map(), dms: new Map(), friendsTab: "online", steamAuto: false
+  friends: new Map(), dms: new Map(), friendsTab: "online", steamAuto: false,
+  acts: new Map(), clockOff: 0
 };
 const V = {
   channelId: null, serverId: null, joining: false,
@@ -137,11 +149,18 @@ const V = {
 const srv = () => S.servers.get(S.serverId);
 function chan(cid = S.channelId) {
   const d = S.dms.get(cid);
-  if (d) { d.type = "text"; d.dm = true; d.name = user(d.userId).username; d.topic = ""; return d; }
+  if (d) { d.type = "text"; d.dm = true; if (!d.group) d.name = user(d.userId).username; d.topic = ""; return d; }
   for (const s of S.servers.values()) { const c = s.channels.find(x => x.id === cid); if (c) return c; }
   return null;
 }
-const isDm = cid => typeof cid === "string" && cid.startsWith("d.");
+const isDm = cid => typeof cid === "string" && (cid.startsWith("d.") || cid.startsWith("g."));
+const groupTitle = d => d.name || d.members.filter(id => !S.me || id !== S.me.id).map(id => user(id).username).slice(0, 4).join(", ") || "Grupo";
+const dmTitle = d => (d.group ? groupTitle(d) : user(d.userId).username);
+function groupAvatar(d, size = 32) {
+  if (d.icon && IS_IMG(d.icon)) return `<span class="av" style="--c:#5865f2;--s:${size}px"><img src="${esc(d.icon)}" alt=""></span>`;
+  const others = d.members.filter(id => !S.me || id !== S.me.id).slice(0, 2).map(user);
+  return `<span class="av-stack" style="--s:${size}px">${others.map(u => avatar(u, Math.round(size * 0.68))).join("")}</span>`;
+}
 function serverOf(cid) { for (const s of S.servers.values()) if (s.channels.some(c => c.id === cid)) return s; return null; }
 const user = id => S.users.get(id) || { id, username: "Usuário removido", color: "#4b5068", avatar: "", status: "offline", about: "", created: 0 };
 function userByName(n) { n = n.toLowerCase(); for (const u of S.users.values()) if (u.username.toLowerCase() === n) return u; return null; }
@@ -172,6 +191,39 @@ function avatar(u, size = 40, status = false, attrs = "") {
   const inner = IS_IMG(u.avatar) ? `<img src="${esc(u.avatar)}" alt="" decoding="async">`
     : u.avatar ? `<span class="av-emoji">${esc(u.avatar)}</span>` : esc(([...name][0] || "?").toUpperCase());
   return `<span class="av" style="--c:${esc(u.color || "#555")};--s:${size}px" ${attrs}>${inner}${status ? `<i class="st st-${esc(u.status || "offline")}"></i>` : ""}</span>`;
+}
+/* Perfil Turbo: nome com efeito, status personalizado e insígnias */
+function nameHTML(u) {
+  const t = u.theme || [u.color || "#7c5cff", "#22d3ee"];
+  return `<span class="nm${u.fx ? " fx-" + esc(u.fx) : ""}" style="--n1:${esc(t[0])};--n2:${esc(t[1])}">${esc(u.username)}</span>`;
+}
+const csText = u => (u.cs ? `${u.cs.e ? esc(u.cs.e) + " " : ""}${esc(u.cs.t || "")}` : "");
+function badges(u) {
+  const b = [];
+  if (u.created && u.created < Date.UTC(2027, 0, 1)) b.push(["⭐", "Fundador — chegou no começo do NEXORA"]);
+  if ([...S.servers.values()].some(s => s.ownerId === u.id)) b.push(["👑", "Dono de servidor"]);
+  if (u.banner || u.theme || u.fx || u.pfx) b.push(["⚡", "Perfil Turbo"]);
+  if (u.steam) b.push(["🎮", "Steam conectada"]);
+  return b.length ? `<div class="badges">${b.map(([e, t]) => `<span data-tip="${esc(t)}">${e}</span>`).join("")}</div>` : "";
+}
+function bannerStyle(u) {
+  if (u.banner && u.banner.startsWith("/f/")) return `background-image:url('${esc(u.banner)}');background-size:cover;background-position:center`;
+  const t = u.theme || [u.banner && u.banner.startsWith("#") ? u.banner : u.color || "#7c5cff", null];
+  return `background:linear-gradient(135deg, ${esc(t[0])}, ${esc(t[1] || `color-mix(in srgb, ${t[0]} 30%, #000)`)})`;
+}
+function uploadBlob(file) {
+  return new Promise((resolve, reject) => {
+    if (LOCAL) return reject(new Error("Disponível na versão online do NEXORA."));
+    if (file.size > 8 * 1024 * 1024) return reject(new Error("Arquivo muito grande (máximo 8 MB)."));
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload");
+    xhr.setRequestHeader("authorization", "Bearer " + S.token);
+    xhr.setRequestHeader("x-file-name", encodeURIComponent(file.name || "imagem"));
+    xhr.setRequestHeader("content-type", file.type || "application/octet-stream");
+    xhr.onload = () => { let j = {}; try { j = JSON.parse(xhr.responseText); } catch {} if (xhr.status === 200 && j.url) resolve(j); else reject(new Error(j.error || "Falha no envio.")); };
+    xhr.onerror = () => reject(new Error("Falha na conexão."));
+    xhr.send(file);
+  });
 }
 function serverIcon(s, cls = "") {
   const v = s.icon || "";
@@ -322,10 +374,12 @@ function renderSide() {
     const dms = [...S.dms.values()].sort((a, b) => ((b.last && b.last.ts) || b.created || 0) - ((a.last && a.last.ts) || a.created || 0));
     body.innerHTML = `<div class="ch${S.view === "home" ? " on" : ""}" data-act="home" role="button" tabindex="0">${ic("compass")}<span class="ch-name">Início</span></div>
       <div class="ch${S.view === "friends" ? " on" : ""}" data-act="friends" role="button" tabindex="0">${ic("users")}<span class="ch-name">Amigos</span>${pending ? `<b class="badge">${pending}</b>` : ""}</div>
-      <div class="cat"><span>Mensagens diretas</span><button data-act="new-dm" data-tip="Nova mensagem">${ic("plus", "sm")}</button></div>` +
+      <div class="cat"><span>Mensagens diretas</span><button data-act="new-group" data-tip="Novo grupo">${ic("plus", "sm")}</button></div>` +
       (dms.length ? dms.map(d => {
-        const u = user(d.userId), n = S.mentions.get(d.id) || 0;
-        const sub = u.game ? `${ic("gamepad", "xs")} ${esc(u.game.name)}` : esc(u.about || "");
+        const n = S.mentions.get(d.id) || 0;
+        if (d.group) return `<div class="dm-item${S.view === "chat" && S.channelId === d.id ? " on" : ""}${n ? " unread" : ""}" data-act="open-dm" data-id="${d.id}" data-group="${d.id}" role="button" tabindex="0">${groupAvatar(d)}<div class="who"><b>${esc(groupTitle(d))}</b><small>${d.members.length} membros</small></div>${n ? `<b class="badge">${n}</b>` : ""}</div>`;
+        const u = user(d.userId);
+        const sub = u.game ? `${ic("gamepad", "xs")} ${esc(u.game.name)}` : csText(u) || esc(u.about || "");
         return `<div class="dm-item${S.view === "chat" && S.channelId === d.id ? " on" : ""}${n ? " unread" : ""}" data-act="open-dm" data-id="${d.id}" data-uid="${u.id}" role="button" tabindex="0">${avatar(u, 32, true)}<div class="who"><b>${esc(u.username)}</b>${sub ? `<small>${sub}</small>` : ""}</div>${n ? `<b class="badge">${n}</b>` : ""}</div>`;
       }).join("") : `<p style="padding:0 8px;color:var(--muted);font-size:13px;margin:0">Nenhuma conversa ainda. Adicione amigos e mande um oi! 👋</p>`);
     return;
@@ -346,7 +400,8 @@ function renderSide() {
   h += voiceCh.map(c => {
     const people = [...S.voice.values()].filter(v => v.channelId === c.id).sort((a, b) => a.at - b.at);
     const live = people.some(p => p.screen);
-    return `<div class="ch${S.view === "stage" && c.id === S.channelId ? " on" : ""}${live ? " live" : ""}" data-act="open-ch" data-id="${c.id}" role="button" tabindex="0">${ic("volume")}<span class="ch-name">${esc(c.name)}</span>${people.length ? `<span class="count">${people.length}/${S.voiceLimit}</span>` : ""}${tools(c.id)}</div>${people.length ? `<div class="vc-users">${people.map(vcUser).join("")}</div>` : ""}`;
+    const act = S.acts.get(c.id);
+    return `<div class="ch${S.view === "stage" && c.id === S.channelId ? " on" : ""}${live ? " live" : ""}" data-act="open-ch" data-id="${c.id}" role="button" tabindex="0">${ic("volume")}<span class="ch-name">${esc(c.name)}</span>${act ? `<span class="act-dot" data-tip="${esc(ACT_NAMES[act] || "Atividade")}">${ic({ yt: "music", board: "brush", ttt: "grid3" }[act] || "rocket", "xs")}</span>` : ""}${people.length ? `<span class="count">${people.length}/${S.voiceLimit}</span>` : ""}${tools(c.id)}</div>${people.length ? `<div class="vc-users">${people.map(vcUser).join("")}</div>` : ""}`;
   }).join("");
   body.innerHTML = h;
 }
@@ -358,7 +413,12 @@ function renderTop() {
   const icon = $("#topIcon"), title = $("#topTitle"), topic = $("#topTopic"), actions = $("#topActions");
   const c = chan();
   const search = `<button class="icon-btn" data-act="switcher" data-tip="Ir para… (Ctrl+K)">${ic("search")}</button>`;
-  if (S.view === "chat" && c && c.dm) {
+  if (S.view === "chat" && c && c.dm && c.group) {
+    icon.innerHTML = ic("users");
+    title.textContent = groupTitle(c);
+    topic.textContent = `${c.members.length} membros`;
+    actions.innerHTML = `<button class="icon-btn" data-act="group-add" data-id="${c.id}" data-tip="Adicionar pessoas">${ic("userPlus")}</button><button class="icon-btn${S.showMembers ? " on" : ""}" data-act="toggle-members" data-tip="Membros">${ic("users")}</button><button class="icon-btn" data-act="group-menu" data-id="${c.id}" data-tip="Opções do grupo">${ic("settings")}</button>${search}`;
+  } else if (S.view === "chat" && c && c.dm) {
     const u = user(c.userId), f = S.friends.get(u.id);
     icon.innerHTML = ic("at");
     title.textContent = u.username;
@@ -385,7 +445,8 @@ function renderTop() {
 }
 
 function renderMembers() {
-  const el = $("#members"), s = srv(), app = $("#app");
+  const el = $("#members"), app = $("#app"), gc = S.view === "chat" ? chan() : null;
+  const s = gc && gc.group ? { members: gc.members, ownerId: gc.ownerId, id: gc.id } : srv();
   const show = S.view === "chat" && s;
   app.classList.toggle("no-members", !(show && S.showMembers));
   if (!show) { el.innerHTML = ""; app.classList.remove("show-members"); return; }
@@ -395,8 +456,9 @@ function renderMembers() {
     const v = S.voice.get(u.id);
     const sub = v && v.serverId === s.id ? `<small>${ic("volume", "xs")} ${esc(chan(v.channelId)?.name || "Em chamada")}${v.screen ? " · ao vivo" : ""}</small>`
       : u.game ? `<small class="playing">${ic("gamepad", "xs")} Jogando <b>${esc(u.game.name)}</b></small>`
+      : u.cs ? `<small>${csText(u)}</small>`
       : u.about ? `<small>${esc(u.about)}</small>` : "";
-    return `<div class="member${u.status === "offline" ? " off" : ""}${V.speaking.has(u.id) ? " speaking" : ""}" data-act="profile" data-uid="${u.id}" data-voice-user="${u.id}">${avatar(u, 34, true)}<div class="who"><b>${esc(u.username)}${u.id === s.ownerId ? `<span data-tip="Dono do servidor">${ic("crown", "xs")}</span>` : ""}</b>${sub}</div></div>`;
+    return `<div class="member${u.status === "offline" ? " off" : ""}${V.speaking.has(u.id) ? " speaking" : ""}" data-act="profile" data-uid="${u.id}" data-voice-user="${u.id}">${avatar(u, 34, true)}<div class="who"><b>${nameHTML(u)}${u.id === s.ownerId ? `<span data-tip="Dono do servidor">${ic("crown", "xs")}</span>` : ""}</b>${sub}</div></div>`;
   };
   el.innerHTML = `<div class="cat">Online — ${on.length}</div>${on.map(row).join("")}${off.length ? `<div class="cat">Offline — ${off.length}</div>${off.map(row).join("")}` : ""}`;
 }
@@ -406,7 +468,7 @@ function renderUserPanel() {
   const pref = S.me.statusPref || "online";
   const shown = { ...S.me, status: pref === "invisible" ? "offline" : pref };
   const micOff = S.muted || S.deaf;
-  $("#userPanel").innerHTML = `<div class="me-card" data-act="status-menu" data-tip="Definir status">${avatar(shown, 34, true)}<div class="who"><b>${esc(S.me.username)}</b><small>${esc(S.me.about || STATUS[pref])}</small></div></div>
+  $("#userPanel").innerHTML = `<div class="me-card" data-act="status-menu" data-tip="Definir status">${avatar(shown, 34, true)}<div class="who"><b>${nameHTML(S.me)}</b><small>${csText(S.me) || esc(S.me.about || STATUS[pref])}</small></div></div>
     <button class="icon-btn${micOff ? " bad" : ""}" data-act="mute" data-tip="${micOff ? "Ativar microfone" : "Silenciar"} (Ctrl+Shift+M)">${ic(micOff ? "micOff" : "mic")}</button>
     <button class="icon-btn${S.deaf ? " bad" : ""}" data-act="deafen" data-tip="${S.deaf ? "Ativar áudio" : "Desativar áudio"} (Ctrl+Shift+D)">${ic(S.deaf ? "headOff" : "headphones")}</button>
     <button class="icon-btn" data-act="settings" data-tip="Configurações do usuário">${ic("settings")}</button>`;
@@ -484,6 +546,46 @@ async function startDM(userId) {
   if (!S.dms.has(r.dm.id)) S.dms.set(r.dm.id, r.dm);
   openDM(r.dm.id);
 }
+/* grupos de mensagem direta */
+function groupModal(groupId) {
+  const g = groupId ? S.dms.get(groupId) : null;
+  const friends = [...S.friends].filter(([id, st]) => st === "friend" && !(g && g.members.includes(id))).map(([id]) => user(id)).sort((a, b) => a.username.localeCompare(b.username, "pt-BR"));
+  const sel = new Set();
+  modal({
+    title: g ? "Adicionar ao grupo" : "Criar grupo", sub: g ? esc(groupTitle(g)) : "Converse com até 10 amigos de uma vez.",
+    body: `${g ? "" : `<label class="field"><span>Nome do grupo (opcional)</span><input id="gName" maxlength="40" placeholder="Ex.: Squad do sábado"></label>`}
+      <span class="label">Amigos — <span data-count>0</span> selecionados</span>
+      <div class="pick-list">${friends.length ? friends.map(u => `<label class="pick">${avatar(u, 32, true)}<b>${esc(u.username)}</b><input type="checkbox" value="${u.id}"></label>`).join("") : `<p style="color:var(--muted)">${g ? "Todos os seus amigos já estão aqui." : "Adicione amigos primeiro em Início › Amigos."}</p>`}</div>
+      <div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" data-go ${friends.length ? "" : "disabled"}>${g ? "Adicionar" : "Criar grupo"}</button></div>`,
+    onMount(m, close) {
+      m.addEventListener("change", e => {
+        if (e.target.type !== "checkbox") return;
+        if (e.target.checked) sel.add(e.target.value); else sel.delete(e.target.value);
+        if (sel.size > 9 - (g ? g.members.length - 1 : 0)) { e.target.checked = false; sel.delete(e.target.value); toast("Um grupo pode ter até 10 pessoas.", "warn"); }
+        e.target.closest(".pick").classList.toggle("on", e.target.checked);
+        m.querySelector("[data-count]").textContent = sel.size;
+      });
+      m.querySelector("[data-go]").onclick = async () => {
+        if (!sel.size) { toast("Escolha pelo menos um amigo.", "warn"); return; }
+        const r = g ? await emit("group:add", { id: g.id, userIds: [...sel] }) : await emit("group:create", { userIds: [...sel], name: m.querySelector("#gName").value });
+        if (r.error) { toast(r.error, "error"); return; }
+        close();
+        if (!g) { setTimeout(() => openDM(r.id), 150); confetti(); }
+      };
+    }
+  });
+}
+function groupMenu(id, at) {
+  const g = S.dms.get(id);
+  if (!g) return;
+  menu(at, [
+    { label: "Adicionar pessoas", icon: "userPlus", run: () => groupModal(id) },
+    { label: "Mudar nome do grupo", icon: "edit", run: () => modal({ title: "Nome do grupo", body: `<label class="field"><span>Nome</span><input id="gn" maxlength="40" value="${esc(g.name || "")}"></label><div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" data-go>Salvar</button></div>`, onMount(m, close) { m.querySelector("[data-go]").onclick = async () => { const r = await emit("group:update", { id, name: m.querySelector("#gn").value }); if (r.error) toast(r.error, "error"); else close(); }; } }) },
+    { label: "Mudar ícone", icon: "image", run: () => iconMenu(at instanceof Element ? at : document.body, v => emit("group:update", { id, icon: v }), true) },
+    "-",
+    { label: "Sair do grupo", icon: "logout", danger: true, run: async () => { if (await confirmBox({ title: "Sair do grupo", html: `Sair de <b>${esc(groupTitle(g))}</b>? Você só volta se alguém te adicionar.`, ok: "Sair" })) { const r = await emit("group:leave", { id }); if (r.error) toast(r.error, "error"); } } }
+  ]);
+}
 async function addFriend(username) {
   const r = await emit("friend:request", { username });
   if (r.error) { toast(r.error, "error"); return false; }
@@ -520,7 +622,7 @@ function renderFriends() {
     body = `<div class="section-title">${label} — ${list.length}</div>` + (list.length ? list.map(x => friendRow(x.u, x.st)).join("")
       : `<div class="empty">${ic(tab === "pending" ? "userCheck" : "users")}<p>${tab === "pending" ? "Nenhum pedido pendente." : tab === "online" ? "Nenhum amigo online agora." : "Você ainda não tem amigos aqui."}</p><button class="btn primary" data-act="friends-tab" data-tab="add">${ic("userPlus", "sm")}Adicionar amigo</button></div>`);
   }
-  root.innerHTML = `<div class="page"><div class="tabs-row">${tabs.map(([k, n]) => `<button class="tab${k === tab ? " on" : ""}${k === "add" ? " add" : ""}" data-act="friends-tab" data-tab="${k}">${n}</button>`).join("")}</div>${body}</div>`;
+  root.innerHTML = `<div class="page"><div class="tabs-row">${tabs.map(([k, n]) => `<button class="tab${k === tab ? " on" : ""}${k === "add" ? " add" : ""}" data-act="friends-tab" data-tab="${k}">${n}</button>`).join("")}<button class="btn sm" style="margin-left:auto" data-act="new-group">${ic("users", "sm")}Novo grupo</button></div>${body}</div>`;
   const form = $("#addFriendForm");
   if (form) form.onsubmit = async e => {
     e.preventDefault();
@@ -572,7 +674,7 @@ function findMsg(id, cid = S.channelId) { const b = S.msgs.get(cid); return b ? 
 
 function openText(c) {
   const input = $("#input");
-  input.placeholder = c.dm ? `Mensagem para @${c.name}` : `Conversar em #${c.name}`;
+  input.placeholder = c.group ? `Mensagem para ${groupTitle(c)}` : c.dm ? `Mensagem para @${c.name}` : `Conversar em #${c.name}`;
   input.value = S.drafts[c.id] || "";
   autoGrow();
   S.newMarker = isUnread(c) && S.lastRead[c.id] ? { cid: c.id, ts: S.lastRead[c.id] } : null;
@@ -583,6 +685,7 @@ function openText(c) {
     loadHistory(c.id);
   }
   renderTyping();
+  renderTray();
   if (!matchMedia("(pointer: coarse)").matches) input.focus({ preventScroll: true });
 }
 
@@ -613,7 +716,7 @@ async function loadHistory(cid, older = false) {
 function msgHTML(m, prev, isNew) {
   if (m.sys) {
     const u = user(m.a);
-    return `<div class="msg sys${isNew ? " new" : ""}" data-id="${m.id}">${ic("arrowRight")}<span><b data-act="profile" data-uid="${u.id}" style="color:${esc(u.color)}">${esc(u.username)}</b> ${SYS[m.sys] || ""}<time title="${esc(fmtFull(m.ts))}">${fmtStamp(m.ts)}</time></span></div>`;
+    return `<div class="msg sys${isNew ? " new" : ""}" data-id="${m.id}">${ic("arrowRight")}<span><b data-act="profile" data-uid="${u.id}" style="color:${esc(u.color)}">${esc(u.username)}</b> ${m.sys === "gname" && m.t ? `mudou o nome do grupo para <b>${esc(m.t)}</b>.` : SYS[m.sys] || ""}<time title="${esc(fmtFull(m.ts))}">${fmtStamp(m.ts)}</time></span></div>`;
   }
   const u = user(m.a), s = srv(), mine = S.me && m.a === S.me.id;
   const cont = prev && !prev.sys && prev.a === m.a && !m.re && m.ts - prev.ts < 420000 && sameDay(prev.ts, m.ts);
@@ -622,14 +725,15 @@ function msgHTML(m, prev, isNew) {
   let h = `<div class="${cls}" data-id="${esc(m.id)}">`;
   if (m.re) {
     const ru = user(m.re.a);
-    h += `<div class="msg-reply" data-act="jump-to" data-ref="${esc(m.re.id)}">${avatar(ru, 16)}<b style="color:${esc(ru.color)}">@${esc(ru.username)}</b><span>${esc(m.re.t.replace(/\n/g, " "))}</span></div>`;
+    h += `<div class="msg-reply" data-act="jump-to" data-ref="${esc(m.re.id)}">${avatar(ru, 16)}<b style="color:${esc(ru.color)}">@${esc(ru.username)}</b><span>${esc((m.re.t || "📎 Anexo").replace(/\n/g, " "))}</span></div>`;
   }
   h += cont ? `<time class="msg-side-time" title="${esc(fmtFull(m.ts))}">${fmtTime(m.ts)}</time>` : avatar(u, 40, false, `data-act="profile" data-uid="${esc(u.id)}"`);
   h += `<div class="msg-body">`;
   if (!cont) {
-    h += `<div class="msg-head"><span class="msg-author" data-act="profile" data-uid="${esc(u.id)}" style="color:${esc(u.color)}">${esc(u.username)}</span>${s && s.ownerId === u.id ? `<span class="owner-tag" data-tip="Dono do servidor">${ic("crown")}</span>` : ""}<time title="${esc(fmtFull(m.ts))}">${fmtStamp(m.ts)}</time></div>`;
+    h += `<div class="msg-head"><span class="msg-author" data-act="profile" data-uid="${esc(u.id)}" style="color:${esc(u.color)}">${nameHTML(u)}</span>${s && s.ownerId === u.id ? `<span class="owner-tag" data-tip="Dono do servidor">${ic("crown")}</span>` : ""}<time title="${esc(fmtFull(m.ts))}">${fmtStamp(m.ts)}</time></div>`;
   }
   h += `<div class="msg-text${jumbo ? " jumbo" : ""}">${html}${m.e ? `<span class="edited" title="${esc(fmtFull(m.e))}">(editado)</span>` : ""}</div>`;
+  h += filesHTML(m);
   h += images.map(src => `<img class="msg-img" src="${esc(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-act="lightbox">`).join("");
   if (m.r && Object.keys(m.r).length) {
     h += `<div class="reactions">${Object.entries(m.r).map(([e, ids]) => `<button class="react${ids.includes(S.me.id) ? " on" : ""}" data-act="react-toggle" data-emoji="${esc(e)}" data-tip="${esc(ids.slice(0, 10).map(id => user(id).username).join(", ") + (ids.length > 10 ? "…" : ""))}"><span>${esc(e)}</span><b>${ids.length}</b></button>`).join("")}<button class="react add" data-act="react" data-tip="Adicionar reação">${ic("smile")}</button></div>`;
@@ -646,7 +750,8 @@ function renderMessages(toBottom) {
   if (!c) return;
   const b = S.msgs.get(c.id), list = b ? b.list : [];
   let h = "";
-  if (b && !b.more && c.dm) { const u = user(c.userId); h += `<div class="chan-intro">${avatar(u, 76)}<h2 style="margin-top:12px">${esc(u.username)}</h2><p>Este é o começo da sua conversa privada com <b>@${esc(u.username)}</b>. Só vocês dois veem estas mensagens.</p></div>`; }
+  if (b && !b.more && c.group) h += `<div class="chan-intro">${groupAvatar(c, 76)}<h2 style="margin-top:12px">${esc(groupTitle(c))}</h2><p>Bem-vindos ao começo do grupo. Só quem está aqui vê estas mensagens.</p></div>`;
+  else if (b && !b.more && c.dm) { const u = user(c.userId); h += `<div class="chan-intro">${avatar(u, 76)}<h2 style="margin-top:12px">${esc(u.username)}</h2><p>Este é o começo da sua conversa privada com <b>@${esc(u.username)}</b>. Só vocês dois veem estas mensagens.</p></div>`; }
   else if (b && !b.more) h += `<div class="chan-intro"><div class="big">${ic("hash")}</div><h2>Bem-vindo(a) a #${esc(c.name)}!</h2><p>Este é o começo do canal #${esc(c.name)}.${c.topic ? " " + esc(c.topic) : ""}</p></div>`;
   else if (b && b.more) h += `<div class="skeleton"><i style="width:40px;height:40px;border-radius:50%;flex:none"></i><div style="flex:1;display:grid;gap:8px"><i style="width:120px;height:12px"></i><i style="width:60%;height:12px"></i></div></div>`;
   let prev = null, marked = false;
@@ -694,21 +799,93 @@ function maybeRead() {
   if (S.view === "chat" && S.channelId && document.hasFocus() && atBottom()) markRead(S.channelId);
 }
 
+/* ---------- anexos (enviar arquivos) ---------- */
+const fmtSize = n => (n < 1024 ? n + " B" : n < 1048576 ? Math.round(n / 1024) + " KB" : (n / 1048576).toFixed(1) + " MB");
+S.uploads = [];
+function fileHref(f) { return `/f/${f.id}/${encodeURIComponent(f.n).replace(/%20/g, "+")}`; }
+function filesHTML(m) {
+  if (!m.f || !m.f.length) return "";
+  return `<div class="atts">${m.f.map(f => {
+    const url = esc(fileHref(f));
+    if (/^image\/(png|jpeg|gif|webp|avif)$/.test(f.t)) return `<img class="msg-img" src="${url}" alt="${esc(f.n)}" loading="lazy" decoding="async" data-act="lightbox">`;
+    if (/^video\/(mp4|webm|ogg)$/.test(f.t)) return `<video class="msg-video" src="${url}" controls preload="metadata" playsinline></video>`;
+    if (/^audio\//.test(f.t)) return `<div class="att-audio">${ic("music")}<div><b>${esc(f.n)}</b><audio src="${url}" controls preload="none"></audio></div></div>`;
+    return `<a class="att-file" href="${url}" download="${esc(f.n)}">${ic("file", "lg")}<span><b>${esc(f.n)}</b><small>${fmtSize(f.s)}</small></span>${ic("download")}</a>`;
+  }).join("")}</div>`;
+}
+function addFiles(list) {
+  if (LOCAL) { toast("Enviar arquivos funciona na versão online do NEXORA.", "warn"); return; }
+  if (S.view !== "chat" || !S.channelId) return;
+  for (const f of [...list]) {
+    if (S.uploads.filter(u => u.cid === S.channelId).length >= 10) { toast("No máximo 10 arquivos por mensagem.", "warn"); break; }
+    if (f.size > 8 * 1024 * 1024) { toast(`"${f.name}" passa de 8 MB.`, "warn"); continue; }
+    const up = { key: Math.random().toString(36).slice(2), file: f, name: f.name || "imagem.png", size: f.size, type: f.type || "application/octet-stream", progress: 0, cid: S.channelId };
+    if (/^image\//.test(up.type)) up.preview = URL.createObjectURL(f);
+    S.uploads.push(up);
+    startUpload(up);
+  }
+  renderTray();
+  $("#input").focus();
+}
+function startUpload(up) {
+  const xhr = new XMLHttpRequest();
+  up.xhr = xhr;
+  xhr.open("POST", "/api/upload");
+  xhr.setRequestHeader("authorization", "Bearer " + S.token);
+  xhr.setRequestHeader("x-file-name", encodeURIComponent(up.name));
+  xhr.setRequestHeader("content-type", up.type);
+  xhr.upload.onprogress = e => { if (e.lengthComputable) { up.progress = e.loaded / e.total; updTrayItem(up); } };
+  xhr.onload = () => {
+    let j = {};
+    try { j = JSON.parse(xhr.responseText); } catch {}
+    if (xhr.status === 200 && j.id) { up.id = j.id; up.progress = 1; }
+    else { up.error = j.error || "Falha no envio"; toast(up.error, "error"); }
+    renderTray();
+  };
+  xhr.onerror = () => { up.error = "Falha na conexão"; renderTray(); };
+  xhr.send(up.file);
+}
+function renderTray() {
+  const tray = $("#uploadTray");
+  const list = S.uploads.filter(u => u.cid === S.channelId);
+  tray.classList.toggle("hidden", !list.length);
+  tray.innerHTML = list.map(u => `<div class="up${u.error ? " err" : ""}${u.id ? " done" : ""}" data-key="${u.key}">${u.preview ? `<img src="${u.preview}" alt="">` : `<span class="up-ic">${ic("file")}</span>`}<div class="up-info"><b>${esc(u.name)}</b><small>${u.error ? esc(u.error) : u.id ? fmtSize(u.size) : "Enviando… " + Math.round(u.progress * 100) + "%"}</small><i style="transform:scaleX(${u.progress})"></i></div><button type="button" class="icon-btn" data-act="up-remove" data-key="${u.key}" data-tip="Remover">${ic("x", "sm")}</button></div>`).join("");
+}
+function updTrayItem(up) {
+  const el = $(`#uploadTray [data-key="${up.key}"]`);
+  if (!el) return;
+  el.querySelector("small").textContent = "Enviando… " + Math.round(up.progress * 100) + "%";
+  el.querySelector("i").style.transform = `scaleX(${up.progress})`;
+}
+function removeUpload(key) {
+  const i = S.uploads.findIndex(u => u.key === key);
+  if (i < 0) return;
+  const u = S.uploads[i];
+  try { if (u.xhr && u.xhr.readyState !== 4) u.xhr.abort(); } catch {}
+  if (u.preview) setTimeout(() => URL.revokeObjectURL(u.preview), 5000);
+  S.uploads.splice(i, 1);
+  renderTray();
+}
+
 async function sendMessage() {
   const input = $("#input"), text = input.value.trim(), cid = S.channelId;
-  if (!text || !cid) return;
+  const ups = S.uploads.filter(u => u.cid === cid && !u.error);
+  if ((!text && !ups.length) || !cid) return;
+  if (ups.some(u => !u.id)) { toast("Espere os arquivos terminarem de enviar.", "warn"); return; }
   if (text.length > 2000) { toast("Mensagem muito longa (máximo de 2000 caracteres).", "warn"); return; }
   const b = S.msgs.get(cid);
   if (!b || !b.loaded) return;
   const nonce = Math.random().toString(36).slice(2, 12);
   const re = S.replyTo;
   const m = { id: "tmp-" + nonce, a: S.me.id, t: text, ts: Date.now(), nonce, pending: true };
+  if (ups.length) { m.f = ups.map(u => ({ id: u.id, n: u.name, t: u.type, s: u.size })); for (const u of ups) removeUpload(u.key); }
+  const fileIds = ups.map(u => u.id);
   if (re) m.re = { id: re.id, a: re.a, t: re.t.slice(0, 140) };
   input.value = ""; S.drafts[cid] = ""; autoGrow(); cancelReply(); closeMention();
   if (S.newMarker) { S.newMarker = null; $("#msgList .new-line")?.remove(); }
   b.list.push(m);
   appendMsg(m);
-  const r = await emit("send", { channelId: cid, text, replyTo: re ? re.id : undefined, nonce });
+  const r = await emit("send", { channelId: cid, text, replyTo: re ? re.id : undefined, nonce, files: fileIds });
   if (r.error) {
     const i = b.list.indexOf(m);
     if (i >= 0) b.list.splice(i, 1);
@@ -802,7 +979,7 @@ function computeMention() {
   const ta = $("#input"), s = srv(), c = chan();
   const before = ta.value.slice(0, ta.selectionStart);
   const m = before.match(/(^|\s)@([\p{L}\p{N}_.-]{0,24})$/u);
-  const members = s ? s.members : c && c.dm ? [S.me.id, c.userId] : null;
+  const members = s ? s.members : c && c.group ? c.members : c && c.dm ? [S.me.id, c.userId] : null;
   if (!m || !members) { closeMention(); return; }
   const q = m[2].toLowerCase();
   const list = members.map(user).filter(u => u.username.toLowerCase().startsWith(q))
@@ -1226,10 +1403,17 @@ function connect() {
     if (state === "friend" && prev === "out") toast(`${user(userId).username} aceitou seu pedido! 🎉`, "ok");
     schedule("rail", "side", "home", "top", "title");
   });
-  sock.on("dm:add", ({ dm, user: u }) => {
+  sock.on("dm:add", ({ dm, user: u, users }) => {
     if (u) S.users.set(u.id, u);
-    if (!S.dms.has(dm.id)) S.dms.set(dm.id, dm);
-    schedule("side");
+    for (const x of users || []) if (!S.me || x.id !== S.me.id) S.users.set(x.id, x);
+    const old = S.dms.get(dm.id);
+    if (old) Object.assign(old, dm); else S.dms.set(dm.id, dm);
+    schedule("side", "top", "members");
+    if (S.view === "chat" && S.channelId === dm.id) $("#input").placeholder = `Mensagem para ${dmTitle(chan(dm.id))}`;
+  });
+  sock.on("dm:remove", ({ id }) => {
+    S.dms.delete(id); S.msgs.delete(id); S.mentions.delete(id);
+    if (S.channelId === id) goFriends(); else schedule("side", "rail");
   });
   sock.on("user:update", ({ user: u, statusPref }) => {
     S.users.set(u.id, u);
@@ -1318,6 +1502,10 @@ function connect() {
   sock.on("voice:state", onVoiceState);
   sock.on("voice:leave", onVoiceLeave);
   sock.on("voice:signal", onSignal);
+  sock.on("act", onAct);
+  sock.on("act:sum", ({ channelId, type }) => { if (type) S.acts.set(channelId, type); else S.acts.delete(channelId); schedule("side"); });
+  sock.on("act:ev", ev => { if (V.actEl && V.actEl._onEv) V.actEl._onEv(ev); });
+  sock.on("call:fx", onCallFx);
   sock.on("voice:kicked", ({ reason } = {}) => { teardownVoice(); if (reason) toast(reason, "warn", 5000); renderAll(); });
 }
 
@@ -1333,6 +1521,8 @@ function onReady(d) {
   S.friends = new Map(Object.entries(d.friends || {}));
   S.dms = new Map((d.dms || []).map(x => [x.id, x]));
   S.steamAuto = !!d.steamAuto;
+  S.acts = new Map((d.acts || []).map(a => [a.channelId, a.type]));
+  if (d.now) S.clockOff = d.now - Date.now();
   S.msgs.clear();
   for (const id of S.mentions.keys()) if (!chan(id)) S.mentions.delete(id);
   const first = !S.ready;
@@ -1389,7 +1579,7 @@ function notify(m, s, c) {
   if (document.hasFocus() && S.channelId === c.id) return;
   const u = user(m.a);
   try {
-    const n = new Notification(c.dm ? `${u.username} (privado)` : `${u.username} em #${c.name} (${s.name})`, { body: m.t.slice(0, 160), tag: c.id, silent: true });
+    const n = new Notification(c.group ? `${u.username} em ${groupTitle(c)}` : c.dm ? `${u.username} (privado)` : `${u.username} em #${c.name} (${s.name})`, { body: m.t.slice(0, 160), tag: c.id, silent: true });
     n.onclick = () => { window.focus(); openChannel(c.id); n.close(); };
   } catch {}
 }
@@ -1429,15 +1619,52 @@ function sfx(kind) {
 /* ------------------------------------------------------------------ */
 function sig(to, data) { if (S.socket) S.socket.emit("voice:signal", { to, data }); }
 
-async function getMic() {
+// Supressão de ruído: "ai" (RNNoise + portão inteligente), "browser" (a do navegador) ou "off"
+const nsMode = () => (S.settings.nsMode || (S.settings.noise === false ? "off" : "ai"));
+async function getRawMic() {
   const st = S.settings;
-  const base = { echoCancellation: st.echo, noiseSuppression: st.noise, autoGainControl: st.agc, channelCount: 1, sampleRate: 48000 };
+  const base = { echoCancellation: st.echo, noiseSuppression: nsMode() === "browser", autoGainControl: st.agc, channelCount: 1, sampleRate: 48000 };
   try {
     return await navigator.mediaDevices.getUserMedia({ audio: st.inputId ? { ...base, deviceId: { exact: st.inputId } } : base, video: false });
   } catch (e) {
     if (st.inputId && (e.name === "OverconstrainedError" || e.name === "NotFoundError")) return navigator.mediaDevices.getUserMedia({ audio: base, video: false });
     throw e;
   }
+}
+let nsWasm = null, nsWarned = false;
+async function buildNoiseChain(raw) {
+  if (!window.AudioWorkletNode || location.protocol === "file:") throw new Error("sem AudioWorklet");
+  const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000, latencyHint: "interactive" });
+  try {
+    if (!nsWasm) nsWasm = await fetch("/vendor/rnnoise/rnnoise.wasm").then(r => { if (!r.ok) throw new Error("wasm"); return r.arrayBuffer(); });
+    await ctx.audioWorklet.addModule("/noise-worklet.js");
+    const src = ctx.createMediaStreamSource(raw);
+    const hp = ctx.createBiquadFilter();
+    hp.type = "highpass"; hp.frequency.value = 80;           // corta ronco e vibração da mesa
+    const node = new AudioWorkletNode(ctx, "nexora-noise", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1], processorOptions: { wasm: nsWasm.slice(0), gate: S.settings.nsGate !== false } });
+    const dest = ctx.createMediaStreamDestination();
+    src.connect(hp).connect(node).connect(dest);
+    if (ctx.state === "suspended") await ctx.resume().catch(() => {});
+    const out = dest.stream;
+    out._raw = raw; out._ctx = ctx; out._node = node;
+    return out;
+  } catch (e) { ctx.close().catch(() => {}); throw e; }
+}
+async function getMic() {
+  const raw = await getRawMic();
+  if (nsMode() !== "ai") return raw;
+  try { return await buildNoiseChain(raw); }
+  catch (e) {
+    console.warn("[ruído] IA indisponível, usando o microfone normal:", e);
+    if (!nsWarned) { nsWarned = true; toast("Supressão de ruído com IA indisponível neste navegador — usando a padrão.", "warn"); }
+    return raw;
+  }
+}
+function stopMic(s) {
+  if (!s) return;
+  s.getTracks().forEach(t => t.stop());
+  if (s._raw) s._raw.getTracks().forEach(t => t.stop());
+  if (s._ctx) s._ctx.close().catch(() => {});
 }
 function ensureCtx() {
   if (!V.ctx) {
@@ -1497,6 +1724,9 @@ async function joinVoice(cid) {
     if (r.error) throw new Error(r.error);
     V.channelId = cid; V.serverId = s.id;
     S.ice = r.iceServers || S.ice;
+    if (r.now) S.clockOff = r.now - Date.now();
+    destroyAct();
+    V.act = r.act && r.act.type ? r.act : null;
     applyMic();
     if (V.mic) attachMeter(S.me.id, V.mic);
     for (const p of r.peers) createPeer(p.sock, p.userId, true);
@@ -1505,7 +1735,7 @@ async function joinVoice(cid) {
     sfx("join");
   } catch (e) {
     toast(e.message || "Não foi possível entrar na sala.", "error");
-    if (!V.channelId && V.mic) { V.mic.getTracks().forEach(t => t.stop()); V.mic = null; }
+    if (!V.channelId && V.mic) { stopMic(V.mic); V.mic = null; }
   } finally {
     V.joining = false;
     renderAll();
@@ -1519,6 +1749,8 @@ function leaveVoice() {
   sfx("leave");
 }
 function teardownVoice(silent, keepMic) {
+  V.act = null;
+  destroyAct();
   if (V.controlling) stopControlling();
   for (const sock of [...V.granted.keys()]) endGrant(sock);
   for (const p of [...V.peers.values()]) closePeer(p);
@@ -1529,7 +1761,7 @@ function teardownVoice(silent, keepMic) {
   for (const uid of [...V.speaking]) setSpeaking(uid, false);
   clearInterval(V.loop); V.loop = null;
   clearInterval(V.statsTimer); V.statsTimer = null;
-  if (!keepMic && V.mic) { V.mic.getTracks().forEach(t => t.stop()); V.mic = null; }
+  if (!keepMic && V.mic) { stopMic(V.mic); V.mic = null; }
   if (!keepMic && V.ctx && V.ctx.state === "running") V.ctx.suspend();
   V.watching.clear(); V.viewers.clear(); V.focus = null; V.ping = null;
   if (S.me && V.channelId) { const st = S.voice.get(S.me.id); if (st && st.channelId === V.channelId) S.voice.delete(S.me.id); }
@@ -1681,7 +1913,7 @@ async function refreshMic() {
     if (p.senders.mic) await p.senders.mic.replaceTrack(t).catch(() => {});
     else p.senders.mic = p.pc.addTrack(t, s);
   }
-  if (old) old.getTracks().forEach(x => x.stop());
+  if (old) stopMic(old);
   attachMeter(S.me.id, s);
   emit("voice:update", { muted: S.muted || S.deaf });
 }
@@ -2244,9 +2476,12 @@ function renderStage() {
   if (!root.querySelector(".stage")) root.innerHTML = `<div class="stage"><div class="stage-grid" id="stageGrid"></div><div class="stage-bar" id="stageBar"></div></div>`;
   const grid = $("#stageGrid");
   const tiles = stageTiles(c.id);
-  if (V.focus && !tiles.some(t => t.key === V.focus)) V.focus = null;
+  if (V.focus && V.focus !== "__act" && !tiles.some(t => t.key === V.focus)) V.focus = null;
+  if (V.act && !V.focus) V.focus = "__act";
+  if (!V.act && V.focus === "__act") V.focus = null;
   grid.classList.toggle("focus", !!V.focus);
   const existing = new Map($$(".tile", grid).map(el => [el.dataset.key, el]));
+  existing.delete("__act");
   const els = tiles.map(t => {
     let el = existing.get(t.key);
     existing.delete(t.key);
@@ -2254,6 +2489,7 @@ function renderStage() {
     updateTile(el, t);
     return el;
   });
+  if (V.act) els.unshift(actElement());
   existing.forEach(el => { const v = el.querySelector("video"); if (v) v.srcObject = null; el.remove(); });
   let strip = grid.querySelector(":scope > .strip");
   if (V.focus) {
@@ -2269,7 +2505,377 @@ function renderStage() {
     els.forEach((e, i) => { if (grid.children[i] !== e) grid.insertBefore(e, grid.children[i] || null); });
   }
   const micOff = S.muted || S.deaf;
-  $("#stageBar").innerHTML = `<button class="ctl${micOff ? " off" : ""}" data-act="mute" data-tip="${micOff ? "Ativar microfone" : "Silenciar"}">${ic(micOff ? "micOff" : "mic")}</button><button class="ctl${S.deaf ? " off" : ""}" data-act="deafen" data-tip="${S.deaf ? "Ativar áudio" : "Desativar áudio"}">${ic(S.deaf ? "headOff" : "headphones")}</button><button class="ctl${V.cam ? " on" : ""}" data-act="cam" data-tip="${V.cam ? "Desligar câmera" : "Ligar câmera"}">${ic(V.cam ? "camera" : "cameraOff")}</button><button class="ctl${V.screen ? " on" : ""}" data-act="share" data-tip="${V.screen ? "Opções da transmissão" : "Transmitir tela"}">${ic("monitorUp")}</button><button class="ctl red" data-act="voice-leave" data-tip="Desconectar">${ic("phoneOff")}</button>`;
+  $("#stageBar").innerHTML = `<button class="ctl${micOff ? " off" : ""}" data-act="mute" data-tip="${micOff ? "Ativar microfone" : "Silenciar"}">${ic(micOff ? "micOff" : "mic")}</button><button class="ctl${S.deaf ? " off" : ""}" data-act="deafen" data-tip="${S.deaf ? "Ativar áudio" : "Desativar áudio"}">${ic(S.deaf ? "headOff" : "headphones")}</button><button class="ctl${V.cam ? " on" : ""}" data-act="cam" data-tip="${V.cam ? "Desligar câmera" : "Ligar câmera"}">${ic(V.cam ? "camera" : "cameraOff")}</button><button class="ctl${V.screen ? " on" : ""}" data-act="share" data-tip="${V.screen ? "Opções da transmissão" : "Transmitir tela"}">${ic("monitorUp")}</button><span class="ctl-sep"></span><button class="ctl${V.act ? " on" : ""}" data-act="act-menu" data-tip="Atividades: música, lousa, jogos">${ic("rocket")}</button><button class="ctl" data-act="sound-menu" data-tip="Sons para todos">${ic("speaker")}</button><button class="ctl" data-act="react-menu" data-tip="Reações">${ic("smile")}</button><span class="ctl-sep"></span><button class="ctl red" data-act="voice-leave" data-tip="Desconectar">${ic("phoneOff")}</button>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Atividades na call: Ouvir juntos (YouTube), Lousa, Jogo da velha,   */
+/* sons para todos e reações voando na tela                            */
+/* ------------------------------------------------------------------ */
+const ACT_NAMES = { yt: "🎵 Ouvir juntos", board: "🎨 a Lousa", ttt: "❌⭕ Jogo da velha" };
+const nowServer = () => Date.now() + (S.clockOff || 0);
+function startActivity(type) {
+  if (!V.channelId) { toast("Entre numa sala de voz primeiro.", "warn"); return; }
+  emit("act:start", { type }).then(r => r.error && toast(r.error, "error"));
+}
+function actMenu(at) {
+  menu(at, [
+    { label: "Ouvir juntos (YouTube)", icon: "music", hint: "música e vídeo", run: () => startActivity("yt") },
+    { label: "Lousa", icon: "brush", hint: "desenhar junto", run: () => startActivity("board") },
+    { label: "Jogo da velha", icon: "grid3", hint: "2 jogadores", run: () => startActivity("ttt") },
+    V.act && "-",
+    V.act && { label: "Encerrar atividade", icon: "x", danger: true, run: () => emit("act:stop", {}) }
+  ]);
+}
+function actElement() {
+  const a = V.act;
+  let el = V.actEl;
+  if (!el || el._type !== a.type) {
+    destroyAct();
+    el = document.createElement("div");
+    el.className = "tile act-panel";
+    el.dataset.key = "__act";
+    el._type = a.type;
+    V.actEl = el;
+    ({ yt: mountYT, board: mountBoard, ttt: mountTTT })[a.type](el);
+  }
+  el.classList.toggle("big", V.focus === "__act");
+  return el;
+}
+function destroyAct() {
+  if (!V.actEl) return;
+  try { V.actEl._destroy && V.actEl._destroy(); } catch {}
+  V.actEl.remove();
+  V.actEl = null;
+}
+function onAct(a) {
+  if (!V.channelId || a.channelId !== V.channelId) return;
+  const prev = V.act && V.act.type;
+  V.act = a.type ? a : null;
+  if (!V.act) destroyAct();
+  else if (V.actEl && V.actEl._type === a.type && V.actEl._update) V.actEl._update(a);
+  if (a.type && a.type !== prev) { V.focus = "__act"; if (a.by !== S.me.id) toast(`${user(a.by).username} abriu ${ACT_NAMES[a.type]} na call!`, "info"); }
+  schedule("stage");
+}
+const isLeader = () => { const ids = [...S.voice.values()].filter(v => v.channelId === V.channelId).map(v => v.userId).sort(); return ids[0] === S.me.id; };
+const fmtSec = s => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+
+/* --- Ouvir juntos (YouTube sincronizado) --- */
+let ytApi = null;
+function loadYT() {
+  if (window.YT && window.YT.Player) return Promise.resolve();
+  if (ytApi) return ytApi;
+  ytApi = new Promise((res, rej) => {
+    const prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => { if (prev) try { prev(); } catch {} res(); };
+    const s = document.createElement("script");
+    s.src = "https://www.youtube.com/iframe_api";
+    s.onerror = () => { ytApi = null; rej(new Error("Não foi possível carregar o YouTube.")); };
+    document.head.append(s);
+  });
+  return ytApi;
+}
+function ytId(url) {
+  const s = String(url || "").trim();
+  const m = s.match(/(?:youtu\.be\/|[?&]v=|\/shorts\/|\/embed\/|\/live\/)([A-Za-z0-9_-]{11})/) || s.match(/^([A-Za-z0-9_-]{11})$/);
+  return m ? m[1] : "";
+}
+const ytPos = st => (st.pos || 0) + (st.playing ? (nowServer() - st.at) / 1000 : 0);
+function mountYT(el) {
+  el.innerHTML = `<div class="yt-wrap"><div class="yt-player"><div class="yt-frame"></div><div class="yt-empty">${ic("music", "lg")}<b>Ouvir juntos</b><small>Cole um link do YouTube aqui embaixo — música, clipe ou vídeo. Todo mundo na call ouve sincronizado.</small></div></div>
+    <div class="yt-bar"><button class="icon-btn" data-yt="toggle" data-tip="Tocar / pausar">${ic("play")}</button><button class="icon-btn" data-yt="skip" data-tip="Próxima">${ic("skip")}</button><span class="yt-time">0:00</span><input type="range" class="yt-seek" min="0" max="100" value="0" step="0.5"><span class="yt-dur">0:00</span><span data-tip="Volume (só para você)" style="display:grid">${ic("volume", "sm")}</span><input type="range" class="yt-vol" min="0" max="100" value="${store.get("ytVol", 70)}"></div>
+    <form class="yt-add"><input placeholder="Cole um link do YouTube para tocar ou pôr na fila…" spellcheck="false"><button class="btn sm primary">${ic("plus", "sm")}Adicionar</button></form>
+    <div class="yt-queue"></div></div>`;
+  let player = null, ready = false, lastVid = "", seeking = false;
+  const st = () => (V.act && V.act.type === "yt" ? V.act.state : null);
+  const push = s => emit("act:state", { state: s }).then(r => r.error && toast(r.error, "error"));
+  const next = () => { const s = st(); if (!s) return; const q = (s.queue || []).slice(); const vid = q.shift() || ""; push({ ...s, vid, queue: q, playing: !!vid, pos: 0 }); };
+  loadYT().then(() => {
+    player = new YT.Player(el.querySelector(".yt-frame"), {
+      width: "100%", height: "100%",
+      playerVars: { autoplay: 1, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, playsinline: 1, iv_load_policy: 3, origin: location.origin },
+      events: {
+        onReady: () => { ready = true; player.setVolume(+el.querySelector(".yt-vol").value); sync(); },
+        onStateChange: e => { if (e.data === 0 && isLeader()) next(); },
+        onError: () => { toast("Esse vídeo não pode tocar fora do YouTube. Pulando…", "warn"); if (isLeader()) next(); }
+      }
+    });
+  }).catch(e => toast(e.message, "error"));
+  function sync() {
+    const s = st();
+    if (!s) return;
+    el.querySelector(".yt-empty").classList.toggle("hidden", !!s.vid);
+    el.querySelector('[data-yt="toggle"]').innerHTML = ic(s.playing ? "pause" : "play");
+    const q = s.queue || [];
+    el.querySelector(".yt-queue").innerHTML = q.length ? `<span class="label">Na fila — ${q.length}</span><div class="yt-qs">${q.map((v, i) => `<div class="yt-q"><img src="https://i.ytimg.com/vi/${esc(v)}/mqdefault.jpg" alt="" referrerpolicy="no-referrer"><button class="icon-btn" data-yt-del="${i}" data-tip="Tirar da fila">${ic("x", "xs")}</button></div>`).join("")}</div>` : "";
+    if (!ready || !player) return;
+    if (!s.vid) { if (lastVid) { player.stopVideo(); lastVid = ""; } return; }
+    const want = ytPos(s);
+    if (s.vid !== lastVid) {
+      lastVid = s.vid;
+      player.loadVideoById({ videoId: s.vid, startSeconds: want });
+      if (!s.playing) setTimeout(() => player.pauseVideo(), 400);
+      return;
+    }
+    if (Math.abs((player.getCurrentTime() || 0) - want) > 1.5) player.seekTo(want, true);
+    const ps = player.getPlayerState();
+    if (s.playing && ps !== 1 && ps !== 3) player.playVideo();
+    if (!s.playing && ps === 1) player.pauseVideo();
+  }
+  const timer = setInterval(() => {
+    if (!player || !ready) return;
+    if (S.deaf) player.mute(); else player.unMute();
+    const s = st();
+    const dur = player.getDuration ? player.getDuration() || 0 : 0, cur = s && s.vid ? ytPos(s) : 0;
+    const seek = el.querySelector(".yt-seek");
+    if (!seeking) { seek.max = Math.max(1, dur); seek.value = Math.min(cur, dur || cur); }
+    el.querySelector(".yt-time").textContent = fmtSec(cur);
+    el.querySelector(".yt-dur").textContent = fmtSec(dur);
+  }, 500);
+  const drift = setInterval(sync, 4000);
+  el.addEventListener("click", e => {
+    const b = e.target.closest("[data-yt]"), del = e.target.closest("[data-yt-del]");
+    const s = st();
+    if (!s) return;
+    if (del) { const q = (s.queue || []).slice(); q.splice(+del.dataset.ytDel, 1); push({ ...s, pos: ytPos(s), queue: q }); return; }
+    if (!b) return;
+    if (b.dataset.yt === "toggle" && s.vid) push({ ...s, playing: !s.playing, pos: ytPos(s) });
+    if (b.dataset.yt === "skip") next();
+  });
+  const seek = el.querySelector(".yt-seek");
+  seek.addEventListener("input", () => { seeking = true; });
+  seek.addEventListener("change", () => { seeking = false; const s = st(); if (s && s.vid) push({ ...s, pos: +seek.value }); });
+  el.querySelector(".yt-vol").addEventListener("input", e => { store.set("ytVol", +e.target.value); if (player && ready) player.setVolume(+e.target.value); });
+  el.querySelector(".yt-add").addEventListener("submit", e => {
+    e.preventDefault();
+    const inp = e.target.querySelector("input"), id = ytId(inp.value), s = st();
+    if (!id) { toast("Cole um link válido do YouTube.", "warn"); return; }
+    if (!s) return;
+    inp.value = "";
+    if (!s.vid) push({ ...s, vid: id, pos: 0, playing: true });
+    else { push({ ...s, pos: ytPos(s), queue: [...(s.queue || []), id].slice(0, 50) }); toast("Adicionado à fila. 🎵", "ok"); }
+  });
+  el._update = () => sync();
+  el._destroy = () => { clearInterval(timer); clearInterval(drift); try { if (player) player.destroy(); } catch {} };
+}
+
+/* --- Lousa para desenhar junto --- */
+const BOARD_COLORS = ["#ffffff", "#f87171", "#fbbf24", "#34d399", "#22d3ee", "#7c5cff", "#f472b6", "#111111"];
+const BOARD_BG = "#151826";
+function mountBoard(el) {
+  let color = store.get("boardColor", "#ffffff"), size = store.get("boardSize", 6), eraser = false;
+  el.innerHTML = `<div class="board"><div class="board-area"><canvas width="1600" height="900"></canvas></div><div class="board-tools">${BOARD_COLORS.map(c => `<button class="bcol" style="--c:${c}" data-col="${c}" data-tip="Cor"></button>`).join("")}<input type="range" min="2" max="40" value="${size}" class="bsize" data-tip="Espessura"><button class="icon-btn" data-bt="eraser" data-tip="Borracha">${ic("x")}</button><span class="ctl-sep"></span><button class="btn sm" data-bt="clear">Limpar</button><button class="btn sm" data-bt="save">${ic("download", "sm")}Salvar</button></div></div>`;
+  const cv = el.querySelector("canvas"), g = cv.getContext("2d");
+  const W = cv.width, H = cv.height;
+  const clear = () => { g.fillStyle = BOARD_BG; g.fillRect(0, 0, W, H); };
+  const drawSeg = s => {
+    const p = s.p;
+    if (!p || p.length < 2) return;
+    g.strokeStyle = s.e ? BOARD_BG : s.c;
+    g.lineWidth = s.w * (W / 1000);
+    g.lineCap = "round"; g.lineJoin = "round";
+    g.beginPath();
+    g.moveTo(p[0] * W, p[1] * H);
+    if (p.length === 2) g.lineTo(p[0] * W + 0.1, p[1] * H);
+    for (let i = 2; i < p.length; i += 2) g.lineTo(p[i] * W, p[i + 1] * H);
+    g.stroke();
+  };
+  const tools = () => {
+    $$(".bcol", el).forEach(b => b.classList.toggle("on", !eraser && b.dataset.col === color));
+    el.querySelector('[data-bt="eraser"]').classList.toggle("on", eraser);
+  };
+  clear();
+  for (const s of (V.act && V.act.strokes) || []) drawSeg(s);
+  tools();
+  let drawing = null, buf = [], last = null, flushT = 0;
+  const pt = e => { const r = cv.getBoundingClientRect(); return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))]; };
+  const flush = () => {
+    flushT = 0;
+    if (buf.length < 2) return;
+    const seg = { k: "seg", id: drawing, c: color, w: size, e: eraser, p: buf.map(v => Math.round(v * 10000) / 10000) };
+    if (S.socket) S.socket.emit("act:ev", seg);
+    buf = buf.slice(-2);
+  };
+  cv.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    cv.setPointerCapture(e.pointerId);
+    drawing = Math.random().toString(36).slice(2, 10);
+    last = pt(e);
+    buf = [...last];
+    drawSeg({ c: color, w: size, e: eraser, p: buf });
+  });
+  cv.addEventListener("pointermove", e => {
+    if (!drawing) return;
+    const p = pt(e);
+    drawSeg({ c: color, w: size, e: eraser, p: [...last, ...p] });
+    last = p;
+    buf.push(...p);
+    if (buf.length > 380) flush();
+    else if (!flushT) flushT = setTimeout(flush, 45);
+  });
+  const end = () => { if (!drawing) return; clearTimeout(flushT); flush(); drawing = null; buf = []; };
+  cv.addEventListener("pointerup", end);
+  cv.addEventListener("pointercancel", end);
+  el.addEventListener("click", e => {
+    const c = e.target.closest("[data-col]");
+    if (c) { color = c.dataset.col; eraser = false; store.set("boardColor", color); tools(); return; }
+    const b = e.target.closest("[data-bt]");
+    if (!b) return;
+    if (b.dataset.bt === "eraser") { eraser = !eraser; tools(); }
+    if (b.dataset.bt === "clear") { clear(); if (S.socket) S.socket.emit("act:ev", { k: "clear" }); }
+    if (b.dataset.bt === "save") { const a = document.createElement("a"); a.href = cv.toDataURL("image/png"); a.download = "lousa-nexora.png"; a.click(); }
+  });
+  el.querySelector(".bsize").addEventListener("input", e => { size = +e.target.value; store.set("boardSize", size); });
+  el._onEv = ev => { if (ev.k === "clear") clear(); else drawSeg(ev); };
+}
+
+/* --- Jogo da velha --- */
+const TTT_LINES = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
+function tttWinner(b) {
+  for (const [a, c, d] of TTT_LINES) if (b[a] && b[a] === b[c] && b[a] === b[d]) return { w: b[a], line: [a, c, d] };
+  return b.every(Boolean) ? { w: "draw", line: [] } : null;
+}
+function mountTTT(el) {
+  const st = () => (V.act && V.act.type === "ttt" ? V.act.state : null);
+  const push = s => emit("act:state", { state: s }).then(r => r.error && toast(r.error, "error"));
+  let lastWin = "";
+  const draw = () => {
+    const s = st();
+    if (!s) return;
+    const mine = s.x === S.me.id ? "X" : s.o === S.me.id ? "O" : "";
+    const res = tttWinner(s.b);
+    const who = m => (m === "X" ? s.x : s.o);
+    const pl = m => who(m) ? `${avatar(user(who(m)), 26)}<b>${esc(user(who(m)).username)}</b>` : `<button class="btn sm" data-join="${m}">Jogar como ${m}</button>`;
+    const status = res ? (res.w === "draw" ? "Deu velha! 🤝" : `${esc(user(who(res.w)).username || res.w)} venceu! 🏆`) : !s.x || !s.o ? "Esperando jogadores…" : `Vez de ${esc(user(who(s.turn)).username)} (${s.turn})`;
+    el.innerHTML = `<div class="ttt"><div class="ttt-players"><div class="tp${s.turn === "X" && !res ? " on" : ""}"><span class="mark x">X</span>${pl("X")}<em>${s.score.X}</em></div><div class="tp${s.turn === "O" && !res ? " on" : ""}"><span class="mark o">O</span>${pl("O")}<em>${s.score.O}</em></div></div>
+      <div class="ttt-board">${s.b.map((v, i) => `<button class="cell${v ? " " + v.toLowerCase() : ""}${res && res.line.includes(i) ? " win" : ""}" data-cell="${i}" ${v || res || mine !== s.turn || !s.x || !s.o ? "disabled" : ""}>${v}</button>`).join("")}</div>
+      <div class="ttt-status">${status}</div>${res ? `<button class="btn primary sm" data-again>Nova rodada</button>` : ""}${mine ? `<button class="btn ghost sm" data-quit>Sair do jogo</button>` : ""}</div>`;
+    const key = res ? res.w + s.b.join("") : "";
+    if (res && key !== lastWin) { lastWin = key; if (res.w !== "draw" && who(res.w) === S.me.id) confetti(); sfx(res.w === "draw" ? "unlive" : "live"); }
+  };
+  el.addEventListener("click", e => {
+    const s = st();
+    if (!s) return;
+    const j = e.target.closest("[data-join]");
+    if (j) { const k = j.dataset.join.toLowerCase(); if (s.x === S.me.id || s.o === S.me.id) return; push({ ...s, [k]: S.me.id }); return; }
+    const c = e.target.closest("[data-cell]");
+    if (c) {
+      const mine = s.x === S.me.id ? "X" : s.o === S.me.id ? "O" : "";
+      const i = +c.dataset.cell;
+      if (!mine || s.turn !== mine || !s.x || !s.o || s.b[i] || tttWinner(s.b)) return;
+      const b = s.b.slice(); b[i] = mine;
+      const res = tttWinner(b), score = { ...s.score };
+      if (res && res.w !== "draw") score[res.w]++;
+      push({ ...s, b, turn: mine === "X" ? "O" : "X", score });
+      return;
+    }
+    if (e.target.closest("[data-again]")) push({ ...s, b: Array(9).fill(""), turn: tttWinner(s.b)?.w === "X" ? "O" : "X" });
+    if (e.target.closest("[data-quit]")) push({ ...s, x: s.x === S.me.id ? "" : s.x, o: s.o === S.me.id ? "" : s.o, b: Array(9).fill(""), turn: "X" });
+  });
+  draw();
+  el._update = draw;
+}
+
+/* --- sons para todos (gerados na hora, sem baixar nada) --- */
+const SOUNDS = { buzina: "📯 Buzina", palmas: "👏 Palmas", tada: "🎉 Tadã", badum: "🥁 Ba-dum-tss", erro: "❌ Errou!", grilo: "🦗 Grilos", suspense: "😱 Suspense", vitoria: "🏆 Vitória", sino: "🔔 Sino", boing: "🤪 Boing" };
+function synth() {
+  sfxCtx = sfxCtx || new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
+  if (sfxCtx.state === "suspended") sfxCtx.resume();
+  clearTimeout(sfxIdle);
+  sfxIdle = setTimeout(() => sfxCtx && sfxCtx.suspend(), 8000);
+  return sfxCtx;
+}
+function playSound(k) {
+  if (S.deaf || !SOUNDS[k]) return;
+  const c = synth(), t0 = c.currentTime + 0.02, out = c.createGain();
+  out.gain.value = 0.35;
+  out.connect(c.destination);
+  const tone = (f, t, d, type = "sine", v = 0.5, f2) => {
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    o.connect(g).connect(out); o.start(t); o.stop(t + d + 0.05);
+  };
+  const noise = (t, d, v = 0.5, fType = "highpass", freq = 1000) => {
+    const len = Math.ceil(c.sampleRate * d), b = c.createBuffer(1, len, c.sampleRate), ch = b.getChannelData(0);
+    for (let i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
+    const s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+    s.buffer = b; f.type = fType; f.frequency.value = freq;
+    g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    s.connect(f).connect(g).connect(out); s.start(t);
+  };
+  switch (k) {
+    case "buzina": for (const f of [415, 523, 622]) for (let i = 0; i < 3; i++) tone(f, t0 + i * 0.32, 0.28 + (i === 2 ? 0.5 : 0), "sawtooth", 0.18); break;
+    case "palmas": for (let i = 0; i < 18; i++) noise(t0 + i * 0.07 + Math.random() * 0.04, 0.09, 0.6, "bandpass", 1400 + Math.random() * 800); break;
+    case "tada": [523, 659, 784, 1047].forEach((f, i) => tone(f, t0 + i * 0.09, i === 3 ? 0.9 : 0.25, "triangle", 0.4)); break;
+    case "badum": tone(150, t0, 0.25, "sine", 0.9, 50); noise(t0 + 0.28, 0.18, 0.5, "bandpass", 1800); tone(120, t0 + 0.28, 0.2, "sine", 0.6, 60); noise(t0 + 0.62, 1.1, 0.35, "highpass", 6000); break;
+    case "erro": tone(300, t0, 0.25, "square", 0.25, 280); tone(220, t0 + 0.28, 0.5, "square", 0.25, 150); break;
+    case "grilo": for (let i = 0; i < 8; i++) for (let j = 0; j < 3; j++) tone(4200, t0 + i * 0.22 + j * 0.035, 0.03, "sine", 0.15); break;
+    case "suspense": tone(220, t0, 1.6, "sawtooth", 0.25, 110); tone(233, t0, 1.6, "sawtooth", 0.2, 116); break;
+    case "vitoria": [[523, 0], [523, 0.15], [523, 0.3], [659, 0.45], [784, 0.75], [659, 1.05], [784, 1.2]].forEach(([f, d], i) => tone(f, t0 + d, i === 6 ? 0.8 : 0.2, "square", 0.18)); break;
+    case "sino": for (const [f, v] of [[880, 0.4], [1760, 0.15], [2640, 0.08]]) tone(f, t0, 1.8, "sine", v); break;
+    case "boing": tone(180, t0, 0.5, "sine", 0.6, 600); tone(600, t0 + 0.5, 0.3, "sine", 0.4, 300); break;
+  }
+}
+function sendSound(k) {
+  playSound(k);
+  if (S.socket) S.socket.emit("call:fx", { k: "sound", v: k });
+  floatFx(SOUNDS[k].split(" ")[0], S.me.id);
+}
+function soundMenu(at) {
+  popover(at, `<span class="label">Sons para todos da call</span><div class="sound-grid">${Object.entries(SOUNDS).map(([k, n]) => `<button data-snd="${k}">${n}</button>`).join("")}</div>`, "emoji-pop", el => {
+    el.addEventListener("click", e => { const b = e.target.closest("[data-snd]"); if (b) sendSound(b.dataset.snd); });
+  });
+}
+/* --- reações voando na tela --- */
+const CALL_REACTS = ["😂", "❤️", "🔥", "👏", "😮", "😢", "🎉", "💀", "👀", "🤯", "🫡", "💯"];
+function sendReaction(e) {
+  floatFx(e, S.me.id);
+  if (S.socket) S.socket.emit("call:fx", { k: "emoji", v: e });
+}
+function reactMenu(at) {
+  popover(at, `<span class="label">Reagir na call</span><div class="emoji-row big">${CALL_REACTS.map(e => `<button data-e="${e}">${e}</button>`).join("")}</div>`, "emoji-pop", el => {
+    el.addEventListener("click", ev => { const b = ev.target.closest("[data-e]"); if (b) sendReaction(b.dataset.e); });
+  });
+}
+function floatFx(emoji, uid) {
+  if (S.settings.reduceMotion) return;
+  const layer = S.view === "stage" ? $("#stageView") : document.body;
+  const el = document.createElement("div");
+  el.className = "float-fx";
+  el.style.left = (10 + Math.random() * 80) + "%";
+  el.style.setProperty("--dx", (Math.random() * 80 - 40).toFixed(0) + "px");
+  el.innerHTML = `<span>${esc(emoji)}</span><small>${esc(user(uid).username)}</small>`;
+  layer.append(el);
+  setTimeout(() => el.remove(), 3000);
+}
+function onCallFx({ k, v, userId }) {
+  if (k === "sound") { playSound(v); floatFx((SOUNDS[v] || "🔊").split(" ")[0], userId); }
+  else if (k === "emoji") floatFx(v, userId);
+}
+
+/* --- confete (comemorações) --- */
+function confetti() {
+  if (S.settings.reduceMotion) return;
+  const cv = document.createElement("canvas");
+  cv.className = "confetti";
+  cv.width = innerWidth; cv.height = innerHeight;
+  document.body.append(cv);
+  const g = cv.getContext("2d"), cols = ["#7c5cff", "#22d3ee", "#f472b6", "#fbbf24", "#34d399", "#f87171"];
+  const ps = Array.from({ length: 140 }, () => ({ x: innerWidth / 2 + (Math.random() - 0.5) * 200, y: innerHeight * 0.35, vx: (Math.random() - 0.5) * 16, vy: -Math.random() * 14 - 4, r: Math.random() * 6 + 4, c: cols[Math.floor(Math.random() * cols.length)], a: Math.random() * 6, va: (Math.random() - 0.5) * 0.4 }));
+  const t0 = performance.now();
+  const step = t => {
+    const el = t - t0;
+    g.clearRect(0, 0, cv.width, cv.height);
+    for (const p of ps) {
+      p.vy += 0.35; p.vx *= 0.99; p.x += p.vx; p.y += p.vy; p.a += p.va;
+      g.save(); g.translate(p.x, p.y); g.rotate(p.a); g.globalAlpha = Math.max(0, 1 - el / 2600);
+      g.fillStyle = p.c; g.fillRect(-p.r / 2, -p.r / 4, p.r, p.r / 2); g.restore();
+    }
+    if (el < 2600) requestAnimationFrame(step); else cv.remove();
+  };
+  requestAnimationFrame(step);
 }
 function updateMini() {
   const el = $("#miniPlayer");
@@ -2407,7 +3013,7 @@ function profilePop(uid, anchor) {
   const steam = steamId ? `<div class="sec"><span class="label">Steam</span><div class="gl"><a href="https://steamcommunity.com/profiles/${steamId}" target="_blank" rel="noopener">${ic("steam", "xs")} Perfil Steam</a>${mine ? "" : `<a href="steam://friends/message/${steamId}">Conversar na Steam</a>`}</div></div>` : "";
   const acts = mine ? `<button class="btn sm" data-edit-profile>Editar perfil</button>`
     : `<button class="btn sm primary" data-dm>${ic("message", "sm")}Mensagem</button>${f === "friend" ? "" : f === "out" ? `<button class="btn sm" disabled>Pedido enviado</button>` : f === "in" ? `<button class="btn sm green" data-accept>Aceitar amizade</button>` : `<button class="btn sm" data-addf>${ic("userPlus", "sm")}Adicionar</button>`}${S.view === "chat" && !isDm(S.channelId) ? `<button class="btn sm ghost" data-mention>@</button>` : ""}`;
-  popover(anchor, `<div class="pb" style="--c:${esc(u.color)}"></div><div class="pc">${avatar(u, 76, true)}<h3>${esc(u.username)}</h3><div class="status-line"><i class="dot st-${esc(u.status)}"></i>${STATUS[u.status] || ""}${f === "friend" ? " · Amigo" : ""}</div>${game}${u.about ? `<div class="sec"><span class="label">Sobre mim</span>${esc(u.about)}</div>` : ""}${steam}<div class="sec"><span class="label">No NEXORA desde</span>${u.created ? new Date(u.created).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</div>${v ? `<div class="sec"><span class="label">Em chamada</span><a data-go-voice="${v.channelId}" style="cursor:pointer">${esc(chan(v.channelId)?.name || "Sala de voz")}</a>${v.screen ? ' <b class="live-tag">AO VIVO</b>' : ""}</div>` : ""}<div class="sec" style="display:flex;gap:8px;flex-wrap:wrap">${acts}</div></div>`, "profile-pop", (el, close) => {
+  popover(anchor, `<div class="pb" style="${bannerStyle(u)}"></div><div class="pc">${avatar(u, 76, true)}${badges(u)}<h3>${nameHTML(u)}${u.pron ? `<small class="pron">${esc(u.pron)}</small>` : ""}</h3><div class="status-line"><i class="dot st-${esc(u.status)}"></i>${STATUS[u.status] || ""}${f === "friend" ? " · Amigo" : ""}</div>${u.cs ? `<div class="cs-bubble">${csText(u)}</div>` : ""}${game}${u.about ? `<div class="sec"><span class="label">Sobre mim</span>${esc(u.about)}</div>` : ""}${steam}<div class="sec"><span class="label">No NEXORA desde</span>${u.created ? new Date(u.created).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</div>${v ? `<div class="sec"><span class="label">Em chamada</span><a data-go-voice="${v.channelId}" style="cursor:pointer">${esc(chan(v.channelId)?.name || "Sala de voz")}</a>${v.screen ? ' <b class="live-tag">AO VIVO</b>' : ""}</div>` : ""}<div class="sec" style="display:flex;gap:8px;flex-wrap:wrap">${acts}</div></div>`, "profile-pop" + (u.pfx ? " pfx-" + u.pfx : ""), (el, close) => {
     el.addEventListener("click", e => {
       if (e.target.closest("[data-mention]")) { close(); insertAtCaret(`@${u.username} `); }
       if (e.target.closest("[data-edit-profile]")) { close(); userSettings("account"); }
@@ -2783,6 +3389,7 @@ function userSettings(initial) {
   settingsShell([
     { label: "Configurações do usuário" },
     { id: "account", name: "Minha conta", render: renderAccount, mount: mountAccount },
+    { id: "turbo", name: "⚡ Perfil Turbo", render: () => `<div id="turboRoot"></div>`, mount: mountTurbo },
     { id: "voice", name: "Voz e vídeo", render: renderVoiceSettings, mount: mountVoiceSettings },
     { id: "stream", name: "Transmissão", render: () => `<p style="color:var(--muted);margin-top:-8px">Padrão usado ao entrar ao vivo. Você pode mudar durante a transmissão.</p><span class="label">Qualidade padrão</span><div class="qgrid" style="margin-top:8px">${Object.entries(QUALITY).map(([k, v]) => `<button type="button" class="qopt${k === S.settings.shareQuality ? " on" : ""}" data-q="${k}">${v.tag ? `<span class="tag">${v.tag}</span>` : ""}<b>${v.label}</b><small>${v.sub}</small></button>`).join("")}</div>${toggleRow("shareAudio", "Transmitir áudio por padrão", "Inclui o som da aba ou do sistema", S.settings.shareAudio)}<div class="hint" style="margin-top:16px">Como o NEXORA economiza recursos: a tela só é codificada para quem está assistindo, a taxa de bits se divide entre os espectadores, o codec é escolhido pelo modo (VP9 para texto nítido, H.264 com aceleração por hardware para movimento) e o áudio usa Opus com supressão de silêncio.</div>`, mount: p => { p.addEventListener("click", e => { const b = e.target.closest("[data-q]"); if (b) { S.settings.shareQuality = b.dataset.q; saveSettings(); $$("[data-q]", p).forEach(x => x.classList.toggle("on", x === b)); } }); bindToggles(p); } },
     { id: "app", name: "Baixar o app", render: renderAppDl, mount: mountAppDl },
@@ -2795,6 +3402,75 @@ function userSettings(initial) {
     "-",
     { id: "logout", name: "Sair", danger: true, action: async close => { if (await confirmBox({ title: "Sair", html: "Tem certeza de que quer sair da sua conta?", ok: "Sair" })) { close(); logout(); } } }
   ], initial);
+}
+/* Perfil Turbo: tudo liberado, com prévia ao vivo */
+function mountTurbo(p) {
+  const me = S.me;
+  const d = { avatar: me.avatar || "", banner: me.banner || "", theme: me.theme || [me.color || "#7c5cff", "#22d3ee"], useTheme: !!me.theme, pron: me.pron || "", cs: { e: (me.cs && me.cs.e) || "", t: (me.cs && me.cs.t) || "" }, fx: me.fx || "", pfx: me.pfx || "" };
+  const root = p.querySelector("#turboRoot");
+  const FX = [["", "Normal"], ["grad", "Degradê"], ["glow", "Brilho"], ["rainbow", "Arco-íris"]];
+  const PFX = [["", "Nenhum"], ["aurora", "Aurora"], ["stars", "Estrelas"], ["fire", "Fogo"], ["neon", "Neon"]];
+  const preview = () => {
+    const u = { ...me, avatar: d.avatar, banner: d.banner, theme: d.useTheme ? d.theme : null, pron: d.pron, cs: d.cs.t || d.cs.e ? d.cs : null, fx: d.fx, pfx: d.pfx, status: me.statusPref === "invisible" ? "offline" : me.statusPref };
+    return `<div class="popover profile-pop turbo-preview${d.pfx ? " pfx-" + d.pfx : ""}"><div class="pb" style="${bannerStyle(u)}"></div><div class="pc">${avatar(u, 76, true)}${badges(u)}<h3>${nameHTML(u)}${u.pron ? `<small class="pron">${esc(u.pron)}</small>` : ""}</h3><div class="status-line"><i class="dot st-${esc(u.status)}"></i>${STATUS[u.status] || ""}</div>${u.cs ? `<div class="cs-bubble">${csText(u)}</div>` : ""}${u.about ? `<div class="sec"><span class="label">Sobre mim</span>${esc(u.about)}</div>` : ""}</div></div>`;
+  };
+  const draw = () => {
+    root.innerHTML = `<p style="color:var(--muted);margin-top:-8px">Deixe seu perfil com a sua cara. Tudo grátis. ✨</p>
+      <div class="turbo">
+        <div class="turbo-form">
+          <span class="label">Avatar animado</span>
+          <div class="row-btns"><button class="btn sm" data-up="avatar">${ic("image", "sm")}Enviar imagem ou GIF</button>${d.avatar ? `<button class="btn sm ghost" data-clear="avatar">Remover</button>` : ""}</div>
+          <span class="label">Banner</span>
+          <div class="row-btns"><button class="btn sm" data-up="banner">${ic("image", "sm")}Enviar banner</button>${d.banner ? `<button class="btn sm ghost" data-clear="banner">Remover</button>` : ""}</div>
+          <div class="toggle-row"><span><b>Cores do perfil</b><small>Degradê usado no banner e no efeito do nome</small></span><label class="switch"><input type="checkbox" data-k="useTheme" ${d.useTheme ? "checked" : ""}><i></i></label></div>
+          <div class="row-btns" ${d.useTheme ? "" : 'style="opacity:.4;pointer-events:none"'}><label class="color-in">Cor 1<input type="color" data-k="t0" value="${esc(d.theme[0])}"></label><label class="color-in">Cor 2<input type="color" data-k="t1" value="${esc(d.theme[1])}"></label></div>
+          <span class="label">Efeito no nome</span>
+          <div class="chips">${FX.map(([k, n]) => `<button class="chip${d.fx === k ? " on" : ""}" data-fx="${k}">${k ? `<span class="nm fx-${k}" style="--n1:${esc(d.theme[0])};--n2:${esc(d.theme[1])}">${n}</span>` : n}</button>`).join("")}</div>
+          <span class="label">Efeito do perfil</span>
+          <div class="chips">${PFX.map(([k, n]) => `<button class="chip${d.pfx === k ? " on" : ""}" data-pfx="${k}">${n}</button>`).join("")}</div>
+          <label class="field" style="margin-top:14px"><span>Status personalizado</span><div class="cs-in"><button type="button" class="btn sm" data-cs-emoji>${d.cs.e ? esc(d.cs.e) : "😀"}</button><input data-k="cst" maxlength="60" placeholder="O que está rolando?" value="${esc(d.cs.t)}"></div></label>
+          <label class="field"><span>Pronomes</span><input data-k="pron" maxlength="24" placeholder="ex.: ele/dele, ela/dela" value="${esc(d.pron)}"></label>
+          <button class="btn primary" data-save>Salvar Perfil Turbo</button>
+        </div>
+        <div class="turbo-prev"><span class="label">Prévia</span>${preview()}</div>
+      </div>`;
+  };
+  const refreshPrev = () => { const pv = root.querySelector(".turbo-prev"); if (pv) pv.innerHTML = `<span class="label">Prévia</span>${preview()}`; };
+  draw();
+  root.addEventListener("input", e => {
+    const k = e.target.dataset.k;
+    if (k === "t0" || k === "t1") d.theme[+k[1]] = e.target.value;
+    else if (k === "cst") d.cs.t = e.target.value;
+    else if (k === "pron") d.pron = e.target.value;
+    else return;
+    refreshPrev();
+  });
+  root.addEventListener("change", e => { if (e.target.dataset.k === "useTheme") { d.useTheme = e.target.checked; draw(); } });
+  root.addEventListener("click", async e => {
+    const t = e.target;
+    const fx = t.closest("[data-fx]"); if (fx) { d.fx = fx.dataset.fx; draw(); return; }
+    const pfx = t.closest("[data-pfx]"); if (pfx) { d.pfx = pfx.dataset.pfx; draw(); return; }
+    const cl = t.closest("[data-clear]"); if (cl) { d[cl.dataset.clear] = ""; draw(); return; }
+    const em = t.closest("[data-cs-emoji]"); if (em) { emojiPicker(em, v => { d.cs.e = v; draw(); }); return; }
+    const up = t.closest("[data-up]");
+    if (up) {
+      const inp = document.createElement("input");
+      inp.type = "file"; inp.accept = "image/png,image/jpeg,image/webp,image/gif";
+      inp.onchange = async () => {
+        const f = inp.files[0];
+        if (!f) return;
+        up.classList.add("loading");
+        try { const r = await uploadBlob(f); d[up.dataset.up] = r.url; draw(); toast(f.type === "image/gif" ? "GIF enviado — seu avatar vai ficar animado! ✨" : "Imagem enviada.", "ok"); }
+        catch (err) { toast(err.message, "error"); up.classList.remove("loading"); }
+      };
+      inp.click();
+      return;
+    }
+    if (t.closest("[data-save]")) {
+      const r = await emit("profile:update", { avatar: d.avatar, banner: d.banner, theme: d.useTheme ? d.theme : null, pron: d.pron, cs: d.cs, fx: d.fx, pfx: d.pfx });
+      if (r.error) toast(r.error, "error"); else { toast("Perfil Turbo salvo! ⚡", "ok"); confetti(); }
+    }
+  });
 }
 function renderGames() {
   const me = S.me, steamId = me.steam || "";
@@ -2901,15 +3577,19 @@ function renderVoiceSettings() {
     <span class="label">Sensibilidade de voz</span>
     <input type="range" id="sens" min="0.01" max="0.25" step="0.01" value="${st.sensitivity}" style="width:100%;accent-color:var(--accent);margin:10px 0 4px">
     <div class="meter"><i id="meterBar"></i></div>
-    <button class="btn sm" data-test>${ic("mic", "sm")}Testar microfone</button>
-    <div style="margin-top:18px">
-      ${toggleRow("noise", "Supressão de ruído", "Remove ventilador, teclado e barulhos de fundo", st.noise)}
+    <button class="btn sm" data-test>${ic("mic", "sm")}Testar microfone</button> <button class="btn sm" data-listen>${ic("headphones", "sm")}Ouvir a mim mesmo</button>
+    <span class="label" style="display:block;margin-top:22px">Supressão de ruído</span>
+    <div style="margin:8px 0 6px">
+      ${[["ai", "IA do NEXORA (recomendado)", "RNNoise: tira ventilador, teclado, cachorro, trânsito — deixa só a sua voz"], ["browser", "Padrão do navegador", "Mais leve, remove só ruído constante"], ["off", "Desligada", "Som cru do microfone (bom para música)"]].map(([k, t, d]) => `<label class="radio-card${nsMode() === k ? " on" : ""}"><span><b>${t}</b><small>${d}</small></span><input type="radio" name="nsm" value="${k}" ${nsMode() === k ? "checked" : ""}></label>`).join("")}
+    </div>
+    <div>
+      ${toggleRow("nsGate", "Portão inteligente", "Com a IA ligada: silencia seu microfone quando você não está falando", st.nsGate !== false)}
       ${toggleRow("echo", "Cancelamento de eco", "Evita que os outros ouçam a própria voz", st.echo)}
       ${toggleRow("agc", "Ganho automático", "Mantém o volume da sua voz estável", st.agc)}
     </div>`;
 }
 function mountVoiceSettings(p) {
-  let test = null, raf = 0;
+  let test = null, raf = 0, listen = false;
   const bar = p.querySelector("#meterBar");
   const fill = async () => {
     try {
@@ -2925,7 +3605,7 @@ function mountVoiceSettings(p) {
   fill();
   const stopTest = () => {
     cancelAnimationFrame(raf);
-    if (test) { test.stream.getTracks().forEach(t => t.stop()); test.ctx.close(); test = null; }
+    if (test) { stopMic(test.stream); test.ctx.close(); test = null; }
     bar.style.transform = "scaleX(0)";
     const b = p.querySelector("[data-test]");
     if (b) b.innerHTML = `${ic("mic", "sm")}Testar microfone`;
@@ -2935,9 +3615,14 @@ function mountVoiceSettings(p) {
       const stream = await getMic();
       const ctx = new AudioContext();
       const an = ctx.createAnalyser(); an.fftSize = 512;
-      ctx.createMediaStreamSource(stream).connect(an);
+      const srcN = ctx.createMediaStreamSource(stream);
+      srcN.connect(an);
+      // "ouvir a mim mesmo": dá para escutar o efeito do filtro (use fone para não dar microfonia)
+      const mon = ctx.createGain();
+      mon.gain.value = listen ? 1 : 0;
+      srcN.connect(mon).connect(ctx.destination);
       const buf = new Uint8Array(an.fftSize);
-      test = { stream, ctx };
+      test = { stream, ctx, mon };
       p.querySelector("[data-test]").innerHTML = `${ic("stop", "sm")}Parar teste`;
       fill();
       const loop = () => {
@@ -2953,6 +3638,22 @@ function mountVoiceSettings(p) {
     } catch { toast("Não foi possível acessar o microfone.", "error"); }
   };
   p.querySelector("[data-test]").onclick = () => (test ? stopTest() : startTest());
+  p.querySelector("[data-listen]").onclick = e => {
+    listen = !listen;
+    e.currentTarget.classList.toggle("on", listen);
+    e.currentTarget.innerHTML = `${ic("headphones", "sm")}${listen ? "Parar de me ouvir" : "Ouvir a mim mesmo"}`;
+    if (test && test.mon) test.mon.gain.value = listen ? 1 : 0;
+    if (listen && !test) startTest();
+  };
+  p.addEventListener("change", e => {
+    if (e.target.name !== "nsm") return;
+    S.settings.nsMode = e.target.value;
+    saveSettings();
+    $$(".radio-card", p).forEach(r => r.classList.toggle("on", r.querySelector("input").checked));
+    if (test) { stopTest(); startTest(); }
+    refreshMic();
+    if (e.target.value === "ai") toast("IA de ruído ligada. Faça um teste e ouça a diferença! 🎧", "ok");
+  });
   p.querySelector("#sens").addEventListener("input", e => { S.settings.sensitivity = +e.target.value; saveSettings(); });
   p.querySelector("#inDev").addEventListener("change", e => { S.settings.inputId = e.target.value; saveSettings(); if (test) { stopTest(); startTest(); } refreshMic(); });
   const od = p.querySelector("#outDev");
@@ -3132,6 +3833,14 @@ const ACTIONS = {
   home: goHome,
   friends: () => goFriends(),
   "get-app": () => userSettings("app"),
+  attach: () => $("#fileInput").click(),
+  "new-group": () => groupModal(),
+  "act-menu": a => actMenu(a),
+  "sound-menu": a => soundMenu(a),
+  "react-menu": a => reactMenu(a),
+  "group-add": a => groupModal(a.dataset.id),
+  "group-menu": a => groupMenu(a.dataset.id, a),
+  "up-remove": a => removeUpload(a.dataset.key),
   "friends-tab": a => goFriends(a.dataset.tab),
   "new-dm": () => goFriends(S.friends.size ? "all" : "add"),
   "open-dm": a => openDM(a.dataset.id),
@@ -3242,6 +3951,8 @@ function wire() {
   document.addEventListener("contextmenu", e => {
     if (e.target.closest("input, textarea, a") || String(getSelection()).length) return;
     const at = { x: e.clientX, y: e.clientY };
+    const grp = e.target.closest("[data-group]");
+    if (grp) { e.preventDefault(); groupMenu(grp.dataset.group, at); return; }
     const rail = e.target.closest(".rail-item[data-id]");
     const ch = e.target.closest(".ch[data-id]");
     const msg = e.target.closest(".msg[data-id]:not(.sys)");
@@ -3307,6 +4018,16 @@ function wire() {
     } else if (e.key === "Escape" && S.replyTo) { e.stopPropagation(); cancelReply(); }
   });
   input.addEventListener("blur", () => setTimeout(closeMention, 150));
+  // arquivos: botão, colar (Ctrl+V) e arrastar
+  $("#fileInput").addEventListener("change", e => { addFiles(e.target.files); e.target.value = ""; });
+  input.addEventListener("paste", e => { const fl = e.clipboardData && e.clipboardData.files; if (fl && fl.length) { e.preventDefault(); addFiles(fl); } });
+  const chatView = $("#chatView"), drop = $("#dropZone");
+  let dragDepth = 0;
+  const hasFiles = e => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
+  chatView.addEventListener("dragenter", e => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth++; drop.classList.remove("hidden"); });
+  chatView.addEventListener("dragover", e => { if (hasFiles(e)) e.preventDefault(); });
+  chatView.addEventListener("dragleave", e => { if (!hasFiles(e)) return; if (--dragDepth <= 0) { dragDepth = 0; drop.classList.add("hidden"); } });
+  chatView.addEventListener("drop", e => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth = 0; drop.classList.add("hidden"); addFiles(e.dataTransfer.files); });
   $("#mentionPop").addEventListener("mousedown", e => e.preventDefault());
   $("#composer").addEventListener("submit", e => { e.preventDefault(); sendMessage(); });
 

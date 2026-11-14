@@ -67,12 +67,16 @@
     </header>
 
     <section id="chatView" class="view chat-view hidden">
+      <div class="drop-zone hidden" id="dropZone"><div><span data-icon="clip"></span><b>Solte para enviar</b><small>Até 8 MB por arquivo</small></div></div>
       <div class="messages" id="messages"><div class="msg-list" id="msgList"></div></div>
       <button class="jump hidden" id="jumpBtn" type="button">Novas mensagens <span data-icon="chevron"></span></button>
       <div class="composer-wrap">
         <div class="mention-pop hidden" id="mentionPop"></div>
         <div class="reply-bar hidden" id="replyBar"></div>
+        <div class="upload-tray hidden" id="uploadTray"></div>
         <form class="composer" id="composer">
+          <button type="button" class="icon-btn" data-act="attach" aria-label="Enviar arquivo" data-tip="Enviar arquivo" data-icon="clip"></button>
+          <input type="file" id="fileInput" multiple hidden>
           <button type="button" class="icon-btn" data-act="emoji-composer" aria-label="Emojis" data-icon="smile"></button>
           <textarea id="input" rows="1" maxlength="2000" autocomplete="off" spellcheck="true"></textarea>
           <button class="icon-btn send" aria-label="Enviar" data-icon="send"></button>
