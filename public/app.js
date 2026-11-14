@@ -468,7 +468,7 @@ function renderSide() {
     const people = [...S.voice.values()].filter(v => v.channelId === c.id).sort((a, b) => a.at - b.at);
     const live = people.some(p => p.screen);
     const act = S.acts.get(c.id);
-    return `<div class="ch${S.view === "stage" && c.id === S.channelId ? " on" : ""}${live ? " live" : ""}" data-act="open-ch" data-id="${c.id}" role="button" tabindex="0">${ic("volume")}<span class="ch-name">${esc(c.name)}</span>${act ? `<span class="act-dot" data-tip="${esc(ACT_NAMES[act] || "Atividade")}">${ic({ yt: "music", board: "brush", ttt: "grid3" }[act] || "rocket", "xs")}</span>` : ""}${people.length ? `<span class="count">${people.length}/${S.voiceLimit}</span>` : ""}${tools(c.id)}</div>${people.length ? `<div class="vc-users">${people.map(vcUser).join("")}</div>` : ""}`;
+    return `<div class="ch${S.view === "stage" && c.id === S.channelId ? " on" : ""}${live ? " live" : ""}" data-act="open-ch" data-id="${c.id}" role="button" tabindex="0">${ic("volume")}<span class="ch-name">${esc(c.name)}</span>${act ? `<span class="act-dot" data-tip="${esc(ACT_NAMES[act] || "Atividade")}">${ic({ yt: "music", sp: "headphones", board: "brush", ttt: "grid3" }[act] || "rocket", "xs")}</span>` : ""}${people.length ? `<span class="count">${people.length}/${S.voiceLimit}</span>` : ""}${tools(c.id)}</div>${people.length ? `<div class="vc-users">${people.map(vcUser).join("")}</div>` : ""}`;
   }).join("");
   body.innerHTML = h;
 }
@@ -3627,7 +3627,7 @@ function callChatOnMsg(channelId, m) {
 /* Atividades na call: Ouvir juntos (YouTube), Lousa, Jogo da velha,   */
 /* sons para todos e reações voando na tela                            */
 /* ------------------------------------------------------------------ */
-const ACT_NAMES = { yt: "🎵 Ouvir juntos", board: "🎨 a Lousa", ttt: "❌⭕ Jogo da velha" };
+const ACT_NAMES = { sp: "🎧 o Spotify", yt: "🎵 Ouvir juntos", board: "🎨 a Lousa", ttt: "❌⭕ Jogo da velha" };
 const nowServer = () => Date.now() + (S.clockOff || 0);
 function startActivity(type) {
   if (!V.channelId) { toast("Entre numa sala de voz primeiro.", "warn"); return; }
@@ -3636,6 +3636,7 @@ function startActivity(type) {
 function actMenu(at) {
   menu(at, [
     { label: "Ouvir juntos (YouTube)", icon: "music", hint: "música e vídeo", run: () => startActivity("yt") },
+    { label: "Ouvir juntos (Spotify)", icon: "headphones", hint: "músicas e playlists", run: () => startActivity("sp") },
     { label: "Lousa", icon: "brush", hint: "desenhar junto", run: () => startActivity("board") },
     { label: "Jogo da velha", icon: "grid3", hint: "2 jogadores", run: () => startActivity("ttt") },
     V.act && "-",
@@ -3652,7 +3653,7 @@ function actElement() {
     el.dataset.key = "__act";
     el._type = a.type;
     V.actEl = el;
-    ({ yt: mountYT, board: mountBoard, ttt: mountTTT })[a.type](el);
+    ({ yt: mountYT, sp: mountSpotify, board: mountBoard, ttt: mountTTT })[a.type](el);
   }
   el.classList.toggle("big", V.focus === "__act");
   return el;
@@ -3772,6 +3773,137 @@ function mountYT(el) {
   });
   el._update = () => sync();
   el._destroy = () => { clearInterval(timer); clearInterval(drift); try { if (player) player.destroy(); } catch {} };
+}
+
+/* --- Ouvir juntos no Spotify (player oficial embutido, sincronizado) --- */
+let spApi = null;
+function loadSpotify() {
+  if (window.__spIFrameAPI) return Promise.resolve(window.__spIFrameAPI);
+  if (spApi) return spApi;
+  spApi = new Promise((res, rej) => {
+    const prev = window.onSpotifyIframeApiReady;
+    window.onSpotifyIframeApiReady = api => { window.__spIFrameAPI = api; if (prev) try { prev(api); } catch {} res(api); };
+    const s = document.createElement("script");
+    s.src = "https://open.spotify.com/embed/iframe-api/v1";
+    s.async = true;
+    s.onerror = () => { spApi = null; rej(new Error("Não foi possível carregar o Spotify.")); };
+    document.head.append(s);
+    setTimeout(() => { if (!window.__spIFrameAPI) { spApi = null; rej(new Error("O Spotify demorou para responder. Tente de novo.")); } }, 15000);
+  });
+  return spApi;
+}
+// aceita link (open.spotify.com/intl-pt/track/…), link curto de app e "spotify:track:…"
+function spUri(text) {
+  const s = String(text || "").trim();
+  let m = s.match(/^spotify:(track|album|playlist|episode|show|artist):([A-Za-z0-9]{10,40})$/);
+  if (m) return `spotify:${m[1]}:${m[2]}`;
+  m = s.match(/open\.spotify\.com\/(?:intl-[a-z-]+\/)?(?:embed\/)?(track|album|playlist|episode|show|artist)\/([A-Za-z0-9]{10,40})/);
+  return m ? `spotify:${m[1]}:${m[2]}` : "";
+}
+const SP_KIND = { track: "Música", album: "Álbum", playlist: "Playlist", episode: "Episódio", show: "Podcast", artist: "Artista" };
+const spKind = uri => (uri || "").split(":")[1] || "";
+const spSingle = uri => ["track", "episode"].includes(spKind(uri));      // posição exata só em música/episódio
+const spInfo = new Map();
+function spMeta(uri) {
+  if (spInfo.has(uri)) return Promise.resolve(spInfo.get(uri));
+  const [, kind, id] = uri.split(":");
+  return fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(`https://open.spotify.com/${kind}/${id}`)}`)
+    .then(r => (r.ok ? r.json() : null)).then(j => { const v = j ? { title: j.title || "", img: j.thumbnail_url || "" } : null; spInfo.set(uri, v); return v; })
+    .catch(() => null);
+}
+function mountSpotify(el) {
+  el.innerHTML = `<div class="yt-wrap sp-wrap"><div class="sp-player"><div class="sp-frame"></div><div class="yt-empty sp-empty">${ic("music", "lg")}<b>Ouvir juntos no Spotify</b><small>Cole aqui embaixo o link de uma música, álbum, playlist ou podcast do Spotify (Compartilhar › Copiar link). Todo mundo na call ouve junto.</small></div></div>
+    <div class="yt-bar"><button class="icon-btn" data-sp="toggle" data-tip="Tocar / pausar para todos">${ic("play")}</button><button class="icon-btn" data-sp="skip" data-tip="Próxima da fila">${ic("skip")}</button><span class="yt-time">0:00</span><input type="range" class="yt-seek" min="0" max="100" value="0" step="0.5"><span class="yt-dur">0:00</span></div>
+    <form class="yt-add"><input placeholder="Cole um link do Spotify para tocar ou pôr na fila…" spellcheck="false"><button class="btn sm primary">${ic("plus", "sm")}Adicionar</button></form>
+    <div class="yt-queue"></div>
+    <small class="sp-note">🎧 Quem estiver logado no Spotify (Premium) ouve as músicas inteiras; sem login, o Spotify toca só uma prévia de 30 s.</small></div>`;
+  let ctl = null, ready = false, lastUri = "", seeking = false, pb = { paused: true, pos: 0, dur: 0 }, alive = true;
+  const st = () => (V.act && V.act.type === "sp" ? V.act.state : null);
+  const push = s => emit("act:state", { state: s }).then(r => r.error && toast(r.error, "error"));
+  const next = () => { const s = st(); if (!s) return; const q = (s.queue || []).slice(); const uri = q.shift() || ""; push({ ...s, uri, queue: q, playing: !!uri, pos: 0 }); };
+  const posOf = s => (s.pos || 0) + (s.playing ? (nowServer() - s.at) / 1000 : 0);
+  let api = null, creating = false;
+  loadSpotify().then(x => { api = x; if (alive) sync(); }).catch(e => toast(e.message, "error"));
+  // o player só é criado quando já existe algo para tocar
+  function create(uri) {
+    if (creating || ctl || !api) return;
+    creating = true;
+    api.createController(el.querySelector(".sp-frame"), { width: "100%", height: "100%", uri }, c => {
+      ctl = c;
+      if (!alive) { try { c.destroy(); } catch {} return; }
+      lastUri = uri;
+      c.addListener("ready", () => { ready = true; const s = st(); if (s && s.playing) { c.play(); const w = posOf(s); if (spSingle(s.uri) && w > 2) setTimeout(() => c.seek(w), 900); } });
+      c.addListener("playback_update", e => {
+        const d = e && e.data;
+        if (!d) return;
+        const ended = pb.dur > 0 && !pb.paused && d.isPaused && d.position === 0 && pb.pos > 1000;
+        pb = { paused: d.isPaused, pos: d.position || 0, dur: d.duration || 0 };
+        // acabou: quem "lidera" a call passa para a próxima da fila
+        if (ended && isLeader()) { const s = st(); if (s && s.playing && (s.queue || []).length) next(); else if (s && s.playing) push({ ...s, playing: false, pos: 0 }); }
+      });
+    });
+  }
+  function drawQueue(s) {
+    const q = s.queue || [];
+    el.querySelector(".yt-queue").innerHTML = q.length ? `<span class="label">Na fila — ${q.length}</span><div class="yt-qs">${q.map((u, i) => { const m = spInfo.get(u); return `<div class="yt-q sp-q" data-tip="${esc(m ? m.title : SP_KIND[spKind(u)] || "Spotify")}">${m && m.img ? `<img src="${esc(m.img)}" alt="" referrerpolicy="no-referrer">` : `<span class="sp-ph">${ic("music")}</span>`}<button class="icon-btn" data-sp-del="${i}" data-tip="Tirar da fila">${ic("x", "xs")}</button></div>`; }).join("")}</div>` : "";
+    for (const u of q) if (!spInfo.has(u)) spMeta(u).then(() => { const s2 = st(); if (s2) drawQueue(s2); });
+  }
+  function sync() {
+    const s = st();
+    if (!s) return;
+    el.querySelector(".sp-empty").classList.toggle("hidden", !!s.uri);
+    el.querySelector('[data-sp="toggle"]').innerHTML = ic(s.playing ? "pause" : "play");
+    el.querySelector(".yt-seek").disabled = !spSingle(s.uri);
+    drawQueue(s);
+    if (s.uri && !ctl) { create(s.uri); return; }
+    if (!ready || !ctl || !s.uri) { if (ready && ctl && !s.uri && !pb.paused) ctl.pause(); return; }
+    if (s.uri !== lastUri) {
+      lastUri = s.uri;
+      ctl.loadUri(s.uri);
+      if (s.playing) setTimeout(() => { if (!alive) return; ctl.play(); const w = posOf(s); if (spSingle(s.uri) && w > 2) setTimeout(() => ctl.seek(w), 900); }, 600);
+      return;
+    }
+    if (s.playing && pb.paused) ctl.resume();
+    if (!s.playing && !pb.paused) ctl.pause();
+    if (s.playing && spSingle(s.uri) && pb.dur) {
+      const want = posOf(s);
+      if (want * 1000 < pb.dur && Math.abs(pb.pos / 1000 - want) > 2.5) ctl.seek(want);
+    }
+  }
+  const timer = setInterval(() => {
+    const s = st();
+    const dur = pb.dur / 1000, cur = s && s.uri ? (spSingle(s.uri) ? Math.min(posOf(s), dur || Infinity) : pb.pos / 1000) : 0;
+    const seek = el.querySelector(".yt-seek");
+    if (!seeking) { seek.max = Math.max(1, dur); seek.value = Math.min(cur, dur || cur); }
+    el.querySelector(".yt-time").textContent = fmtSec(cur);
+    el.querySelector(".yt-dur").textContent = fmtSec(dur);
+    if (ctl && ready && S.deaf && !pb.paused) ctl.pause();
+  }, 500);
+  const drift = setInterval(() => { if (!S.deaf) sync(); }, 4000);
+  el.addEventListener("click", e => {
+    const b = e.target.closest("[data-sp]"), del = e.target.closest("[data-sp-del]");
+    const s = st();
+    if (!s) return;
+    if (del) { const q = (s.queue || []).slice(); q.splice(+del.dataset.spDel, 1); push({ ...s, pos: posOf(s), queue: q }); return; }
+    if (!b) return;
+    if (b.dataset.sp === "toggle" && s.uri) push({ ...s, playing: !s.playing, pos: spSingle(s.uri) ? posOf(s) : 0 });
+    if (b.dataset.sp === "skip") next();
+  });
+  const seek = el.querySelector(".yt-seek");
+  seek.addEventListener("input", () => { seeking = true; });
+  seek.addEventListener("change", () => { seeking = false; const s = st(); if (s && s.uri && spSingle(s.uri)) push({ ...s, pos: +seek.value }); });
+  el.querySelector(".yt-add").addEventListener("submit", e => {
+    e.preventDefault();
+    const inp = e.target.querySelector("input"), uri = spUri(inp.value), s = st();
+    if (!uri) { toast("Cole um link do Spotify (música, álbum, playlist ou podcast).", "warn"); return; }
+    if (!s) return;
+    inp.value = "";
+    spMeta(uri);
+    if (!s.uri) push({ ...s, uri, pos: 0, playing: true });
+    else { push({ ...s, pos: posOf(s), queue: [...(s.queue || []), uri].slice(0, 50) }); toast("Adicionado à fila. 🎧", "ok"); }
+  });
+  el._update = () => sync();
+  el._destroy = () => { alive = false; clearInterval(timer); clearInterval(drift); try { if (ctl) ctl.destroy(); } catch {} };
 }
 
 /* --- Lousa para desenhar junto --- */

@@ -756,7 +756,7 @@ function leaveVoice(sock) {
 }
 /* Atividades da call: um estado por sala de voz, guardado só na memória */
 const acts = new Map(); // channelId -> { type, state, by, strokes }
-const ACT_TYPES = ["yt", "board", "ttt"];
+const ACT_TYPES = ["yt", "sp", "board", "ttt"];
 const actView = (cid, a) => (a ? { channelId: cid, type: a.type, state: a.state, by: a.by, strokes: a.type === "board" ? a.strokes : undefined } : { channelId: cid, type: null });
 function systemMsg(s, userId, kind) {
   const ch = s.channels.find(c => c.type === "text");
@@ -1810,6 +1810,7 @@ io.on("connection", socket => {
     const v = myVoice();
     if (!ACT_TYPES.includes(type)) fail("Atividade inválida.");
     const state = type === "yt" ? { vid: "", title: "", playing: false, pos: 0, at: Date.now(), queue: [] }
+      : type === "sp" ? { uri: "", playing: false, pos: 0, at: Date.now(), queue: [] }
       : type === "ttt" ? { b: Array(9).fill(""), x: "", o: "", turn: "X", win: "", score: { X: 0, O: 0 } } : {};
     const a = { type, state, by: uid, strokes: [] };
     acts.set(v.cid, a);
@@ -1826,7 +1827,7 @@ io.on("connection", socket => {
     const v = myVoice(), a = acts.get(v.cid);
     if (!a || !state || typeof state !== "object") fail("Nenhuma atividade aberta.");
     if (JSON.stringify(state).length > 20000) fail("Estado grande demais.");
-    if (a.type === "yt") state.at = Date.now();   // relógio do servidor para sincronizar
+    if (a.type === "yt" || a.type === "sp") state.at = Date.now();   // relógio do servidor para sincronizar
     a.state = state;
     io.to("v:" + v.cid).emit("act", actView(v.cid, a));
   });
