@@ -92,6 +92,7 @@ const P = {
   grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   external: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
   minimize: '<path d="M5 12h14"/>',
+  volumeX: '<path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6M16 9l6 6"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/>'
 };
 const ic = (n, c = "") => `<svg class="ic ${c}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ""}</svg>`;
@@ -3590,7 +3591,7 @@ function renderStage() {
   const grid = $("#stageGrid");
   const tiles = stageTiles(c.id);
   if (V.focus && V.focus !== "__act" && !tiles.some(t => t.key === V.focus)) V.focus = null;
-  if (V.act && !V.focus) V.focus = "__act";
+  if (V.act && !V.focus && !V.actMin) V.focus = "__act";
   if (!V.act && V.focus === "__act") V.focus = null;
   grid.classList.toggle("focus", !!V.focus);
   const existing = new Map($$(".tile", grid).map(el => [el.dataset.key, el]));
@@ -3759,10 +3760,22 @@ function actElement() {
     el._type = a.type;
     V.actEl = el;
     ({ yt: mountYT, sp: mountSpotify, board: mountBoard, ttt: mountTTT })[a.type](el);
+    el.addEventListener("click", e => {
+      const b = e.target.closest("[data-mm]");
+      if (!b) return;
+      e.stopPropagation();
+      if (b.dataset.mm === "mute") {
+        store.set("musicMute", !musicMuted());
+        $$('[data-mm="mute"]', el).forEach(x => { x.innerHTML = ic(musicMuted() ? "volumeX" : "volume"); });
+        toast(musicMuted() ? "Música mutada só para você 🔇" : "Música de volta 🔊", "info", 2000);
+        if (el._update) el._update(V.act);
+      } else { V.actMin = V.focus === "__act"; V.focus = V.actMin ? null : "__act"; schedule("stage"); }
+    });
   }
   el.classList.toggle("big", V.focus === "__act");
   return el;
 }
+const musicMuted = () => !!store.get("musicMute", false);
 function destroyAct() {
   if (!V.actEl) return;
   try { V.actEl._destroy && V.actEl._destroy(); } catch {}
@@ -3775,7 +3788,7 @@ function onAct(a) {
   V.act = a.type ? a : null;
   if (!V.act) destroyAct();
   else if (V.actEl && V.actEl._type === a.type && V.actEl._update) V.actEl._update(a);
-  if (a.type && a.type !== prev) { V.focus = "__act"; if (a.by !== S.me.id) toast(`${user(a.by).username} abriu ${ACT_NAMES[a.type]} na call!`, "info"); }
+  if (a.type && a.type !== prev) { V.actMin = false; V.focus = "__act"; if (a.by !== S.me.id) toast(`${user(a.by).username} abriu ${ACT_NAMES[a.type]} na call!`, "info"); }
   schedule("stage");
 }
 const isLeader = () => { const ids = [...S.voice.values()].filter(v => v.channelId === V.channelId).map(v => v.userId).sort(); return ids[0] === S.me.id; };
@@ -3804,7 +3817,7 @@ function ytId(url) {
 const ytPos = st => (st.pos || 0) + (st.playing ? (nowServer() - st.at) / 1000 : 0);
 function mountYT(el) {
   el.innerHTML = `<div class="yt-wrap"><div class="yt-player"><div class="yt-frame"></div><div class="yt-empty">${ic("music", "lg")}<b>Ouvir juntos</b><small>Cole um link do YouTube aqui embaixo — música, clipe ou vídeo. Todo mundo na call ouve sincronizado.</small></div></div>
-    <div class="yt-bar"><button class="icon-btn" data-yt="toggle" data-tip="Tocar / pausar">${ic("play")}</button><button class="icon-btn" data-yt="skip" data-tip="Próxima">${ic("skip")}</button><span class="yt-time">0:00</span><input type="range" class="yt-seek" min="0" max="100" value="0" step="0.5"><span class="yt-dur">0:00</span><span data-tip="Volume (só para você)" style="display:grid">${ic("volume", "sm")}</span><input type="range" class="yt-vol" min="0" max="100" value="${store.get("ytVol", 70)}"></div>
+    <div class="yt-bar"><button class="icon-btn" data-yt="toggle" data-tip="Tocar / pausar">${ic("play")}</button><button class="icon-btn" data-yt="skip" data-tip="Próxima">${ic("skip")}</button><span class="yt-time">0:00</span><input type="range" class="yt-seek" min="0" max="100" value="0" step="0.5"><span class="yt-dur">0:00</span><span data-tip="Volume (só para você)" style="display:grid">${ic("volume", "sm")}</span><input type="range" class="yt-vol" min="0" max="100" value="${store.get("ytVol", 70)}"><span class="mm-sep"></span><button class="icon-btn" data-mm="mute" data-tip="Mutar a música (só para você)">${ic(musicMuted() ? "volumeX" : "volume")}</button><button class="icon-btn" data-mm="min" data-tip="Diminuir / aumentar o player">${ic("minimize")}</button></div>
     <form class="yt-add"><input placeholder="Cole um link do YouTube para tocar ou pôr na fila…" spellcheck="false"><button class="btn sm primary">${ic("plus", "sm")}Adicionar</button></form>
     <div class="yt-queue"></div></div>`;
   let player = null, ready = false, lastVid = "", seeking = false;
@@ -3845,7 +3858,7 @@ function mountYT(el) {
   }
   const timer = setInterval(() => {
     if (!player || !ready) return;
-    if (S.deaf) player.mute(); else player.unMute();
+    if (S.deaf || musicMuted()) player.mute(); else player.unMute();
     const s = st();
     const dur = player.getDuration ? player.getDuration() || 0 : 0, cur = s && s.vid ? ytPos(s) : 0;
     const seek = el.querySelector(".yt-seek");
@@ -3918,7 +3931,7 @@ function spMeta(uri) {
 }
 function mountSpotify(el) {
   el.innerHTML = `<div class="yt-wrap sp-wrap"><div class="sp-player"><div class="sp-frame"></div><div class="yt-empty sp-empty">${ic("music", "lg")}<b>Ouvir juntos no Spotify</b><small>Cole aqui embaixo o link de uma música, álbum, playlist ou podcast do Spotify (Compartilhar › Copiar link). Todo mundo na call ouve junto.</small></div></div>
-    <div class="yt-bar"><button class="icon-btn" data-sp="toggle" data-tip="Tocar / pausar para todos">${ic("play")}</button><button class="icon-btn" data-sp="skip" data-tip="Próxima da fila">${ic("skip")}</button><span class="yt-time">0:00</span><input type="range" class="yt-seek" min="0" max="100" value="0" step="0.5"><span class="yt-dur">0:00</span></div>
+    <div class="yt-bar"><button class="icon-btn" data-sp="toggle" data-tip="Tocar / pausar para todos">${ic("play")}</button><button class="icon-btn" data-sp="skip" data-tip="Próxima da fila">${ic("skip")}</button><span class="yt-time">0:00</span><input type="range" class="yt-seek" min="0" max="100" value="0" step="0.5"><span class="yt-dur">0:00</span><span class="mm-sep"></span><button class="icon-btn" data-mm="mute" data-tip="Mutar a música (só para você)">${ic(musicMuted() ? "volumeX" : "volume")}</button><button class="icon-btn" data-mm="min" data-tip="Diminuir / aumentar o player">${ic("minimize")}</button></div>
     <form class="yt-add"><input placeholder="Cole um link do Spotify para tocar ou pôr na fila…" spellcheck="false"><button class="btn sm primary">${ic("plus", "sm")}Adicionar</button></form>
     <div class="yt-queue"></div>
     <small class="sp-note">🎧 Quem estiver logado no Spotify (Premium) ouve as músicas inteiras; sem login, o Spotify toca só uma prévia de 30 s.</small></div>`;
@@ -3968,9 +3981,9 @@ function mountSpotify(el) {
       if (s.playing) setTimeout(() => { if (!alive) return; ctl.play(); const w = posOf(s); if (spSingle(s.uri) && w > 2) setTimeout(() => ctl.seek(w), 900); }, 600);
       return;
     }
-    if (s.playing && pb.paused) ctl.resume();
-    if (!s.playing && !pb.paused) ctl.pause();
-    if (s.playing && spSingle(s.uri) && pb.dur) {
+    if (s.playing && pb.paused && !musicMuted()) ctl.resume();
+    if ((!s.playing || musicMuted()) && !pb.paused) ctl.pause();
+    if (s.playing && !musicMuted() && spSingle(s.uri) && pb.dur) {
       const want = posOf(s);
       if (want * 1000 < pb.dur && Math.abs(pb.pos / 1000 - want) > 2.5) ctl.seek(want);
     }
@@ -3982,7 +3995,7 @@ function mountSpotify(el) {
     if (!seeking) { seek.max = Math.max(1, dur); seek.value = Math.min(cur, dur || cur); }
     el.querySelector(".yt-time").textContent = fmtSec(cur);
     el.querySelector(".yt-dur").textContent = fmtSec(dur);
-    if (ctl && ready && S.deaf && !pb.paused) ctl.pause();
+    if (ctl && ready && (S.deaf || musicMuted()) && !pb.paused) ctl.pause();
   }, 500);
   const drift = setInterval(() => { if (!S.deaf) sync(); }, 4000);
   el.addEventListener("click", e => {

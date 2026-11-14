@@ -1340,3 +1340,12 @@ html.reduce-motion .gp-spin { border-top-color: var(--accent); border-right-colo
 .news .nw-e { width: 36px; height: 36px; flex: none; border-radius: 10px; display: grid; place-items: center; background: var(--bg-3); font-size: 18px; }
 .news b { display: block; }
 .news small { color: var(--text-2); font-size: 13px; }
+
+/* player de música diminuído: só a imagem e os botões */
+.mm-sep { width: 1px; height: 20px; background: rgba(255,255,255,.12); margin: 0 2px; }
+.act-panel:not(.big) .yt-add, .act-panel:not(.big) .yt-queue, .act-panel:not(.big) .sp-note,
+.act-panel:not(.big) .yt-seek, .act-panel:not(.big) .yt-vol, .act-panel:not(.big) .yt-time, .act-panel:not(.big) .yt-dur { display: none; }
+.act-panel:not(.big) .yt-wrap { padding: 6px; gap: 4px; }
+.act-panel:not(.big) .yt-bar { justify-content: center; }
+.act-panel:not(.big) .yt-player, .act-panel:not(.big) .sp-player { min-height: 0; }
+.act-panel > .yt-wrap { width: 100%; align-self: stretch; }
