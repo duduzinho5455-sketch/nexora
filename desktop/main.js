@@ -1,0 +1,149 @@
+/**
+ * NEXORA para Windows (Electron)
+ * Abre o NEXORA numa janela própria, com seletor de tela, ícone na bandeja
+ * e o NEXORA Agente embutido (controle remoto sem baixar nada à parte).
+ */
+"use strict";
+const { app, BrowserWindow, shell, session, desktopCapturer, ipcMain, Menu, Tray, nativeImage } = require("electron");
+const path = require("node:path");
+const fs = require("node:fs");
+const crypto = require("node:crypto");
+const { spawn } = require("node:child_process");
+
+const APP_URL = (process.env.NEXORA_URL || "https://nexora-ujw6.onrender.com").replace(/\/+$/, "");
+const ORIGIN = new URL(APP_URL).origin;
+const ICON = path.join(__dirname, "build", "icon.png");
+
+if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
+app.setAppUserModelId("com.nexora.app");
+
+let win = null, tray = null, quitting = false;
+let agent = null, agentCode = null;
+
+/* ---------- janela principal ---------- */
+function createWindow() {
+  win = new BrowserWindow({
+    width: 1300, height: 820, minWidth: 940, minHeight: 560,
+    backgroundColor: "#08090f", title: "NEXORA", icon: ICON, show: false, autoHideMenuBar: true,
+    webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, sandbox: true, spellcheck: true, backgroundThrottling: false }
+  });
+  Menu.setApplicationMenu(null);
+  win.once("ready-to-show", () => win.show());
+  win.loadURL(APP_URL);
+
+  // links externos (Steam, lojas, sites) abrem fora do app
+  win.webContents.setWindowOpenHandler(({ url }) => { openExternal(url); return { action: "deny" }; });
+  win.webContents.on("will-navigate", (e, url) => {
+    if (!url.startsWith(ORIGIN)) { e.preventDefault(); openExternal(url); }
+  });
+  win.webContents.on("did-fail-load", (_e, code, _desc, _url, isMain) => {
+    if (!isMain || code === -3) return;
+    win.loadFile(path.join(__dirname, "offline.html"), { query: { url: APP_URL } });
+  });
+  win.webContents.on("before-input-event", (e, input) => {
+    if (input.type === "keyDown" && (input.key === "F5" || (input.control && input.key.toLowerCase() === "r"))) { win.webContents.reload(); e.preventDefault(); }
+    if (input.type === "keyDown" && input.key === "F11") { win.setFullScreen(!win.isFullScreen()); e.preventDefault(); }
+  });
+  // fechar a janela só esconde (como o Discord); sair pela bandeja
+  win.on("close", e => { if (!quitting) { e.preventDefault(); win.hide(); } });
+}
+function openExternal(url) {
+  if (/^(https?|steam|mailto):/i.test(url)) shell.openExternal(url).catch(() => {});
+}
+function showWindow() {
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+/* ---------- bandeja ---------- */
+function createTray() {
+  tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: 16, height: 16 }));
+  tray.setToolTip("NEXORA");
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: "Abrir NEXORA", click: showWindow },
+    { label: "Recarregar", click: () => win && win.webContents.reload() },
+    { type: "separator" },
+    { label: "Sair do NEXORA", click: () => { quitting = true; app.quit(); } }
+  ]));
+  tray.on("click", showWindow);
+}
+
+/* ---------- permissões (microfone, câmera, tela, notificações) ---------- */
+function setupPermissions() {
+  const allowed = new Set(["media", "display-capture", "notifications", "fullscreen", "pointerLock", "clipboard-sanitized-write", "local-network-access"]);
+  const fromApp = wc => { try { return new URL(wc.getURL()).origin === ORIGIN; } catch { return false; } };
+  session.defaultSession.setPermissionRequestHandler((wc, perm, cb) => cb(fromApp(wc) && allowed.has(perm)));
+  session.defaultSession.setPermissionCheckHandler((wc, perm) => !!wc && fromApp(wc) && allowed.has(perm));
+
+  // Seletor de tela próprio (o Windows não tem um nativo para apps Electron)
+  session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
+    try {
+      const sources = await desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 400, height: 225 }, fetchWindowIcons: true });
+      const chosen = await pickSource(sources);
+      if (!chosen) return callback({});
+      const res = { video: chosen };
+      if (request.audioRequested) res.audio = "loopback";
+      callback(res);
+    } catch (e) {
+      console.error(e);
+      callback({});
+    }
+  }, { useSystemPicker: false });
+}
+function pickSource(sources) {
+  return new Promise(resolve => {
+    const picker = new BrowserWindow({
+      width: 900, height: 620, parent: win, modal: true, resizable: false, minimizable: false, maximizable: false,
+      backgroundColor: "#0e1019", title: "Escolha o que transmitir", icon: ICON, autoHideMenuBar: true, show: false,
+      webPreferences: { preload: path.join(__dirname, "picker-preload.js"), contextIsolation: true, sandbox: true }
+    });
+    let done = false;
+    const finish = id => {
+      if (done) return;
+      done = true;
+      resolve(id ? sources.find(s => s.id === id) || null : null);
+      if (!picker.isDestroyed()) picker.close();
+    };
+    const onChoose = (_e, id) => finish(id);
+    ipcMain.once("picker:choose", onChoose);
+    picker.on("closed", () => { ipcMain.removeListener("picker:choose", onChoose); finish(null); });
+    picker.loadFile(path.join(__dirname, "picker.html"));
+    picker.webContents.once("did-finish-load", () => {
+      picker.webContents.send("picker:sources", sources.map(s => ({
+        id: s.id, name: s.name, screen: s.id.startsWith("screen:"),
+        thumb: s.thumbnail.isEmpty() ? "" : s.thumbnail.toDataURL(),
+        icon: s.appIcon && !s.appIcon.isEmpty() ? s.appIcon.toDataURL() : ""
+      })));
+      picker.show();
+    });
+  });
+}
+
+/* ---------- NEXORA Agente embutido ---------- */
+function agentScript() {
+  const packed = path.join(process.resourcesPath || "", "agente", "nexora-agente.ps1");
+  if (app.isPackaged && fs.existsSync(packed)) return packed;
+  return path.join(__dirname, "..", "public", "agente", "nexora-agente.ps1");
+}
+ipcMain.handle("agent:start", () => {
+  if (process.platform !== "win32") throw new Error("O controle remoto funciona só no Windows.");
+  if (agent && agent.exitCode === null) return agentCode;
+  agentCode = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
+  agent = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", agentScript(), "-Codigo", agentCode, "-Oculto"], { windowsHide: true, stdio: "ignore" });
+  agent.on("exit", () => { agent = null; });
+  return agentCode;
+});
+ipcMain.handle("agent:stop", () => { stopAgent(); return true; });
+function stopAgent() { if (agent) { try { agent.kill(); } catch {} agent = null; } }
+
+/* ---------- ciclo de vida ---------- */
+app.on("second-instance", showWindow);
+app.on("before-quit", () => { quitting = true; stopAgent(); });
+app.whenReady().then(() => {
+  setupPermissions();
+  createWindow();
+  createTray();
+});
+app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

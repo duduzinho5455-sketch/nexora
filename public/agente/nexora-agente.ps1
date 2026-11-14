@@ -2,7 +2,7 @@
 # Deixa um amigo controlar este PC (mouse e teclado) pelo NEXORA - somente
 # enquanto esta janela estiver aberta e somente depois que VOCE aceitar no NEXORA.
 # Fechar esta janela corta o controle na hora.
-param([int]$Porta = 47800)
+param([int]$Porta = 47800, [string]$Codigo = "", [switch]$Oculto)
 
 Add-Type -TypeDefinition @"
 using System;
@@ -43,14 +43,14 @@ public static class NxInput {
 }
 "@
 
-$codigo = -join (1..6 | ForEach-Object { Get-Random -Minimum 0 -Maximum 10 })
+$codigo = if ($Codigo -match '^\d{6}$') { $Codigo } else { -join (1..6 | ForEach-Object { Get-Random -Minimum 0 -Maximum 10 }) }
 $inv = [Globalization.CultureInfo]::InvariantCulture
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://127.0.0.1:$Porta/")
 try { $listener.Start() } catch {
   Write-Host ""
   Write-Host "  Nao foi possivel abrir a porta $Porta. O agente ja esta aberto em outra janela?" -ForegroundColor Red
-  Read-Host "  Aperte Enter para sair"
+  if (-not $Oculto) { Read-Host "  Aperte Enter para sair" }
   exit 1
 }
 

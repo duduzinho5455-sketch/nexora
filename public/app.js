@@ -78,6 +78,12 @@ const P = {
 const ic = (n, c = "") => `<svg class="ic ${c}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ""}</svg>`;
 const LOGO = '<svg viewBox="0 0 48 48" aria-hidden="true"><defs><linearGradient id="nxg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><path d="M14 35V13l20 22V13" fill="none" stroke="url(#nxg)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
+const DESKTOP = window.nexoraDesktop || null;
+const DESKTOP_URL = "https://github.com/duduzinho5455-sketch/nexora/releases/latest/download/NEXORA-Setup.exe";
+let installPrompt = null;
+window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPrompt = e; });
+window.addEventListener("appinstalled", () => { installPrompt = null; });
+const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 const COLORS = ["#7c5cff", "#22d3ee", "#f472b6", "#34d399", "#fbbf24", "#f87171", "#60a5fa", "#a78bfa", "#fb923c", "#2dd4bf"];
 const STATUS = { online: "Disponível", idle: "Ausente", dnd: "Não perturbe", invisible: "Invisível", offline: "Offline" };
 const EMOJIS = "😀 😂 🤣 😊 😍 🥰 😎 🤩 🥳 😅 😭 😤 😡 🤯 😱 🤔 🫡 😴 🙄 😏 🤡 💀 👻 👽 🤖 💩 👍 👎 👏 🙌 🙏 🤝 💪 👀 🫶 ❤️ 🧡 💛 💚 💙 💜 🖤 💯 🔥 ✨ ⚡ 🎉 🎮 🏆 🎧 🍕 🍔 ☕ 🍺 🚀 ✅ ❌ ⭐ 🌙".split(" ");
@@ -854,6 +860,7 @@ function renderHome() {
       <button class="qcard" data-act="create-server" style="--k:var(--accent)"><span class="qi">${ic("plus")}</span><span><b>Criar servidor</b><small>Seu espaço, suas regras</small></span></button>
       <button class="qcard" data-act="join-server" style="--k:#23d18b"><span class="qi">${ic("link")}</span><span><b>Entrar com convite</b><small>Cole um link ou código</small></span></button>
       <button class="qcard" data-act="discover" style="--k:#0ea5c6"><span class="qi">${ic("compass")}</span><span><b>Explorar</b><small>Comunidades públicas</small></span></button>
+      ${DESKTOP || isStandalone() ? "" : `<button class="qcard" data-act="get-app" style="--k:#f472b6"><span class="qi">${ic("arrowDown")}</span><span><b>Baixar o app</b><small>Windows, Android e iPhone</small></span></button>`}
     </div>
     ${live ? `<div class="section-title">${ic("volume", "sm")} Acontecendo agora</div><div class="vc-live">${live}</div>` : ""}
     <div class="section-title">Seus servidores — ${servers.length}</div>
@@ -1339,6 +1346,7 @@ function onReady(d) {
   } else goHome();
   renderAll();
   if (rejoin && chan(rejoin)) joinVoice(rejoin);
+  if (S.openFriends) { S.openFriends = false; goFriends(); }
   if (S.pendingInvite) { const code = S.pendingInvite; S.pendingInvite = null; try { sessionStorage.removeItem("nx:invite"); } catch {} joinModal(code); }
 }
 
@@ -1836,7 +1844,19 @@ function stopCam(silent) {
 /* ------------------------------------------------------------------ */
 const AG = { ws: null };
 const agentOk = () => !!(AG.ws && AG.ws.readyState === 1);
-function agentConnect(code = S.settings.agentCode) {
+// No app de PC o agente já vem embutido: o app abre ele sozinho, escondido.
+async function agentConnect(code) {
+  if (agentOk()) return;
+  if (DESKTOP && DESKTOP.startAgent) {
+    const c = await DESKTOP.startAgent();
+    for (let i = 0; i < 16; i++) {
+      try { await agentConnectRaw(c); return; } catch { await new Promise(r => setTimeout(r, 600)); }
+    }
+    throw new Error("Não foi possível iniciar o controle remoto do app.");
+  }
+  return agentConnectRaw(code || S.settings.agentCode);
+}
+function agentConnectRaw(code) {
   return new Promise((res, rej) => {
     if (agentOk()) return res();
     if (!code) return rej(new Error("Abra o NEXORA Agente e digite o código em Configurações › Controle remoto."));
@@ -1898,7 +1918,7 @@ function askControl(p) {
     body: `<div class="invite-card" style="--c:${esc(u.color)}">${avatar(u, 48)}<div><b>${esc(u.username)}</b><small>está assistindo sua transmissão</small></div></div>
       <label class="radio-card on">${ic("gamepad", "lg")}<span><b>Co-op (jogar junto)</b><small>Só teclado e controle — ideal para co-op local. Mouse bloqueado.</small></span><input type="radio" name="cm" value="coop" checked></label>
       <label class="radio-card">${ic("pointer", "lg")}<span><b>Controle total</b><small>Mouse e teclado, como AnyDesk.${surface && surface !== "monitor" ? " <b style='color:var(--yellow)'>Transmita a tela inteira para o mouse cair no lugar certo.</b>" : ""}</small></span><input type="radio" name="cm" value="full"></label>
-      <div class="hint" style="margin:10px 0 0">${agentOk() ? "✅ NEXORA Agente conectado." : "⚠️ O NEXORA Agente precisa estar aberto neste PC (Configurações › Controle remoto)."} Você pode encerrar a qualquer momento.</div>
+      <div class="hint" style="margin:10px 0 0">${DESKTOP || agentOk() ? "✅ Controle remoto pronto." : "⚠️ O NEXORA Agente precisa estar aberto neste PC (Configurações › Controle remoto) — ou use o app de PC, que já vem com ele."} Você pode encerrar a qualquer momento.</div>
       <div class="modal-foot"><button class="btn ghost" data-no>Recusar</button><button class="btn primary" data-yes>Permitir</button></div>`,
     onMount(m, close) {
       m.addEventListener("change", e => { if (e.target.name === "cm") { mode = e.target.value; $$(".radio-card", m).forEach(r => r.classList.toggle("on", r.querySelector("input").checked)); } });
@@ -2765,6 +2785,7 @@ function userSettings(initial) {
     { id: "account", name: "Minha conta", render: renderAccount, mount: mountAccount },
     { id: "voice", name: "Voz e vídeo", render: renderVoiceSettings, mount: mountVoiceSettings },
     { id: "stream", name: "Transmissão", render: () => `<p style="color:var(--muted);margin-top:-8px">Padrão usado ao entrar ao vivo. Você pode mudar durante a transmissão.</p><span class="label">Qualidade padrão</span><div class="qgrid" style="margin-top:8px">${Object.entries(QUALITY).map(([k, v]) => `<button type="button" class="qopt${k === S.settings.shareQuality ? " on" : ""}" data-q="${k}">${v.tag ? `<span class="tag">${v.tag}</span>` : ""}<b>${v.label}</b><small>${v.sub}</small></button>`).join("")}</div>${toggleRow("shareAudio", "Transmitir áudio por padrão", "Inclui o som da aba ou do sistema", S.settings.shareAudio)}<div class="hint" style="margin-top:16px">Como o NEXORA economiza recursos: a tela só é codificada para quem está assistindo, a taxa de bits se divide entre os espectadores, o codec é escolhido pelo modo (VP9 para texto nítido, H.264 com aceleração por hardware para movimento) e o áudio usa Opus com supressão de silêncio.</div>`, mount: p => { p.addEventListener("click", e => { const b = e.target.closest("[data-q]"); if (b) { S.settings.shareQuality = b.dataset.q; saveSettings(); $$("[data-q]", p).forEach(x => x.classList.toggle("on", x === b)); } }); bindToggles(p); } },
+    { id: "app", name: "Baixar o app", render: renderAppDl, mount: mountAppDl },
     { id: "games", name: "Jogos e Steam", render: renderGames, mount: mountGames },
     { id: "remote", name: "Controle remoto", render: renderRemote, mount: mountRemote },
     { label: "Aplicativo" },
@@ -2794,8 +2815,33 @@ function mountGames(p, rerender) {
     if (e.target.closest("[data-clear-game]")) upd({ game: "" });
   });
 }
+async function installApp() {
+  if (installPrompt) {
+    installPrompt.prompt();
+    const r = await installPrompt.userChoice.catch(() => null);
+    installPrompt = null;
+    if (r && r.outcome === "accepted") toast("NEXORA instalado! 🎉", "ok");
+    return true;
+  }
+  return false;
+}
+function renderAppDl() {
+  const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent), android = /Android/i.test(navigator.userAgent);
+  const pwaState = DESKTOP ? "Você já está usando o app de PC. 😎" : isStandalone() ? "✅ O NEXORA já está instalado neste aparelho." : installPrompt ? "" : ios ? "No iPhone/iPad: toque em <b>Compartilhar</b> ⬆️ e depois em <b>Adicionar à Tela de Início</b>." : android ? "No Android: toque no menu ⋮ do Chrome e em <b>Instalar app</b>." : "No Chrome ou Edge: clique no ícone de instalar ⊕ na barra de endereço (ou menu ⋮ › <b>Instalar NEXORA</b>).";
+  return `<p style="color:var(--muted);margin-top:-8px">Use o NEXORA como um app de verdade: janela própria, ícone na área de trabalho e notificações.</p>
+    <div class="steps">
+      <div class="step"><b>${ic("monitor", "sm")}</b><div><b>App para Windows</b><small>Programa completo: seletor de tela próprio, fica na bandeja e já vem com o controle remoto embutido (não precisa do NEXORA Agente).</small>${DESKTOP ? `<small style="color:var(--green)">✅ Instalado — você está nele agora.</small>` : `<a class="btn primary sm" href="${DESKTOP_URL}" target="_blank" rel="noopener">${ic("arrowDown", "sm")}Baixar NEXORA-Setup.exe</a><small>Se o Windows avisar "O Windows protegeu o computador", clique em <b>Mais informações › Executar assim mesmo</b>.</small>`}</div></div>
+      <div class="step"><b>${ic("users", "sm")}</b><div><b>Instalar pelo navegador (PC e celular)</b><small>Leve e sem baixar nada: vira um app com ícone, direto do site.</small>${installPrompt && !DESKTOP ? `<button class="btn primary sm" data-install>${ic("plus", "sm")}Instalar NEXORA</button>` : ""}${pwaState ? `<small>${pwaState}</small>` : ""}</div></div>
+    </div>`;
+}
+function mountAppDl(p, rerender) {
+  const b = p.querySelector("[data-install]");
+  if (b) b.onclick = async () => { await installApp(); rerender(); };
+}
 function renderRemote() {
   const local = LOCAL || location.protocol === "file:";
+  if (DESKTOP) return `<p style="color:var(--muted);margin-top:-8px">Deixe um amigo controlar seu PC (como AnyDesk) ou jogar com você em co-op local pela transmissão.</p>
+    <div class="steps"><div class="step"><b>✓</b><div><b>Já está pronto!</b><small>O app de PC tem o controle remoto embutido. Quando alguém clicar em ${ic("gamepad", "xs")} <b>Pedir controle</b> na sua transmissão, é só escolher <b>Co-op</b> ou <b>Controle total</b>.</small><small>Para jogos que rodam como administrador, abra o NEXORA como administrador também.</small></div></div></div>`;
   return `<p style="color:var(--muted);margin-top:-8px">Deixe um amigo controlar seu PC (como AnyDesk) ou jogar com você em co-op local pela transmissão — como o Remote Play Together da Steam.</p>
     <div class="steps">
       <div class="step"><b>1</b><div><b>Baixe o NEXORA Agente</b><small>Um programinha do Windows que move o mouse e o teclado quando você permite. Não precisa instalar.</small>${local ? `<small style="color:var(--yellow)">Disponível na versão online do NEXORA.</small>` : `<a class="btn sm" href="/agente/NEXORA-Agente.zip" download>${ic("arrowDown", "sm")}Baixar NEXORA-Agente.zip</a>`}</div></div>
@@ -2806,7 +2852,9 @@ function renderRemote() {
     <div class="hint" style="margin-top:16px">Para jogar co-op: transmita no modo <b>Movimento</b> com <b>720p ou 1080p 60 FPS</b>. Quem joga pode usar teclado ou controle — o controle vira teclas (WASD ou setas) no seu PC.</div>`;
 }
 function mountRemote(p, rerender) {
-  p.querySelector("[data-ag]").onclick = async () => {
+  const btn = p.querySelector("[data-ag]");
+  if (!btn) return;
+  btn.onclick = async () => {
     const code = p.querySelector("#agCode").value.replace(/\D/g, "");
     if (code.length !== 6) { toast("O código tem 6 números.", "warn"); return; }
     S.settings.agentCode = code; saveSettings();
@@ -3083,6 +3131,7 @@ const msgIdOf = a => a.closest(".msg")?.dataset.id;
 const ACTIONS = {
   home: goHome,
   friends: () => goFriends(),
+  "get-app": () => userSettings("app"),
   "friends-tab": a => goFriends(a.dataset.tab),
   "new-dm": () => goFriends(S.friends.size ? "all" : "add"),
   "open-dm": a => openDM(a.dataset.id),
@@ -3374,6 +3423,11 @@ function boot() {
     note.classList.remove("hidden");
     S.pendingInvite = null;
   }
+  if (new URLSearchParams(location.search).get("abrir") === "amigos") S.openFriends = true;
+  if (!LOCAL && "serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }
+  if (DESKTOP) document.documentElement.classList.add("desktop-app");
   $$(".seg button").forEach(b => (b.onclick = () => setAuthMode(b.dataset.mode)));
   $("#authForm").addEventListener("submit", doAuth);
   wire();

@@ -1,0 +1,35 @@
+{
+  "name": "nexora-desktop",
+  "productName": "NEXORA",
+  "version": "1.0.0",
+  "description": "NEXORA para Windows — chat, voz, tela e jogos com os amigos",
+  "author": "NEXORA",
+  "license": "MIT",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --publish never"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.nexora.app",
+    "productName": "NEXORA",
+    "artifactName": "NEXORA-Setup.${ext}",
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": ["main.js", "preload.js", "picker-preload.js", "picker.html", "offline.html", "build/icon.png"],
+    "extraResources": [{ "from": "agente/nexora-agente.ps1", "to": "agente/nexora-agente.ps1" }],
+    "win": { "target": "nsis", "icon": "build/icon.png" },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "NEXORA",
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

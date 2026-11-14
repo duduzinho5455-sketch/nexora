@@ -1,0 +1,53 @@
+name: App de PC (Windows)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - "public/agente/**"
+      - ".github/workflows/app-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Preparar
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force agente | Out-Null
+          Copy-Item ../public/agente/nexora-agente.ps1 agente/ -Force
+          npm version "1.0.${{ github.run_number }}" --no-git-tag-version --allow-same-version
+
+      - name: Instalar dependências
+        run: npm install --no-audit --no-fund
+
+      - name: Montar o instalador
+        run: npx electron-builder --win nsis --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Publicar na página de Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: app-v1.0.${{ github.run_number }}
+          name: NEXORA para Windows 1.0.${{ github.run_number }}
+          body: |
+            Baixe **NEXORA-Setup.exe**, abra e pronto — o atalho aparece na área de trabalho.
+            Se o Windows mostrar "O Windows protegeu o computador", clique em **Mais informações › Executar assim mesmo**
+            (acontece porque o app ainda não tem assinatura digital paga).
+          files: desktop/dist/NEXORA-Setup.exe
+          make_latest: true

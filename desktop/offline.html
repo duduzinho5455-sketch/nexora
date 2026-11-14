@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>NEXORA</title>
+<style>
+  body { margin: 0; height: 100vh; display: grid; place-content: center; justify-items: center; gap: 14px; text-align: center; font: 15px/1.5 "Segoe UI", system-ui, sans-serif; background: #08090f; color: #e8eaf4; }
+  h1 { margin: 0; font-size: 22px; }
+  p { margin: 0; color: #858ba8; max-width: 420px; }
+  button { border: 0; font: inherit; font-weight: 600; padding: 10px 22px; border-radius: 8px; background: #7c5cff; color: #fff; cursor: pointer; }
+</style>
+</head>
+<body>
+  <h1>Não foi possível conectar</h1>
+  <p>Verifique sua internet. Se o servidor estava dormindo (Render gratuito), ele pode levar até um minuto para acordar.</p>
+  <button id="b">Tentar de novo</button>
+  <script>
+    const url = new URLSearchParams(location.search).get("url");
+    const retry = () => { if (url && /^https?:\/\//.test(url)) location.href = url; };
+    document.getElementById("b").onclick = retry;
+    setTimeout(retry, 15000);
+  </script>
+</body>
+</html>
