@@ -112,7 +112,7 @@ const COLORS = ["#7c5cff", "#22d3ee", "#f472b6", "#34d399", "#fbbf24", "#f87171"
 const STATUS = { online: "Disponível", idle: "Ausente", dnd: "Não perturbe", invisible: "Invisível", offline: "Offline" };
 const EMOJIS = "😀 😂 🤣 😊 😍 🥰 😎 🤩 🥳 😅 😭 😤 😡 🤯 😱 🤔 🫡 😴 🙄 😏 🤡 💀 👻 👽 🤖 💩 👍 👎 👏 🙌 🙏 🤝 💪 👀 🫶 ❤️ 🧡 💛 💚 💙 💜 🖤 💯 🔥 ✨ ⚡ 🎉 🎮 🏆 🎧 🍕 🍔 ☕ 🍺 🚀 ✅ ❌ ⭐ 🌙".split(" ");
 const QUICK = ["👍", "😂", "❤️"];
-const SYS = { ocreate: "abriu este pedido. A equipe vai conferir se o Pix caiu na conta.", oreview: "colocou o pedido em análise. 🔎", oapprove: "aprovou o pagamento e liberou o plano! 🎉", oreject: "recusou o pedido.", join: "entrou no servidor. Deem as boas-vindas! 🎉", gcreate: "criou o grupo. 🎉", gjoin: "entrou no grupo. 👋", gleave: "saiu do grupo.", gname: "mudou o nome do grupo." };
+const SYS = { ocreate: "abriu este pedido. A equipe vai conferir se o Pix caiu na conta.", oreview: "colocou o pedido em análise. 🔎", oapprove: "aprovou o pagamento e liberou o plano! 🎉", oreject: "recusou o pedido.", oexpire: "— o pedido expirou depois de 7 dias sem resposta. Se você pagou, avise aqui que a equipe confere.", join: "entrou no servidor. Deem as boas-vindas! 🎉", gcreate: "criou o grupo. 🎉", gjoin: "entrou no grupo. 👋", gleave: "saiu do grupo.", gname: "mudou o nome do grupo." };
 const QUALITY = {
   "720": { label: "720p", sub: "30 FPS · leve", w: 1280, h: 720, fps: 30, br: 2500000 },
   "720-60": { label: "720p", sub: "60 FPS · jogo leve", w: 1280, h: 720, fps: 60, br: 4500000, tag: "COOP" },
@@ -180,8 +180,9 @@ function chan(cid = S.channelId) {
 const isDm = cid => typeof cid === "string" && (cid.startsWith("d.") || cid.startsWith("g."));
 const isTicket = cid => typeof cid === "string" && cid.startsWith("t.");
 const fmtMoney = c => "R$ " + (c / 100).toFixed(2).replace(".", ",");
-const ORDER_STATUS = { pending: ["Pendente", "st-pend"], review: ["Em análise", "st-rev"], approved: ["Aprovado", "st-ok"], rejected: ["Recusado", "st-bad"] };
+const ORDER_STATUS = { pending: ["Pendente", "st-pend"], review: ["Em análise", "st-rev"], approved: ["Aprovado", "st-ok"], rejected: ["Recusado", "st-bad"], expired: ["Expirado", "st-bad"] };
 const PLAN_RANK = { plus: 1, pro: 2, max: 3 };
+const PLAN_NAME = { plus: "VIP", pro: "Pro", max: "Max" };
 const myRank = () => (S.me && PLAN_RANK[S.me.plan]) || 0;
 const groupTitle = d => d.name || d.members.filter(id => !S.me || id !== S.me.id).map(id => user(id).username).slice(0, 4).join(", ") || "Grupo";
 const dmTitle = d => (d.group ? groupTitle(d) : user(d.userId).username);
@@ -229,7 +230,7 @@ function nameHTML(u) {
 const csText = u => (u.cs ? `${u.cs.e ? esc(u.cs.e) + " " : ""}${esc(u.cs.t || "")}` : "");
 function badges(u) {
   const b = [];
-  if (u.plan) b.push([{ plus: "💠", pro: "💎", max: "👑" }[u.plan] || "💠", `Assinante ${{ plus: "Plus", pro: "Pro", max: "Max" }[u.plan] || ""}`]);
+  if (u.plan) b.push([{ plus: "💠", pro: "💎", max: "👑" }[u.plan] || "💠", `Assinante ${PLAN_NAME[u.plan] || ""}`]);
   if (u.created && u.created < Date.UTC(2027, 0, 1)) b.push(["⭐", "Fundador — chegou no começo da Auryx Nexavória"]);
   if ([...S.servers.values()].some(s => s.ownerId === u.id)) b.push(["🏰", "Dono de servidor"]);
   if (u.steam) b.push(["🎮", "Steam conectada"]);
@@ -521,7 +522,7 @@ function renderTop() {
   } else if (S.view === "friends") {
     icon.innerHTML = ic("users"); title.textContent = "Amigos"; topic.textContent = ""; actions.innerHTML = search;
   } else if (S.view === "premium") {
-    icon.innerHTML = ic("gem"); title.textContent = "Central de Pagamentos"; topic.textContent = "Planos Plus, Pro e Max"; actions.innerHTML = search;
+    icon.innerHTML = ic("gem"); title.textContent = "Central de Pagamentos"; topic.textContent = "Planos VIP, Pro e Max"; actions.innerHTML = search;
   } else if (S.view === "ai") {
     icon.innerHTML = ic("sparkles"); title.textContent = "Aury"; topic.textContent = "Sua IA exclusiva do VIP"; actions.innerHTML = search;
   } else if (S.view === "games") {
@@ -648,6 +649,7 @@ function onOrderUpdate(o) {
     if (o.status === "approved") { toast(`Pagamento aprovado! Plano ${o.plan} liberado. 🎉`, "ok", 6000); confetti(); sfx("live"); }
     if (o.status === "rejected") toast(`Seu pedido do plano ${o.plan} foi recusado: ${o.reason}`, "warn", 8000);
     if (o.status === "review") toast(`Seu pedido do plano ${o.plan} está em análise.`, "info");
+    if (o.status === "approved") loadPlans().then(() => S.view === "premium" && renderPremium());
   }
   if (S.view === "premium") renderPremium();
   if (S.view === "admin") renderAdmin(true);
@@ -658,6 +660,7 @@ async function loadPlans() {
   const r = await emit("plans:get", {});
   if (r.error) { toast(r.error, "error"); return false; }
   S.plans = r.plans;
+  S.planMine = r.mine; S.planLast = r.last || null; S.planLog = r.log || [];
   for (const o of r.orders) S.orders.set(o.id, o);
   return true;
 }
@@ -672,23 +675,44 @@ async function goPremium() {
 function renderPremium() {
   const root = $("#premiumView");
   if (!root || !S.plans.length) return;
-  const mine = S.me.planInfo;
+  const mine = S.planMine || S.me.planInfo, last = S.planLast, log = S.planLog || [];
   const myOrders = [...S.orders.values()].filter(o => o.uid === S.me.id).sort((a, b) => b.created - a.created);
   const pending = myOrders.find(o => o.status === "pending" || o.status === "review");
+  const day = 86400e3, left = mine ? Math.max(0, Math.ceil((mine.until - Date.now()) / day)) : 0;
+  const span = mine && mine.since ? Math.max(day, mine.until - mine.since) : 30 * day;
+  const pct = mine ? Math.max(4, Math.min(100, Math.round(((mine.until - Date.now()) / span) * 100))) : 0;
+  const EMO = { plus: "💠", pro: "💎", max: "👑" };
+  const sub = mine
+    ? `<div class="sub-card sub-${esc(mine.tier)}"><div class="sub-top"><span class="sub-emo">${EMO[mine.tier] || "💠"}</span><div><small>Sua assinatura</small><b>${esc(PLAN_NAME[mine.tier] || "")} <span class="ost st-ok">ativa</span></b></div><div class="sub-left"><b>${left}</b><small>${left === 1 ? "dia restante" : "dias restantes"}</small></div></div>
+        <div class="sub-bar"><i style="width:${pct}%"></i></div>
+        <div class="sub-dates"><span>Ativada em <b>${mine.since ? fmtDate(mine.since) : "—"}</b></span><span>Vence em <b>${fmtDate(mine.until)}</b></span></div>
+        ${left <= 3 ? `<div class="sub-warn">${ic("info", "sm")} Vence logo! Renove para não perder os benefícios — os dias novos somam aos que faltam.</div>` : ""}
+        <div class="sub-acts"><button class="btn primary" data-act="buy-plan" data-tier="${esc(mine.tier)}">${ic("gem", "sm")}Renovar +30 dias</button><small>Sem cobrança automática: o plano só renova quando você paga. Para cancelar, é só não renovar.</small></div></div>`
+    : `<div class="sub-card sub-none"><div class="sub-top"><span class="sub-emo">✨</span><div><small>Sua assinatura</small><b>${last ? `${esc(PLAN_NAME[last.tier] || "")} <span class="ost st-bad">vencida em ${fmtDate(last.until)}</span>` : "Você ainda não assina"}</b></div></div><p>${last ? "Seus benefícios estão pausados, mas nada foi apagado: renove e tudo volta como estava." : "Escolha um plano abaixo. A partir de <b>R$ 5,99 por mês</b>, sem fidelidade."}</p></div>`;
   root.innerHTML = `<div class="page premium">
-    <div class="hero prem-hero"><h1>${ic("gem", "lg")} Auryx Premium</h1><p>${mine ? `Seu plano <b>${esc({ plus: "Plus", pro: "Pro", max: "Max" }[mine.tier])}</b> está ativo até <b>${fmtDate(mine.until)}</b>. Obrigado pelo apoio! 💜` : "Apoie a Auryx Nexavória e desbloqueie selos, perfil turbinado e arquivos maiores."}</p></div>
-    ${pending ? `<div class="prem-alert">${ic("info")}<span>Você tem um pedido <b>${esc(pending.plan)}</b> ${statusTag(pending.status)}. A equipe vai conferir o Pix e responder no atendimento.</span><button class="btn sm" data-act="open-ticket" data-id="${pending.id}">Abrir atendimento</button></div>` : ""}
+    <div class="hero prem-hero"><h1>${ic("gem", "lg")} Auryx VIP</h1><p>Apoie a Auryx Nexavória e ganhe insígnia, perfil turbinado, a Aury (IA) e arquivos maiores. Pagamento por Pix, sem cartão e sem renovação automática.</p></div>
+    ${pending ? `<div class="prem-alert">${ic("info")}<span>Você tem um pedido <b>${esc(pending.plan)}</b> ${statusTag(pending.status)}. A equipe confere o Pix e responde no atendimento.</span><button class="btn sm" data-act="open-ticket" data-id="${pending.id}">Abrir atendimento</button></div>` : ""}
+    ${sub}
     <div class="plans">${S.plans.map(p => {
-      const active = mine && mine.tier === p.tier;
-      return `<div class="plan plan-${p.tier}${p.tier === "pro" ? " featured" : ""}">${p.tier === "pro" ? `<span class="plan-flag">Mais escolhido</span>` : ""}
-        <h3>${esc(p.name)}</h3><div class="price"><b>${fmtMoney(p.price)}</b><small>/mês</small></div>
+      const active = mine && mine.tier === p.tier, feat = p.tier === "plus";
+      const change = mine && !active ? `<small class="plan-note">Os dias que faltam do seu plano atual viram dias deste, pelo valor.</small>` : "";
+      return `<div class="plan plan-${p.tier}${feat ? " featured" : ""}${active ? " current" : ""}">${feat ? `<span class="plan-flag">Oficial · mais escolhido</span>` : ""}${active ? `<span class="plan-flag cur">Seu plano</span>` : ""}
+        <div class="plan-emo">${EMO[p.tier] || "💠"}</div><h3>${esc(p.name)}</h3><div class="price"><b>${fmtMoney(p.price)}</b><small>/mês</small></div>
         <ul>${p.benefits.map(b => `<li>${ic("check", "sm")}${esc(b)}</li>`).join("")}</ul>
-        <button class="btn ${p.tier === "pro" ? "primary" : ""} big" data-act="buy-plan" data-tier="${p.tier}">${active ? "Renovar por +30 dias" : `Assinar ${esc(p.name)}`}</button></div>`;
+        <button class="btn ${feat || active ? "primary" : ""} big" data-act="buy-plan" data-tier="${p.tier}">${active ? "Renovar +30 dias" : `Assinar ${esc(p.name)}`}</button>${change}</div>`;
     }).join("")}</div>
-    <div class="section-title">${ic("receipt", "sm")} Meus pedidos</div>
-    ${myOrders.length ? `<div class="orders">${myOrders.map(o => `<div class="order-row"><div class="or-main"><b>Plano ${esc(o.plan)}</b><small>${fmtMoney(o.amount)} · ${fmtDate(o.created)}${o.status === "rejected" && o.reason ? ` · Motivo: ${esc(o.reason)}` : ""}${o.decidedBy ? ` · por ${esc(o.decidedBy)}` : ""}</small></div>${statusTag(o.status)}<button class="btn sm" data-act="open-ticket" data-id="${o.id}">${ic("message", "sm")}Atendimento</button></div>`).join("")}</div>` : `<p style="color:var(--muted)">Nenhum pedido ainda.</p>`}
-    <div class="prem-how"><b>Como funciona</b><ol><li>Escolha o plano e pague pelo Pix (link do Nubank).</li><li>Volte aqui e envie o comprovante.</li><li>Um ADM confere se o valor caiu na conta e libera o plano — você acompanha tudo pelo atendimento.</li></ol></div>
+    <div class="section-title">${ic("receipt", "sm")} Pagamentos</div>
+    ${myOrders.length ? `<div class="orders">${myOrders.map(o => `<div class="order-row"><div class="or-main"><b>Plano ${esc(o.plan)}</b><small>${fmtMoney(o.amount)} · ${fmtDate(o.created)}${o.status === "rejected" && o.reason ? ` · Motivo: ${esc(o.reason)}` : ""}${o.status === "expired" ? " · ficou 7 dias sem resposta — chame no atendimento se você pagou" : ""}${o.decidedBy ? ` · por ${esc(o.decidedBy)}` : ""}</small></div>${statusTag(o.status)}<button class="btn sm" data-act="open-ticket" data-id="${o.id}">${ic("message", "sm")}Atendimento</button></div>`).join("")}</div>` : `<div class="empty" style="padding:24px">${ic("receipt")}<p>Nenhum pagamento ainda.</p></div>`}
+    ${log.length ? `<div class="section-title">${ic("gem", "sm")} Histórico da assinatura</div><div class="orders">${log.map(x => `<div class="order-row"><div class="or-main"><b>${esc(x.name)} · +${x.days} dias</b><small>${new Date(x.at).toLocaleString("pt-BR")}${x.from && x.from !== x.tier ? ` · trocou de ${esc(PLAN_NAME[x.from] || x.from)}${x.credit ? ` (+${Math.round(x.credit / 24)} dias convertidos)` : ""}` : ""}${x.order ? "" : " · liberado pela equipe"}</small></div></div>`).join("")}</div>` : ""}
+    <div class="prem-how"><b>Como funciona</b><ol><li>Escolha o plano e pague pelo Pix (QR Code ou link oficial do Nubank).</li><li>Envie o comprovante aqui no app.</li><li>Um ADM confere se o valor caiu na conta e libera na hora — você acompanha pelo atendimento, e a Aury (IA) tira dúvidas enquanto isso.</li></ol></div>
   </div>`;
+}
+let qrLib = null;
+function loadQr() {
+  if (window.qrcode) return Promise.resolve();
+  if (qrLib) return qrLib;
+  qrLib = new Promise((res, rej) => { const s = document.createElement("script"); s.src = "/vendor/qrcode/qrcode.js"; s.onload = res; s.onerror = () => { qrLib = null; rej(new Error("qr")); }; document.head.append(s); });
+  return qrLib;
 }
 function buyModal(tier) {
   const p = S.plans.find(x => x.tier === tier);
@@ -699,10 +723,10 @@ function buyModal(tier) {
     body: `<div class="buy"></div>`,
     onMount(m, close) {
       const box = m.querySelector(".buy");
-      const draw = () => {
+      let draw = () => {
         box.innerHTML = `<div class="steps-bar">${["Pagar", "Comprovante", "Pronto"].map((s, i) => `<span class="${i + 1 === step ? "on" : i + 1 < step ? "done" : ""}"><b>${i + 1 < step ? "✓" : i + 1}</b>${s}</span>`).join("")}</div>` +
           (step === 1 ? `<div class="pay-box"><div class="pay-amount">${fmtMoney(p.price)}</div><p>Pague <b>exatamente esse valor</b> pelo Pix no link oficial de cobrança. Ele abre no seu navegador ou no app do banco.</p>
-              <a class="btn primary big" href="${esc(p.link)}" target="_blank" rel="noopener noreferrer" data-paylink>${ic("arrowRight", "sm")}Abrir cobrança Pix (Nubank)</a>
+              <div class="pay-qr"><div class="qr-box" data-qr><small>Gerando QR Code…</small></div><div class="qr-side"><b>No celular</b><small>Aponte a câmera para o QR Code: abre a cobrança oficial do Nubank, onde dá para pagar pelo app do seu banco (QR ou Pix copia e cola).</small><b>Neste aparelho</b><a class="btn primary" href="${esc(p.link)}" target="_blank" rel="noopener noreferrer" data-paylink>${ic("arrowRight", "sm")}Abrir cobrança Pix</a><button class="btn sm" type="button" data-copylink>${ic("copy", "sm")}Copiar link de pagamento</button></div></div>
               <small>Depois de pagar, volte aqui e clique em <b>Já paguei</b>.</small></div>
               <div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" data-next>Já paguei →</button></div>`
           : step === 2 ? `<p style="margin-top:0;color:var(--text-2)">Envie o comprovante do Pix (print ou PDF). Ele fica <b>privado</b>: só você e a equipe ADM conseguem ver.</p>
@@ -712,8 +736,19 @@ function buyModal(tier) {
           : `<div class="pay-done">${ic("check", "lg")}<h3>Pedido enviado!</h3><p>Status: ${statusTag("pending")}</p><p>A equipe vai conferir se o Pix caiu na conta. Você recebe aviso quando o plano for liberado — e pode conversar com a equipe no atendimento.</p></div>
               <div class="modal-foot"><button class="btn ghost" data-close>Fechar</button><button class="btn primary" data-ticket>Abrir atendimento</button></div>`);
       };
+      const drawQr = () => {
+        const box = m.querySelector("[data-qr]");
+        if (!box) return;
+        loadQr().then(() => {
+          const q = qrcode(0, "M"); q.addData(p.link); q.make();
+          box.innerHTML = q.createSvgTag({ cellSize: 5, margin: 2, scalable: true, alt: "QR Code da cobrança Pix" });
+        }).catch(() => { box.innerHTML = "<small>Não deu para gerar o QR. Use o botão ao lado.</small>"; });
+      };
+      const draw0 = draw;
+      draw = () => { draw0(); if (step === 1) drawQr(); };
       draw();
       m.addEventListener("click", e => {
+        if (e.target.closest("[data-copylink]")) { navigator.clipboard.writeText(p.link).then(() => toast("Link de pagamento copiado.", "ok")).catch(() => {}); return; }
         if (e.target.closest("[data-next]")) { step = 2; draw(); }
         if (e.target.closest("[data-back]")) { step = 1; draw(); }
         if (e.target.closest("[data-ticket]") && box._order) { close(); openTicket(box._order.id); }
@@ -787,7 +822,7 @@ async function renderAdmin(soft) {
     const list = body.querySelector("[data-ulist]");
     const r = await emit("admin:users", { q: S.adminQ || "" });
     if (r.error) { list.innerHTML = esc(r.error); return; }
-    list.innerHTML = r.users.map(u => `<div class="adm-user">${avatar(u, 36)}<div class="who"><b>${esc(u.username)}${u.admin ? ` <span class="ost st-rev">ADM</span>` : ""}</b><small>${esc(u.email || "sem e-mail")}${u.email && !u.emailVerified ? " (não confirmado)" : ""}</small></div><div>${u.plan ? `<span class="ost st-ok">${esc({ plus: "Plus", pro: "Pro", max: "Max" }[u.plan])}</span><small style="display:block;color:var(--muted)">até ${fmtDate(u.until)}</small>` : `<small style="color:var(--muted)">sem plano</small>`}</div><div class="ao-acts">${u.banned ? `<span class="ost st-bad" data-tip="${esc(u.banned.reason || "sem motivo")}">Suspensa</span>` : ""}${u.admin ? "" : `<button class="btn sm" data-act="admin-pass" data-uid="${u.id}" data-name="${esc(u.username)}">🔑 Senha</button>`}<button class="btn sm" data-act="admin-grant" data-uid="${u.id}" data-name="${esc(u.username)}">Dar plano</button>${u.plan ? `<button class="btn sm danger" data-act="admin-revoke" data-uid="${u.id}" data-name="${esc(u.username)}">Revogar</button>` : ""}${u.admin ? "" : u.banned ? `<button class="btn sm green" data-act="admin-unban" data-uid="${u.id}" data-name="${esc(u.username)}">Reativar conta</button>` : `<button class="btn sm danger" data-act="admin-ban" data-uid="${u.id}" data-name="${esc(u.username)}">Suspender</button>`}</div></div>`).join("") || `<p style="color:var(--muted)">Ninguém encontrado.</p>`;
+    list.innerHTML = r.users.map(u => `<div class="adm-user">${avatar(u, 36)}<div class="who"><b>${esc(u.username)}${u.admin ? ` <span class="ost st-rev">ADM</span>` : ""}</b><small>${esc(u.email || "sem e-mail")}${u.email && !u.emailVerified ? " (não confirmado)" : ""}</small></div><div>${u.plan ? `<span class="ost st-ok">${esc(PLAN_NAME[u.plan])}</span><small style="display:block;color:var(--muted)">até ${fmtDate(u.until)}</small>` : `<small style="color:var(--muted)">sem plano</small>`}</div><div class="ao-acts">${u.banned ? `<span class="ost st-bad" data-tip="${esc(u.banned.reason || "sem motivo")}">Suspensa</span>` : ""}${u.admin ? "" : `<button class="btn sm" data-act="admin-pass" data-uid="${u.id}" data-name="${esc(u.username)}">🔑 Senha</button>`}<button class="btn sm" data-act="admin-grant" data-uid="${u.id}" data-name="${esc(u.username)}">Dar plano</button>${u.plan ? `<button class="btn sm danger" data-act="admin-revoke" data-uid="${u.id}" data-name="${esc(u.username)}">Revogar</button>` : ""}${u.admin ? "" : u.banned ? `<button class="btn sm green" data-act="admin-unban" data-uid="${u.id}" data-name="${esc(u.username)}">Reativar conta</button>` : `<button class="btn sm danger" data-act="admin-ban" data-uid="${u.id}" data-name="${esc(u.username)}">Suspender</button>`}</div></div>`).join("") || `<p style="color:var(--muted)">Ninguém encontrado.</p>`;
   } else if (tab === "servers") {
     const f = S.adminSrvF || "active";
     body.innerHTML = `<div class="adm-games-head"><div class="chips"><button class="chip${f === "active" ? " on" : ""}" data-act="admin-srv-f" data-f="active">Ativos</button><button class="chip${f === "blocked" ? " on" : ""}" data-act="admin-srv-f" data-f="blocked">🔒 Bloqueados <b data-bcount></b></button></div><form class="add-box" data-ssearch style="flex:1;max-width:380px"><input placeholder="Buscar servidor ou dono" value="${esc(S.adminSrvQ || "")}"><button class="btn primary">Buscar</button></form></div><div data-slist><p style="color:var(--muted)">Carregando…</p></div>`;
@@ -997,7 +1032,7 @@ function renderAIView(scroll) {
   const msgs = AIS.pending ? [...AIS.msgs, AIS.pending] : AIS.msgs;
   list.innerHTML = (!AIS.on ? `<div class="hint" style="margin:12px auto;max-width:560px">⚠️ A Aury ainda não foi ligada pela equipe. Assim que for, ela aparece aqui.</div>` : "") +
     (msgs.length ? msgs.map(aiBubble).join("") : `<div class="ai-hello"><div class="ai-orb">🤖</div><h2>Oi, ${esc(S.me.username)}! Eu sou a Aury.</h2><p>Sua IA exclusiva do VIP. Pergunte o que quiser 👇</p><div class="ai-sugs">${AI_SUGGEST.map(t => `<button type="button" class="ai-sug" data-ai-sug="${esc(t)}">${esc(t)}</button>`).join("")}</div></div>`);
-  $("#aiFoot").innerHTML = `<span>${AIS.used}/${AIS.limit} mensagens hoje · plano ${esc({ plus: "Plus", pro: "Pro", max: "Max" }[AIS.tier] || "")}</span><small>A Aury é uma IA e pode errar. Não envie senhas nem dados de pagamento.</small>`;
+  $("#aiFoot").innerHTML = `<span>${AIS.used}/${AIS.limit} mensagens hoje · plano ${esc(PLAN_NAME[AIS.tier] || "")}</span><small>A Aury é uma IA e pode errar. Não envie senhas nem dados de pagamento.</small>`;
   const send = $("#aiForm .send");
   if (send) send.disabled = AIS.busy || !AIS.on;
   if (scroll) list.scrollTop = list.scrollHeight;
@@ -1266,7 +1301,7 @@ function adminReject(id) {
 function adminGrant(uid, name) {
   modal({
     title: "Dar plano manualmente", sub: esc(name),
-    body: `<span class="label">Plano</span><div class="chips" style="margin:8px 0 14px">${["plus", "pro", "max"].map((t, i) => `<label class="chip${i === 0 ? " on" : ""}"><input type="radio" name="gt" value="${t}" ${i === 0 ? "checked" : ""} hidden>${{ plus: "Plus", pro: "Pro", max: "Max" }[t]}</label>`).join("")}</div>
+    body: `<span class="label">Plano</span><div class="chips" style="margin:8px 0 14px">${["plus", "pro", "max"].map((t, i) => `<label class="chip${i === 0 ? " on" : ""}"><input type="radio" name="gt" value="${t}" ${i === 0 ? "checked" : ""} hidden>${PLAN_NAME[t]}</label>`).join("")}</div>
       <label class="field"><span>Dias</span><input type="number" data-days min="1" max="366" value="30"></label>
       <p class="hint">Use para cortesias ou correções. Fica registrado no histórico com o seu nome.</p>
       <div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" data-go>Dar plano</button></div>`,
@@ -2297,6 +2332,12 @@ function connect() {
   sock.on("act:sum", ({ channelId, type }) => { if (type) S.acts.set(channelId, type); else S.acts.delete(channelId); schedule("side"); });
   sock.on("act:ev", ev => { if (V.actEl && V.actEl._onEv) V.actEl._onEv(ev); });
   sock.on("call:fx", onCallFx);
+  sock.on("plan:notice", ({ kind, tier, until }) => {
+    const n = PLAN_NAME[tier] || "plano";
+    if (kind === "soon") toast(`Seu ${n} vence em ${fmtDate(until)}. Renove em Premium para não perder os benefícios.`, "warn", 9000);
+    else toast(`Seu ${n} venceu. Os benefícios foram pausados — nada foi apagado.`, "warn", 9000);
+    if (S.view === "premium") loadPlans().then(renderPremium);
+  });
   sock.on("session:ended", () => { toast("Sua conta foi desconectada deste aparelho.", "warn", 6000); setTimeout(() => { teardownVoice(true); store.del("token"); location.reload(); }, 1500); });
   sock.on("voice:kicked", ({ reason } = {}) => { teardownVoice(); if (reason) toast(reason, "warn", 5000); renderAll(); });
 }
@@ -4800,7 +4841,7 @@ function mountTurbo(p) {
     const u = { ...me, avatar: d.avatar, banner: d.banner, theme: d.useTheme ? d.theme : null, pron: d.pron, cs: d.cs.t || d.cs.e ? d.cs : null, fx: d.fx, pfx: d.pfx, status: me.statusPref === "invisible" ? "offline" : me.statusPref };
     return `<div class="popover profile-pop turbo-preview${d.pfx ? " pfx-" + d.pfx : ""}"><div class="pb" style="${bannerStyle(u)}"></div><div class="pc">${avatar(u, 76, true)}${badges(u)}<h3>${nameHTML(u)}${u.pron ? `<small class="pron">${esc(u.pron)}</small>` : ""}</h3><div class="status-line"><i class="dot st-${esc(u.status)}"></i>${STATUS[u.status] || ""}</div>${u.cs ? `<div class="cs-bubble">${csText(u)}</div>` : ""}${u.about ? `<div class="sec"><span class="label">Sobre mim</span>${esc(u.about)}</div>` : ""}</div></div>`;
   };
-  const R = myRank(), PN = ["", "Plus", "Pro", "Max"];
+  const R = myRank(), PN = ["", "VIP", "Pro", "Max"];
   // seção bloqueada: mostra o cadeado e o plano necessário (o servidor também confere)
   const sec = (need, html) => R >= need ? `<div class="tsec">${html}</div>` : `<div class="tsec locked"><div class="lock-tag" data-act="premium">${ic("gem", "xs")} Plano ${PN[need]}</div>${html}</div>`;
   const draw = () => {

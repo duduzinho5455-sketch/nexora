@@ -196,19 +196,19 @@ function gameOf(u) {
 /* Planos Premium (pagos por Pix, liberados só por um ADM)             */
 /* ------------------------------------------------------------------ */
 const PLANS = {
-  plus: { tier: "plus", name: "Plus", price: 599, rank: 1, link: "https://nubank.com.br/cobrar/577jqn/6af86b8d-a317-400e-85ce-bfb41001dfa5",
-    benefits: ["Selo Plus no perfil", "Cores do perfil em degradê", "Status personalizado com emoji", "Arquivos de até 15 MB"] },
+  plus: { tier: "plus", name: "VIP", price: 599, rank: 1, link: "https://nubank.com.br/cobrar/577jqn/6af86b8d-a317-400e-85ce-bfb41001dfa5",
+    benefits: ["Insígnia VIP 💠 ao lado do nome", "Cores do perfil em degradê", "Status personalizado com emoji", "Aury, a IA: 40 mensagens por dia", "Arquivos de até 15 MB"] },
   pro: { tier: "pro", name: "Pro", price: 1499, rank: 2, link: "https://nubank.com.br/cobrar/577jqn/6af86c01-b569-4fcc-8170-bc699f49f89f",
-    benefits: ["Tudo do Plus", "Selo Pro", "Avatar animado (GIF) e imagem enviada", "Banner no perfil", "Efeito no nome (degradê, brilho, arco-íris)", "Arquivos de até 25 MB"] },
+    benefits: ["Tudo do VIP", "Insígnia Pro 💎", "Aury, a IA: 120 mensagens por dia", "Avatar animado (GIF) e imagem enviada", "Banner no perfil", "Efeito no nome (degradê, brilho, arco-íris)", "Arquivos de até 25 MB"] },
   max: { tier: "max", name: "Max", price: 3499, rank: 3, link: "https://nubank.com.br/cobrar/577jqn/6af86c1d-40ed-4da3-82cc-221f2402949a",
-    benefits: ["Tudo do Pro", "Selo Max exclusivo", "Efeitos animados no perfil (aurora, neon, fogo, estrelas)", "Arquivos de até 50 MB", "Prioridade no atendimento"] }
+    benefits: ["Tudo do Pro", "Insígnia Max 👑 exclusiva", "Aury, a IA: 300 mensagens por dia", "Efeitos animados no perfil (aurora, neon, fogo, estrelas)", "Arquivos de até 50 MB", "Prioridade no atendimento"] }
 };
 const PLAN_DAYS = 30;
 const planOf = u => { const p = u && u.plan; return p && PLANS[p.tier] && p.until > Date.now() ? p.tier : ""; };
 const rankOf = u => (PLANS[planOf(u)] || { rank: 0 }).rank;
 const maxFileOf = u => [8, 15, 25, 50][rankOf(u)] * 1024 * 1024;
 const NEED = { theme: 1, cs: 1, avatarFile: 2, banner: 2, fx: 2, pfx: 3 };   // nível mínimo de cada benefício
-const RANK_NAME = ["", "Plus", "Pro", "Max"];
+const RANK_NAME = ["", "VIP", "Pro", "Max"];
 
 function pubUser(u) {
   const off = presence(u) === "offline";
@@ -669,7 +669,7 @@ async function handleUpload(req, res) {
   await putFileData(id, buf);
   q.n++; q.bytes += buf.length;
   db.files[id] = { o: user.id, n: name, t: type, s: buf.length, c: now };
-  if (priv) db.files[id].p = 1;
+  if (priv) { db.files[id].p = 1; db.files[id].h = crypto.createHash("sha256").update(buf).digest("hex"); }
   save();
   sendJson(res, 200, { id, name, type, size: buf.length, url: fileUrl(id, name) });
 }
@@ -850,6 +850,61 @@ Novidades: chat dentro da call, Spotify nas atividades, Aury (IA do VIP), sobrep
 
 👉 Feche e abra o app (ou recarregue a página com F5) para usar a versão nova.`;
 const newsSent = new Set();
+/* ---------- pedidos do VIP: visão e avisos ---------- */
+function orderView(o, full) {
+  const u = db.users[o.uid], f = db.files[o.receipt];
+  const v = { id: o.id, uid: o.uid, tier: o.tier, plan: PLANS[o.tier].name, amount: o.amount, status: o.status, created: o.created, updated: o.updated, reason: o.reason || "", note: o.note || "", decidedBy: o.by ? (db.users[o.by] || {}).username || "?" : "", decidedAt: o.decided || 0 };
+  v.user = u ? pubUser(u) : null;
+  v.receipt = f ? { id: o.receipt, n: f.n, t: f.t, s: f.s } : null;
+  if (full && u) v.userEmail = u.email || "";
+  const list = db.messages["t." + o.id];
+  v.last = list && list.length ? { id: list[list.length - 1].id, ts: list[list.length - 1].ts, a: list[list.length - 1].a } : null;
+  return v;
+}
+function pushOrder(o) {
+  io.to("u:" + o.uid).emit("order:update", { order: orderView(o, false) });
+  io.to("admins").emit("order:update", { order: orderView(o, true) });
+}
+
+const PENDING_DAYS = 7;                      // pedido sem resposta vira "expirado" (o ADM ainda pode aprovar)
+const ordersOpen = o => o.status === "pending" || o.status === "review";
+function orderSysMsg(o, kind, text) {
+  const cid = "t." + o.id, list = db.messages[cid] || (db.messages[cid] = []);
+  const m = { id: msgId(), a: o.uid, t: text || "", ts: Date.now(), sys: kind };
+  list.push(m);
+  io.to(["u:" + o.uid, "admins"]).emit("msg", { channelId: cid, serverId: null, m });
+}
+/* Rotina de hora em hora: pedidos esquecidos expiram e quem está perto de vencer recebe aviso */
+function vipSweep() {
+  const now = Date.now();
+  let changed = false;
+  for (const o of Object.values(db.orders)) {
+    if (ordersOpen(o) && now - o.created > PENDING_DAYS * 86400e3) {
+      o.status = "expired"; o.updated = now; changed = true;
+      orderSysMsg(o, "oexpire", "");
+      pushOrder(o);
+    }
+  }
+  for (const u of Object.values(db.users)) {
+    const p = u.plan;
+    if (!p || !p.until || !PLANS[p.tier]) continue;
+    const left = p.until - now, name = PLANS[p.tier].name;
+    if (left > 0 && left < 3 * 86400e3 && p.warned !== p.until) {
+      p.warned = p.until; changed = true;
+      const d = Math.max(1, Math.ceil(left / 86400e3));
+      pushTo(u.id, { title: `Seu ${name} vence em ${d} ${d === 1 ? "dia" : "dias"}`, body: "Renove em Premium para não perder os benefícios.", url: "/?abrir=premium", tag: "plan-warn" });
+      io.to("u:" + u.id).emit("plan:notice", { kind: "soon", tier: p.tier, until: p.until });
+    }
+    if (left <= 0 && p.ended !== p.until) {
+      p.ended = p.until; changed = true;
+      pushTo(u.id, { title: `Seu ${name} venceu`, body: "Os benefícios foram pausados — nada foi apagado. Renove quando quiser.", url: "/?abrir=premium", tag: "plan-end" });
+      io.to("u:" + u.id).emit("plan:notice", { kind: "ended", tier: p.tier, until: p.until });
+      io.to("u:" + u.id).emit("me:update", { me: meView(u) });
+      emitToPeers(u.id, "user:update", { user: pubUser(u) });
+    }
+  }
+  if (changed) save();
+}
 const sockAlias = new Map();   // socket antigo -> socket novo (para os sinais de quem ainda usa o id antigo)
 function holdVoice(sock) {
   const v = voice.get(sock);
@@ -946,7 +1001,8 @@ const ORDER_STATUS = {
   pending: "AGUARDANDO — a equipe ainda não abriu o pedido",
   review: "EM ANÁLISE — um ADM está conferindo se o Pix caiu na conta",
   approved: "APROVADO — o pagamento foi confirmado e o plano já está liberado",
-  rejected: "RECUSADO pela equipe"
+  rejected: "RECUSADO pela equipe",
+  expired: "EXPIRADO — ficou 7 dias sem resposta; se o Pix caiu, um ADM ainda pode aprovar"
 };
 const AI_BASE = `Você é a Aury, assistente com IA da Auryx Nexavória, uma plataforma brasileira de comunidade: servidores com canais de texto, salas de voz com transmissão de tela e câmera, chat dentro da call, atividades na call (ouvir juntos, lousa, jogo da velha), jogos dentro do app (como o Bunker 9), mensagens e chamadas privadas, sobreposição de jogo no app de PC e planos VIP (Plus, Pro e Max). Funciona no app para Windows, no app para Android e no navegador (https://nexora-ujw6.onrender.com — o site com os downloads fica em /site).
 Fale sempre em português do Brasil, num tom leve, simpático e direto, com frases curtas. No máximo um emoji por mensagem. Pode usar **negrito** e listas simples.
@@ -999,7 +1055,7 @@ function aiTicket(o) {
 async function aiTicketRun(o) {
   const cid = "t." + o.id, list = db.messages[cid] || [];
   const buyer = db.users[o.uid];
-  const SYSN = { ocreate: "pedido criado", oreview: "a equipe começou a analisar o pedido", oapprove: "pagamento aprovado e plano liberado", oreject: "pedido recusado" };
+  const SYSN = { ocreate: "pedido criado", oreview: "a equipe começou a analisar o pedido", oapprove: "pagamento aprovado e plano liberado", oreject: "pedido recusado", oexpire: "pedido expirou sem resposta" };
   const history = AI.tidy(list.slice(-24).map(m => {
     if (m.sys) return { role: "user", content: `[Sistema: ${SYSN[m.sys] || m.sys}${m.t ? " — " + m.t : ""}]` };
     if (m.a === AI_ID) return { role: "assistant", content: m.t };
@@ -1485,27 +1541,17 @@ io.on("connection", socket => {
     if (list.length > HISTORY_KEEP) list.splice(0, list.length - HISTORY_KEEP);
     io.to(["u:" + o.uid, "admins"]).emit("msg", { channelId: cid, serverId: null, m });
   };
-  const orderView = (o, full) => {
-    const u = db.users[o.uid], f = db.files[o.receipt];
-    const v = { id: o.id, uid: o.uid, tier: o.tier, plan: PLANS[o.tier].name, amount: o.amount, status: o.status, created: o.created, updated: o.updated, reason: o.reason || "", note: o.note || "", decidedBy: o.by ? (db.users[o.by] || {}).username || "?" : "", decidedAt: o.decided || 0 };
-    v.user = u ? pubUser(u) : null;
-    v.receipt = f ? { id: o.receipt, n: f.n, t: f.t, s: f.s } : null;
-    if (full && u) v.userEmail = u.email || "";
-    const list = db.messages["t." + o.id];
-    v.last = list && list.length ? { id: list[list.length - 1].id, ts: list[list.length - 1].ts, a: list[list.length - 1].a } : null;
-    return v;
-  };
-  const pushOrder = o => {
-    io.to("u:" + o.uid).emit("order:update", { order: orderView(o, false) });
-    io.to("admins").emit("order:update", { order: orderView(o, true) });
-  };
   const audit = (action, target, details) => {
     db.audit.push({ at: Date.now(), admin: uid, action, target, details });
     if (db.audit.length > 3000) db.audit.splice(0, db.audit.length - 3000);
   };
   const grantPlan = (u, tier, days, orderId) => {
-    const now = Date.now(), cur = u.plan && planOf(u) === tier ? u.plan.until : now;
-    u.plan = { tier, since: u.plan && planOf(u) === tier ? u.plan.since : now, until: Math.max(cur, now) + days * 86400e3, order: orderId || "", by: uid };
+    const now = Date.now(), cur = planOf(u);
+    let base = now, since = now, credit = 0;
+    if (cur === tier) { base = Math.max(u.plan.until, now); since = u.plan.since || now; }
+    else if (cur) credit = Math.round((u.plan.until - now) * PLANS[cur].price / PLANS[tier].price);   // troca de plano: o tempo pago que sobrou é convertido
+    u.plan = { tier, since, until: base + credit + days * 86400e3, order: orderId || "", by: uid };
+    u.planLog = (u.planLog || []).concat({ at: now, tier, days, order: orderId || "", credit: Math.round(credit / 3600e3), from: cur || "" }).slice(-50);
     save();
     emitToPeers(u.id, "user:update", { user: pubUser(u) });
     io.to("u:" + u.id).emit("me:update", { me: meView(u) });
@@ -1518,7 +1564,7 @@ io.on("connection", socket => {
   });
   on("ai:send", ({ text }) => {
     const tier = aiTier(me());
-    if (!tier) fail("A Aury é exclusiva para assinantes do VIP (Plus, Pro ou Max).");
+    if (!tier) fail("A Aury é exclusiva para assinantes (VIP, Pro ou Max).");
     if (!AI.configured()) fail("A IA ainda não foi ligada pela equipe. Tente mais tarde.");
     text = typeof text === "string" ? text.replace(/\r\n?/g, "\n").trim().slice(0, 4000) : "";
     if (!text) fail("Escreva uma mensagem.");
@@ -1548,7 +1594,9 @@ io.on("connection", socket => {
     const u = me();
     return {
       plans: Object.values(PLANS).map(p => ({ tier: p.tier, name: p.name, price: p.price, link: p.link, benefits: p.benefits, rank: p.rank })),
-      mine: planOf(u) ? { tier: u.plan.tier, until: u.plan.until } : null,
+      mine: planOf(u) ? { tier: u.plan.tier, until: u.plan.until, since: u.plan.since || 0 } : null,
+      last: !planOf(u) && u.plan && u.plan.until ? { tier: u.plan.tier, until: u.plan.until } : null,
+      log: (u.planLog || []).slice(-20).reverse().map(x => ({ ...x, name: (PLANS[x.tier] || {}).name || x.tier })),
       orders: Object.values(db.orders).filter(o => o.uid === uid).sort((a, b) => b.created - a.created).map(o => orderView(o, false)),
       admin: isAdmin(u)
     };
@@ -1561,6 +1609,7 @@ io.on("connection", socket => {
     const f = typeof receipt === "string" ? db.files[receipt] : null;
     if (!f || f.o !== uid || !f.p) fail("Envie o comprovante do pagamento antes de continuar.");
     if (f.u) fail("Esse comprovante já foi usado em outro pedido.");
+    if (f.h && Object.values(db.orders).some(x => x.status !== "rejected" && db.files[x.receipt] && db.files[x.receipt].h === f.h)) fail("Esse comprovante já foi enviado em outro pedido. Se for um pagamento novo, envie o comprovante dele.");
     const open = Object.values(db.orders).filter(o => o.uid === uid && (o.status === "pending" || o.status === "review"));
     if (open.length >= 3) fail("Você já tem pedidos em análise. Aguarde a resposta da equipe.");
     f.u = 1;
@@ -1593,7 +1642,7 @@ io.on("connection", socket => {
     requireAdmin();
     const o = db.orders[id];
     if (!o) fail("Pedido não encontrado.");
-    if (o.status !== "pending") fail("Esse pedido não está pendente.");
+    if (o.status !== "pending" && o.status !== "expired") fail("Esse pedido não está pendente.");
     o.status = "review"; o.updated = Date.now();
     audit("order:review", o.uid, { order: o.id });
     ticketMsg(o, uid, "oreview", "");
@@ -1604,7 +1653,7 @@ io.on("connection", socket => {
     requireAdmin();
     const o = db.orders[id];
     if (!o) fail("Pedido não encontrado.");
-    if (o.status !== "pending" && o.status !== "review") fail("Esse pedido já foi decidido.");
+    if (!ordersOpen(o) && o.status !== "expired") fail("Esse pedido já foi decidido.");
     if (confirm !== true) fail("Confirme que o valor caiu na conta antes de aprovar.");
     const u = db.users[o.uid];
     if (!u) fail("O usuário não existe mais.");
@@ -1620,7 +1669,7 @@ io.on("connection", socket => {
     requireAdmin();
     const o = db.orders[id];
     if (!o) fail("Pedido não encontrado.");
-    if (o.status !== "pending" && o.status !== "review") fail("Esse pedido já foi decidido.");
+    if (!ordersOpen(o) && o.status !== "expired") fail("Esse pedido já foi decidido.");
     reason = str(reason, 400);
     if (reason.length < 3) fail("Escreva o motivo da recusa.");
     o.status = "rejected"; o.reason = reason; o.by = uid; o.decided = o.updated = Date.now();
@@ -2107,6 +2156,7 @@ server.keepAliveTimeout = 65000;   // maior que o do balanceador do Render, evit
 server.headersTimeout = 66000;
 loadDb().then(async () => {
   try { await backupInit(); backupSchedule(); } catch (e) { console.error("Backup indisponível:", e.message); }
+  setTimeout(vipSweep, 30e3); setInterval(vipSweep, 3600e3).unref();
   server.listen(PORT, HOST, () => {
     console.log(`\n  ${APP_NAME} rodando em http://localhost:${PORT}`);
     const admins = [...ADMIN_SET].map(n => (byName.has(n) ? n : n + " (essa conta não existe ainda)"));

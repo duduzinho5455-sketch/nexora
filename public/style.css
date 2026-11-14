@@ -1367,3 +1367,34 @@ html.reduce-motion .gp-spin { border-top-color: var(--accent); border-right-colo
 .sec-dev small { color: var(--muted); }
 .sec-ico { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--bg-4); flex: none; }
 @media (max-width: 620px) { .sec-pass { grid-template-columns: 1fr; } }
+
+/* Auryx VIP — assinatura e planos */
+.sub-card { position: relative; margin: 0 0 22px; padding: 18px 20px; border-radius: 18px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 20%, var(--bg-3)), var(--bg-3)); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); animation: tileIn .4s var(--spring); }
+.sub-card.sub-pro { --accent: #7c5cff; } .sub-card.sub-max { --accent: #f59e0b; } .sub-card.sub-plus { --accent: #22d3ee; }
+.sub-card.sub-none { background: var(--bg-3); border-color: var(--line-2); }
+.sub-card.sub-none p { margin: 10px 0 0; color: var(--text-2); }
+.sub-top { display: flex; align-items: center; gap: 14px; }
+.sub-top small { display: block; color: var(--muted); font-size: 12px; }
+.sub-top b { font-size: 18px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.sub-emo { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; font-size: 26px; background: rgba(255,255,255,.06); flex: none; }
+.sub-left { margin-left: auto; text-align: right; }
+.sub-left b { font-size: 28px; display: block; line-height: 1; }
+.sub-bar { height: 8px; border-radius: 99px; background: rgba(255,255,255,.08); margin: 16px 0 10px; overflow: hidden; }
+.sub-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), #22d3ee); transition: width .6s var(--ease); }
+.sub-dates { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; color: var(--text-2); font-size: 13px; }
+.sub-warn { margin-top: 12px; display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: 10px; background: rgba(245,158,11,.12); color: #fbbf24; font-size: 13px; }
+.sub-acts { margin-top: 14px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.sub-acts small { color: var(--muted); font-size: 12px; flex: 1; min-width: 200px; }
+.plan .plan-emo { font-size: 28px; line-height: 1; margin-bottom: 6px; }
+.plan.current { outline: 2px solid var(--green); outline-offset: -2px; }
+.plan-flag.cur { background: var(--green); }
+.plan-note { display: block; margin-top: 8px; color: var(--muted); font-size: 12px; text-align: center; }
+.plan { transition: transform .2s var(--ease), box-shadow .2s var(--ease); }
+.plan:hover { transform: translateY(-3px); }
+.pay-qr { display: grid; grid-template-columns: 180px 1fr; gap: 16px; align-items: center; margin: 14px 0; text-align: left; }
+.qr-box { width: 180px; height: 180px; border-radius: 14px; background: #fff; display: grid; place-items: center; padding: 8px; }
+.qr-box svg { width: 100%; height: 100%; }
+.qr-box small { color: #555; }
+.qr-side { display: grid; gap: 8px; }
+.qr-side small { color: var(--text-2); font-size: 12.5px; margin-bottom: 4px; }
+@media (max-width: 560px) { .pay-qr { grid-template-columns: 1fr; justify-items: center; text-align: center; } .sub-left b { font-size: 22px; } }
