@@ -4,7 +4,7 @@
  * e o Agente Auryx embutido (controle remoto sem baixar nada à parte).
  */
 "use strict";
-const { app, BrowserWindow, shell, session, desktopCapturer, ipcMain, Menu, Tray, nativeImage } = require("electron");
+const { app, BrowserWindow, shell, session, desktopCapturer, ipcMain, Menu, Tray, nativeImage, screen } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const crypto = require("node:crypto");
@@ -48,6 +48,7 @@ function createWindow() {
   });
   // fechar a janela só esconde (como o Discord); sair pela bandeja
   win.on("close", e => { if (!quitting) { e.preventDefault(); win.hide(); } });
+  for (const ev of ["focus", "blur", "show", "hide", "minimize", "restore"]) win.on(ev, () => setTimeout(syncOverlay, 60));
 }
 function openExternal(url) {
   if (/^(https?|steam|mailto):/i.test(url)) shell.openExternal(url).catch(() => {});
@@ -122,6 +123,55 @@ function pickSource(sources) {
     });
   });
 }
+
+/* ---------- sobreposição de jogo (quem está na call, por cima do jogo) ---------- */
+// Aparece quando você está numa call e sai da janela da Auryx (foi pro jogo).
+// Não recebe cliques: o mouse passa direto para o jogo.
+let overlay = null, ovState = null, ovHeight = 60;
+const OV_W = 260;
+function overlayWindow() {
+  if (overlay && !overlay.isDestroyed()) return overlay;
+  overlay = new BrowserWindow({
+    width: OV_W, height: ovHeight, frame: false, transparent: true, resizable: false, movable: false, minimizable: false, maximizable: false,
+    focusable: false, skipTaskbar: true, alwaysOnTop: true, show: false, hasShadow: false, backgroundColor: "#00000000", title: "Auryx — sobreposição",
+    webPreferences: { preload: path.join(__dirname, "overlay-preload.js"), contextIsolation: true, sandbox: true, backgroundThrottling: false }
+  });
+  overlay.setAlwaysOnTop(true, "screen-saver");
+  overlay.setIgnoreMouseEvents(true);
+  overlay.loadFile(path.join(__dirname, "overlay.html"));
+  overlay.webContents.on("did-finish-load", () => { if (ovState) overlay.webContents.send("overlay:state", ovState); });
+  overlay.on("closed", () => { overlay = null; });
+  return overlay;
+}
+function placeOverlay() {
+  if (!overlay || overlay.isDestroyed()) return;
+  let area;
+  try { area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea; } catch { area = screen.getPrimaryDisplay().workArea; }
+  const pos = (ovState && ovState.pos) || "tl", m = 12;
+  const x = pos.endsWith("r") ? area.x + area.width - OV_W - m : area.x + m;
+  const y = pos.startsWith("b") ? area.y + area.height - ovHeight - m : area.y + m;
+  overlay.setBounds({ x: Math.round(x), y: Math.round(y), width: OV_W, height: ovHeight });
+}
+function syncOverlay() {
+  const inCall = !!(ovState && ovState.on && ovState.people && ovState.people.length);
+  const away = !win || win.isDestroyed() || !win.isVisible() || win.isMinimized() || !win.isFocused();
+  if (inCall && away) {
+    const o = overlayWindow();
+    if (!o.isVisible()) { placeOverlay(); o.showInactive(); o.setAlwaysOnTop(true, "screen-saver"); }
+  } else if (overlay && !overlay.isDestroyed() && overlay.isVisible()) overlay.hide();
+}
+ipcMain.on("overlay:state", (e, st) => {
+  if (!win || e.sender !== win.webContents) return;
+  ovState = st && typeof st === "object" ? st : null;
+  if (overlay && !overlay.isDestroyed()) overlay.webContents.send("overlay:state", ovState);
+  if (!ovState || !ovState.on) { if (overlay && !overlay.isDestroyed()) overlay.hide(); return; }
+  syncOverlay();
+});
+ipcMain.on("overlay:size", (e, h) => {
+  if (!overlay || overlay.isDestroyed() || e.sender !== overlay.webContents) return;
+  const nh = Math.max(40, Math.min(600, Math.round(+h || 60)));
+  if (nh !== ovHeight) { ovHeight = nh; placeOverlay(); }
+});
 
 /* ---------- Agente Auryx embutido ---------- */
 function agentScript() {

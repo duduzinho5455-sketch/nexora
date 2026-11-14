@@ -39,7 +39,7 @@
         <service
             android:name=".ScreenService"
             android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
+            android:foregroundServiceType="mediaProjection|microphone" />
 
         <service
             android:name=".CallService"

@@ -420,7 +420,7 @@ async function handleAuth(req, res, kind) {
       if (password.length < 8 || password.length > 128) throw new HttpError(400, "A senha precisa ter pelo menos 8 caracteres.");
       if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) throw new HttpError(400, "Use letras e números na senha.");
       const key = username.toLowerCase();
-      if (byName.has(key) || ADMIN_SET.has(key)) throw new HttpError(409, "Esse nome de usuário já está em uso.");
+      if (byName.has(key) || ADMIN_SET.has(key) || /^aury([ _.-]?(ia|ai|bot))?$/.test(key)) throw new HttpError(409, "Esse nome de usuário já está em uso.");
       if (byEmail.has(email)) throw new HttpError(409, "Já existe uma conta com esse e-mail. Use “Esqueci a senha” se precisar.");
       const salt = crypto.randomBytes(16).toString("hex");
       const hash = (await scrypt(password, salt)).toString("hex");
@@ -812,6 +812,139 @@ function cleanChannelName(name, type) {
   return str(name, 32).toLowerCase().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_-]/gu, "").replace(/-{2,}/g, "-");
 }
 
+/* ------------------------------------------------------------------ */
+/* Aury, a IA (Claude): atendimento de quem compra o VIP e bate-papo   */
+/* exclusivo dos assinantes. A chave fica no servidor (Render).        */
+/* ------------------------------------------------------------------ */
+const AI = require("./ai");
+const AI_ID = "aury";
+const AI_LIMIT = { plus: 40, pro: 120, max: 300 };          // mensagens por dia no bate-papo VIP
+const AI_TICKET_DAY = 25;                                   // respostas por dia em cada atendimento
+const aiBusy = new Set();
+const brl = c => "R$ " + (c / 100).toFixed(2).replace(".", ",");
+const dayKey = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);   // dia no horário de Brasília
+const ORDER_STATUS = {
+  pending: "AGUARDANDO — a equipe ainda não abriu o pedido",
+  review: "EM ANÁLISE — um ADM está conferindo se o Pix caiu na conta",
+  approved: "APROVADO — o pagamento foi confirmado e o plano já está liberado",
+  rejected: "RECUSADO pela equipe"
+};
+const AI_BASE = `Você é a Aury, assistente com IA da Auryx Nexavória, uma plataforma brasileira de comunidade: servidores com canais de texto, salas de voz com transmissão de tela e câmera, chat dentro da call, atividades na call (ouvir juntos, lousa, jogo da velha), jogos dentro do app (como o Bunker 9), mensagens e chamadas privadas, sobreposição de jogo no app de PC e planos VIP (Plus, Pro e Max). Funciona no app para Windows, no app para Android e no navegador (https://nexora-ujw6.onrender.com — o site com os downloads fica em /site).
+Fale sempre em português do Brasil, num tom leve, simpático e direto, com frases curtas. No máximo um emoji por mensagem. Pode usar **negrito** e listas simples.
+Nunca peça senha, código de verificação, dados de cartão, CPF ou dados bancários; se alguém oferecer, diga para não enviar.
+Não invente funções que o app não tem. Se não souber algo, diga que não sabe.`;
+function aiPlansText() {
+  return Object.values(PLANS).map(p => `- ${p.name}: ${brl(p.price)} por ${PLAN_DAYS} dias. Benefícios: ${p.benefits.join("; ")}.`).join("\n");
+}
+const AI_TICKET_RULES = `Agora você está no ATENDIMENTO DE PAGAMENTO do VIP, falando com quem está comprando um plano.
+Planos:
+${aiPlansText()}
+Como funciona a compra: na aba Premium a pessoa escolhe o plano, paga pelo link de cobrança Pix do Nubank, envia o comprovante e o pedido abre este atendimento. Um ADM confere se o valor caiu na conta e aprova; aí o plano é liberado na hora, por ${PLAN_DAYS} dias. A pessoa recebe uma notificação quando o pedido é decidido.
+Regras:
+- Você NÃO aprova, não recusa e não libera pagamento nem plano, e não promete prazo exato: só um ADM faz isso. Se perguntarem, explique que a equipe confere e responde aqui mesmo.
+- Só diga que o pagamento foi confirmado se o status do pedido for APROVADO.
+- Reembolso, valor errado, comprovante errado, cobrança em dobro ou qualquer decisão: diga que um ADM vai responder aqui.
+- Responda em no máximo 4 frases curtas.`;
+const aiTier = u => (isAdmin(u) ? "max" : planOf(u));
+function aiStore(uid) {
+  db.ai = db.ai || {};
+  const st = db.ai[uid] || (db.ai[uid] = { msgs: [], day: "", n: 0 });
+  if (st.day !== dayKey()) { st.day = dayKey(); st.n = 0; }
+  return st;
+}
+const aiMsgView = m => ({ id: m.id, r: m.r, t: m.t, ts: m.ts });
+
+/* --- atendimento de pagamento --- */
+function aiTicketPost(o, m, update) {
+  const cid = "t." + o.id;
+  io.to(["u:" + o.uid, "admins"]).emit(update ? "msg:update" : "msg", update ? { channelId: cid, m } : { channelId: cid, serverId: null, m });
+}
+function aiTicket(o) {
+  if (!AI.configured() || !o) return;
+  const cid = "t." + o.id;
+  if (aiBusy.has(cid)) { o.aiAgain = true; return; }
+  const list = db.messages[cid] || [];
+  // um ADM respondeu há pouco: quem está atendendo é a equipe
+  const lastAdm = [...list].reverse().find(m => !m.sys && m.a !== o.uid && m.a !== AI_ID);
+  if (lastAdm && Date.now() - lastAdm.ts < 15 * 60e3) return;
+  if (o.aiDay !== dayKey()) { o.aiDay = dayKey(); o.aiN = 0; }
+  if ((o.aiN || 0) >= AI_TICKET_DAY) return;
+  aiBusy.add(cid);
+  setTimeout(() => {
+    aiTicketRun(o).catch(e => console.warn("[ia] atendimento:", e && e.message)).finally(() => {
+      aiBusy.delete(cid);
+      if (o.aiAgain) { o.aiAgain = false; const l = db.messages[cid] || [], last = l[l.length - 1]; if (last && last.a === o.uid) aiTicket(o); }
+    });
+  }, 1200);
+}
+async function aiTicketRun(o) {
+  const cid = "t." + o.id, list = db.messages[cid] || [];
+  const buyer = db.users[o.uid];
+  const SYSN = { ocreate: "pedido criado", oreview: "a equipe começou a analisar o pedido", oapprove: "pagamento aprovado e plano liberado", oreject: "pedido recusado" };
+  const history = AI.tidy(list.slice(-24).map(m => {
+    if (m.sys) return { role: "user", content: `[Sistema: ${SYSN[m.sys] || m.sys}${m.t ? " — " + m.t : ""}]` };
+    if (m.a === AI_ID) return { role: "assistant", content: m.t };
+    const files = m.f && m.f.length ? ` [anexou: ${m.f.map(f => f.n).join(", ")}]` : "";
+    if (m.a === o.uid) return { role: "user", content: (m.t || "") + files };
+    const adm = db.users[m.a];
+    return { role: "user", content: `[Mensagem do ADM ${adm ? adm.username : "da equipe"}]: ${m.t || ""}${files}` };
+  }));
+  if (!history.length) return;
+  const status = `Pedido atual: plano ${PLANS[o.tier].name} (${brl(o.amount)}), feito por ${buyer ? buyer.username : "cliente"}. Status: ${ORDER_STATUS[o.status] || o.status}${o.status === "rejected" && o.reason ? ` (motivo: ${o.reason})` : ""}.`;
+  const typing = setInterval(() => io.to(["u:" + o.uid, "admins"]).emit("typing", { channelId: cid, userId: AI_ID }), 3500);
+  io.to(["u:" + o.uid, "admins"]).emit("typing", { channelId: cid, userId: AI_ID });
+  let m = null, lastSent = 0;
+  try {
+    const r = await AI.reply({
+      system: [{ type: "text", text: AI_BASE + "\n\n" + AI_TICKET_RULES }, { type: "text", text: status }],
+      messages: history, maxTokens: 700,
+      onText: full => {
+        if (!full.trim()) return;
+        if (!m) {
+          clearInterval(typing);
+          m = { id: msgId(), a: AI_ID, t: full, ts: Date.now() };
+          list.push(m); db.messages[cid] = list;
+          aiTicketPost(o, m, false); lastSent = Date.now(); return;
+        }
+        m.t = full;
+        if (Date.now() - lastSent > 350) { lastSent = Date.now(); aiTicketPost(o, m, true); }
+      }
+    });
+    const text = r.refused || !r.text ? "Essa eu não consigo responder por aqui — um ADM da equipe vai te ajudar neste atendimento. 🙏" : r.text;
+    if (!m) { m = { id: msgId(), a: AI_ID, t: text, ts: Date.now() }; list.push(m); db.messages[cid] = list; aiTicketPost(o, m, false); }
+    else { m.t = text; aiTicketPost(o, m, true); }
+    if (list.length > HISTORY_KEEP) list.splice(0, list.length - HISTORY_KEEP);
+    o.aiN = (o.aiN || 0) + 1;
+    save();
+  } finally { clearInterval(typing); }
+}
+
+/* --- bate-papo exclusivo dos assinantes --- */
+async function aiChatRun(uid, replyId) {
+  const u = db.users[uid], st = aiStore(uid), tier = aiTier(u);
+  let chars = 0;
+  const recent = [];
+  for (let i = st.msgs.length - 1; i >= 0 && recent.length < 40; i--) {
+    chars += st.msgs[i].t.length;
+    if (chars > 60000 && recent.length) break;
+    recent.unshift(st.msgs[i]);
+  }
+  const history = AI.tidy(recent.map(m => ({ role: m.r === "a" ? "assistant" : "user", content: m.t })));
+  const sys = AI_BASE + `\n\nAgora você está no bate-papo exclusivo para assinantes VIP. A pessoa se chama ${u.username} e tem o plano ${(PLANS[tier] || PLANS.max).name}. Converse sobre qualquer assunto: dúvidas, jogos, estudos, ideias, textos e ajuda com o app. Ajuste o tamanho: curto para papo, mais completo quando pedirem explicação.`;
+  let last = 0;
+  const r = await AI.reply({
+    system: sys, messages: history, maxTokens: 2500,
+    onText: full => { if (Date.now() - last > 120) { last = Date.now(); io.to("u:" + uid).emit("ai:delta", { id: replyId, t: full }); } }
+  });
+  const text = r.refused || !r.text ? "Desculpa, sobre isso eu não consigo ajudar. Quer falar de outra coisa? 🙂" : r.text;
+  const m = { id: replyId, r: "a", t: text, ts: Date.now() };
+  st.msgs.push(m);
+  if (st.msgs.length > 200) st.msgs.splice(0, st.msgs.length - 200);
+  st.n++;
+  save();
+  io.to("u:" + uid).emit("ai:done", { msg: aiMsgView(m), used: st.n });
+}
+
 io.on("connection", socket => {
   const uid = socket.data.uid;
   const me = () => db.users[uid];
@@ -892,7 +1025,8 @@ io.on("connection", socket => {
       if (!d || !d.members.includes(uid)) fail("Conversa não encontrada.");
       return { s: null, c: { id: d.id }, rooms: d.members.map(x => "u:" + x), dm: d };
     }
-    const { s, c } = getChannel(channelId, "text");
+    const { s, c } = getChannel(channelId);
+    if (c.type !== "text" && c.type !== "voice") fail("Canal não encontrado.");   // sala de voz também tem chat (chat da call)
     return { s, c, rooms: "s:" + s.id, dm: null };
   };
   const findMsg = (channelId, id) => {
@@ -953,6 +1087,7 @@ io.on("connection", socket => {
       if (tgt.order) {
         const to = tgt.order.uid === uid ? Object.values(db.users).filter(isAdmin).map(u => u.id) : [tgt.order.uid];
         for (const id of to) if (id !== uid) pushTo(id, { title: `Atendimento · ${PLANS[tgt.order.tier].name}`, body: `${author}: ${preview}`, url, tag: c.id });
+        if (tgt.order.uid === uid && !isAdmin(me())) aiTicket(tgt.order);
       } else if (s) {
         const ids = new Set(mentionedIn(text, s.members));
         if (m.re && m.re.a) ids.add(m.re.a);
@@ -1239,6 +1374,39 @@ io.on("connection", socket => {
     io.to("u:" + u.id).emit("me:update", { me: meView(u) });
   };
 
+  /* --- Aury: bate-papo com IA exclusivo dos assinantes --- */
+  on("ai:state", () => {
+    const tier = aiTier(me()), st = aiStore(uid);
+    return { on: AI.configured(), tier, limit: tier ? AI_LIMIT[tier] : 0, used: st.n, busy: aiBusy.has("c." + uid), msgs: tier ? st.msgs.slice(-80).map(aiMsgView) : [] };
+  });
+  on("ai:send", ({ text }) => {
+    const tier = aiTier(me());
+    if (!tier) fail("A Aury é exclusiva para assinantes do VIP (Plus, Pro ou Max).");
+    if (!AI.configured()) fail("A IA ainda não foi ligada pela equipe. Tente mais tarde.");
+    text = typeof text === "string" ? text.replace(/\r\n?/g, "\n").trim().slice(0, 4000) : "";
+    if (!text) fail("Escreva uma mensagem.");
+    if (aiBusy.has("c." + uid)) fail("Espere a Aury terminar de responder.");
+    const st = aiStore(uid);
+    if (st.n >= AI_LIMIT[tier]) fail(`Você usou as ${AI_LIMIT[tier]} mensagens de hoje do plano ${PLANS[tier].name}. Amanhã tem mais!${tier !== "max" ? " Nos planos maiores o limite é maior." : ""}`);
+    if (!chat()) fail("Devagar! Espere um instante.");
+    const m = { id: msgId(), r: "u", t: text, ts: Date.now() };
+    st.msgs.push(m);
+    save();
+    const replyId = msgId();
+    aiBusy.add("c." + uid);
+    aiChatRun(uid, replyId)
+      .catch(e => { console.warn("[ia] chat:", e && e.message); io.to("u:" + uid).emit("ai:error", { id: replyId, error: "A Aury não conseguiu responder agora. Tente de novo em instantes." }); })
+      .finally(() => aiBusy.delete("c." + uid));
+    return { msg: aiMsgView(m), replyId };
+  });
+  on("ai:clear", () => {
+    const st = aiStore(uid);
+    if (aiBusy.has("c." + uid)) fail("Espere a Aury terminar de responder.");
+    st.msgs = [];
+    save();
+    return { ok: true };
+  });
+
   on("plans:get", () => {
     const u = me();
     return {
@@ -1266,6 +1434,7 @@ io.on("connection", socket => {
     save();
     pushOrder(o);
     io.to("admins").emit("order:new", { order: orderView(o, true) });
+    aiTicket(o);
     return { order: orderView(o, false) };
   });
 

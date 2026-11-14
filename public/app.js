@@ -132,7 +132,7 @@ const TEMPLATES = {
 const DEFAULTS = {
   theme: "dark", accent: "#7c5cff", reduceMotion: false, sounds: true, notify: false,
   noise: true, nsMode: "ai", nsGate: true, echo: true, agc: true, inputId: "", outputId: "", sensitivity: 0.06,
-  shareQuality: "1080", shareMode: "detail", shareAudio: true
+  shareQuality: "1080", shareMode: "detail", shareAudio: true, overlay: true, overlayPos: "tl"
 };
 const S = {
   token: store.get("token", null), socket: null, me: null, ice: [],
@@ -190,7 +190,7 @@ function groupAvatar(d, size = 32) {
   return `<span class="av-stack" style="--s:${size}px">${others.map(u => avatar(u, Math.round(size * 0.68))).join("")}</span>`;
 }
 function serverOf(cid) { for (const s of S.servers.values()) if (s.channels.some(c => c.id === cid)) return s; return null; }
-const user = id => S.users.get(id) || { id, username: "Usuário removido", color: "#4b5068", avatar: "", status: "offline", about: "", created: 0 };
+const user = id => S.users.get(id) || (id === "aury" ? AURY : null) || { id, username: "Usuário removido", color: "#4b5068", avatar: "", status: "offline", about: "", created: 0 };
 function userByName(n) { n = n.toLowerCase(); for (const u of S.users.values()) if (u.username.toLowerCase() === n) return u; return null; }
 const isOwner = s => !!(s && S.me && s.ownerId === S.me.id);
 const peerByUser = uid => { for (const p of V.peers.values()) if (p.userId === uid) return p; return null; };
@@ -379,6 +379,7 @@ function renderRail() {
   if (total) home.insertAdjacentHTML("beforeend", `<b class="badge">${total > 99 ? "99+" : total}</b>`);
   $('.rail-item[data-act="discover"]').classList.toggle("on", S.view === "discover");
   $('.rail-item[data-act="games"]').classList.toggle("on", S.view === "games");
+  $('.rail-item[data-act="ai"]').classList.toggle("on", S.view === "ai");
 }
 
 /* ------------------------------------------------------------------ */
@@ -413,6 +414,13 @@ function renderSide() {
         `<div class="cat"><span>${adm ? "Atendimentos" : "Meus atendimentos"}</span></div>` +
         (list.length ? list.map(o => { const n = S.mentions.get("t." + o.id) || 0; return `<div class="dm-item${S.channelId === "t." + o.id ? " on" : ""}${n ? " unread" : ""}" data-act="open-ticket" data-id="${o.id}" role="button" tabindex="0"><span class="av" style="--c:${{ plus: "#22d3ee", pro: "#7c5cff", max: "#f59e0b" }[o.tier]};--s:32px">${ic("gem", "sm")}</span><div class="who"><b>${adm && o.user ? esc(o.user.username) + " · " : ""}${esc(o.plan)}</b><small>${ORDER_STATUS[o.status][0]} · ${fmtMoney(o.amount)}</small></div>${n ? `<b class="badge">${n}</b>` : ""}</div>`; }).join("")
           : `<p style="padding:0 8px;color:var(--muted);font-size:13px;margin:0">${adm ? "Abra o painel para carregar os pedidos." : "Nenhum pedido ainda."}</p>`);
+      return;
+    }
+    if (S.view === "ai") {
+      head.innerHTML = `<span class="title">Aury · IA</span>`;
+      body.innerHTML = `<div class="ch on" role="button" tabindex="0">${ic("sparkles")}<span class="ch-name">Conversa com a Aury</span></div>` +
+        (AIS.tier && AIS.msgs.length ? `<div class="ch" data-act="ai-clear" role="button" tabindex="0">${ic("trash")}<span class="ch-name">Apagar conversa</span></div>` : "") +
+        `<div class="cat">Sobre</div><p style="padding:0 8px;color:var(--muted);font-size:13.5px;margin:0">A Aury é uma IA exclusiva do VIP. Ela também responde no atendimento de pagamento enquanto a equipe confere seu pedido.</p>`;
       return;
     }
     if (S.view === "games") {
@@ -513,6 +521,8 @@ function renderTop() {
     icon.innerHTML = ic("users"); title.textContent = "Amigos"; topic.textContent = ""; actions.innerHTML = search;
   } else if (S.view === "premium") {
     icon.innerHTML = ic("gem"); title.textContent = "Central de Pagamentos"; topic.textContent = "Planos Plus, Pro e Max"; actions.innerHTML = search;
+  } else if (S.view === "ai") {
+    icon.innerHTML = ic("sparkles"); title.textContent = "Aury"; topic.textContent = "Sua IA exclusiva do VIP"; actions.innerHTML = search;
   } else if (S.view === "games") {
     icon.innerHTML = ic("gamepad"); title.textContent = "Jogos"; topic.textContent = "Jogue com os amigos sem sair da Auryx"; actions.innerHTML = search;
   } else if (S.view === "admin") {
@@ -573,7 +583,7 @@ function renderTitle() {
 /* ------------------------------------------------------------------ */
 /* Navegação                                                           */
 /* ------------------------------------------------------------------ */
-const VIEWS = { chat: "#chatView", stage: "#stageView", home: "#homeView", discover: "#discoverView", friends: "#friendsView", premium: "#premiumView", admin: "#adminView", games: "#gamesView" };
+const VIEWS = { chat: "#chatView", stage: "#stageView", home: "#homeView", discover: "#discoverView", friends: "#friendsView", premium: "#premiumView", admin: "#adminView", games: "#gamesView", ai: "#aiView" };
 function setView(view) {
   if (S.view === "chat" && S.channelId) S.drafts[S.channelId] = $("#input").value;
   const changed = S.view !== view;
@@ -936,6 +946,96 @@ async function loadGames(force) {
   S.games = r.games;
   return true;
 }
+/* ------------------------------------------------------------------ */
+/* Aury — IA exclusiva dos assinantes VIP (e atendente do pagamento)   */
+/* ------------------------------------------------------------------ */
+const AURY = { id: "aury", username: "Aury (IA)", color: "#8b5cf6", avatar: "🤖", status: "online", about: "Assistente com inteligência artificial da Auryx Nexavória.", created: 0, bot: true };
+const AIS = { loaded: false, on: false, tier: "", limit: 0, used: 0, msgs: [], pending: null, busy: false };
+const AI_SUGGEST = ["Me dá ideias de nome para meu servidor de jogos", "Como transmito a tela do celular na call?", "Me ajuda a escrever as regras do meu servidor", "Me recomenda jogos para jogar com amigos"];
+async function goAI() {
+  setView("ai");
+  S.serverId = null; S.channelId = null;
+  store.set("last", { view: "ai" });
+  if (!AIS.loaded) $("#aiView").innerHTML = `<div class="page"><div class="hero"><h1>${ic("sparkles", "lg")} Carregando a Aury…</h1></div></div>`;
+  else renderAIView();
+  renderAll(); updateMini();
+  const r = await emit("ai:state", {});
+  if (r.error) { toast(r.error, "error"); return; }
+  Object.assign(AIS, { loaded: true, on: r.on, tier: r.tier, limit: r.limit, used: r.used, msgs: r.msgs || [], busy: !!r.busy });
+  if (S.view === "ai") { renderAIView(true); renderSide(); }
+}
+function aiBubble(m) {
+  const mine = m.r === "u";
+  const body = m.t ? renderText(m.t).html : `<span class="ai-dots"><i></i><i></i><i></i></span>`;
+  return `<div class="ai-msg${mine ? " me" : ""}${m.err ? " err" : ""}" data-id="${esc(m.id)}">${mine ? "" : `<span class="ai-av">🤖</span>`}<div class="ai-b">${body}</div></div>`;
+}
+function renderAIView(scroll) {
+  const root = $("#aiView");
+  if (!root) return;
+  if (!AIS.tier) {
+    root.innerHTML = `<div class="page ai-lock"><div class="ai-orb">🤖</div><h1>Conheça a <span class="grad">Aury</span></h1><p>Uma inteligência artificial só sua, para conversar sobre qualquer coisa: jogos, estudos, ideias, textos e dúvidas sobre o app. Responde na hora, em português.</p><ul><li>💠 <b>Plus</b> — ${40} mensagens por dia</li><li>💎 <b>Pro</b> — ${120} mensagens por dia</li><li>👑 <b>Max</b> — ${300} mensagens por dia</li></ul><button class="btn primary big" style="width:auto;padding:0 28px" data-act="premium">${ic("gem", "sm")} Ver planos VIP</button><small>Exclusiva para assinantes do VIP.</small></div>`;
+    return;
+  }
+  if (!root.querySelector(".ai-wrap")) {
+    root.innerHTML = `<div class="ai-wrap"><div class="ai-list" id="aiList"></div><form class="ai-form" id="aiForm"><textarea id="aiInput" rows="1" maxlength="4000" placeholder="Mensagem para a Aury…"></textarea><button class="icon-btn send" aria-label="Enviar">${ic("send")}</button></form><div class="ai-foot" id="aiFoot"></div></div>`;
+    const inp = $("#aiInput");
+    inp.addEventListener("input", () => { inp.style.height = "auto"; inp.style.height = Math.min(inp.scrollHeight, 180) + "px"; });
+    inp.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendAI(); } });
+    $("#aiForm").onsubmit = e => { e.preventDefault(); sendAI(); };
+    root.addEventListener("click", e => { const b = e.target.closest("[data-ai-sug]"); if (b) { inp.value = b.dataset.aiSug; sendAI(); } });
+    scroll = true;
+  }
+  const list = $("#aiList");
+  const msgs = AIS.pending ? [...AIS.msgs, AIS.pending] : AIS.msgs;
+  list.innerHTML = (!AIS.on ? `<div class="hint" style="margin:12px auto;max-width:560px">⚠️ A Aury ainda não foi ligada pela equipe. Assim que for, ela aparece aqui.</div>` : "") +
+    (msgs.length ? msgs.map(aiBubble).join("") : `<div class="ai-hello"><div class="ai-orb">🤖</div><h2>Oi, ${esc(S.me.username)}! Eu sou a Aury.</h2><p>Sua IA exclusiva do VIP. Pergunte o que quiser 👇</p><div class="ai-sugs">${AI_SUGGEST.map(t => `<button type="button" class="ai-sug" data-ai-sug="${esc(t)}">${esc(t)}</button>`).join("")}</div></div>`);
+  $("#aiFoot").innerHTML = `<span>${AIS.used}/${AIS.limit} mensagens hoje · plano ${esc({ plus: "Plus", pro: "Pro", max: "Max" }[AIS.tier] || "")}</span><small>A Aury é uma IA e pode errar. Não envie senhas nem dados de pagamento.</small>`;
+  const send = $("#aiForm .send");
+  if (send) send.disabled = AIS.busy || !AIS.on;
+  if (scroll) list.scrollTop = list.scrollHeight;
+}
+async function sendAI() {
+  const inp = $("#aiInput");
+  if (!inp) return;
+  const text = inp.value.trim();
+  if (!text || AIS.busy) return;
+  AIS.busy = true;
+  inp.value = ""; inp.style.height = "auto";
+  const r = await emit("ai:send", { text });
+  if (r.error) { AIS.busy = false; inp.value = text; toast(r.error, "error", 6000); renderAIView(); return; }
+  AIS.msgs.push(r.msg);
+  AIS.pending = { id: r.replyId, r: "a", t: "" };
+  renderAIView(true);
+}
+function aiAtBottom() { const l = $("#aiList"); return !l || l.scrollHeight - l.scrollTop - l.clientHeight < 80; }
+function onAIDelta({ id, t }) {
+  if (!AIS.pending || AIS.pending.id !== id) return;
+  AIS.pending.t = t;
+  if (S.view !== "ai") return;
+  const el = $(`#aiList [data-id="${CSS.escape(id)}"] .ai-b`), stick = aiAtBottom();
+  if (el) el.innerHTML = renderText(t).html; else renderAIView();
+  if (stick) { const l = $("#aiList"); l.scrollTop = l.scrollHeight; }
+}
+function onAIDone({ msg, used }) {
+  AIS.pending = null; AIS.busy = false;
+  if (!AIS.msgs.some(m => m.id === msg.id)) AIS.msgs.push(msg);
+  AIS.used = used;
+  if (S.view === "ai") { const stick = aiAtBottom(); renderAIView(stick); }
+  else toast("A Aury respondeu 🤖", "ok");
+}
+function onAIError({ id, error }) {
+  if (AIS.pending && AIS.pending.id === id) AIS.pending = null;
+  AIS.busy = false;
+  AIS.msgs.push({ id, r: "a", t: error, err: true, ts: Date.now() });
+  if (S.view === "ai") renderAIView(true);
+}
+async function clearAI() {
+  if (!confirm("Apagar toda a conversa com a Aury?")) return;
+  const r = await emit("ai:clear", {});
+  if (r.error) { toast(r.error, "error"); return; }
+  AIS.msgs = []; renderAIView(true);
+}
+
 async function goGames() {
   setView("games");
   S.serverId = null; S.channelId = null;
@@ -2163,6 +2263,9 @@ function connect() {
     }
   });
   sock.on("typing", onTyping);
+  sock.on("ai:delta", onAIDelta);
+  sock.on("ai:done", onAIDone);
+  sock.on("ai:error", onAIError);
   sock.on("voice:state", onVoiceState);
   sock.on("voice:leave", onVoiceLeave);
   sock.on("voice:signal", onSignal);
@@ -2233,13 +2336,14 @@ function onReady(d) {
   }
   if (S.channelId && chan(S.channelId) && (isDm(S.channelId) || S.servers.has(S.serverId))) openChannel(S.channelId, false);
   else if (!first && S.view === "friends") goFriends();
-  else if (!first && S.view === "games") goGames();       // reconectou: continua na mesma tela
+  else if (!first && S.view === "games") goGames();
+  else if (!first && S.view === "ai") goAI();       // reconectou: continua na mesma tela
   else if (!first && S.view === "premium") goPremium();
   else if (!first && S.view === "admin" && S.me.admin) goAdmin();
   else if (!first && S.view === "discover") goDiscover();
   else if (first) {
     const last = store.get("last", {});
-    if (last.server && S.servers.has(last.server)) openServer(last.server); else if (last.view === "games") goGames(); else goHome();
+    if (last.server && S.servers.has(last.server)) openServer(last.server); else if (last.view === "games") goGames(); else if (last.view === "ai") goAI(); else goHome();
   } else goHome();
   renderAll();
   if (rejoin && chan(rejoin)) resumeVoice(rejoin);
@@ -2279,6 +2383,7 @@ function onMsg({ channelId, serverId, m, nonce }) {
     persistRead();
     if (S.me.statusPref !== "dnd") { sfx("mention"); notify(m, s, c); }
   }
+  callChatOnMsg(channelId, m);
   schedule("rail", "side", "title");
 }
 function rerenderVisible() {
@@ -2469,6 +2574,7 @@ function leaveVoice() {
 }
 function teardownVoice(silent, keepMic) {
   if (V.channelId) callBackground(false);
+  CC.unread = 0;
   V.act = null;
   destroyAct();
   if (V.controlling) stopControlling();
@@ -2587,7 +2693,13 @@ function onTrack(p, e) {
       else if ("playoutDelayHint" in e.receiver) e.receiver.playoutDelayHint = 0;
     } catch {}
   }
-  if (e.track.kind === "audio" && !p.audios.has(stream.id)) {
+  if (e.track.kind === "audio" && p.audios.has(stream.id)) {
+    // a mesma transmissão voltou (parou de assistir e assistiu de novo): religa o som
+    const a = p.audios.get(stream.id);
+    a.srcObject = null; a.srcObject = stream;
+    applyVolumes();
+    a.play().catch(() => {});
+  } else if (e.track.kind === "audio") {
     const a = new Audio();
     a.autoplay = true;
     a.srcObject = stream;
@@ -2599,7 +2711,7 @@ function onTrack(p, e) {
     if (!st || st.screen !== stream.id) attachMeter(p.userId, stream);
   }
   e.track.addEventListener("unmute", () => schedule("stage"));
-  e.track.addEventListener("ended", () => schedule("stage"));
+  e.track.addEventListener("ended", () => { try { stream.removeTrack(e.track); } catch {} schedule("stage"); });
   stream.onremovetrack = () => schedule("stage");
   schedule("stage");
 }
@@ -2700,9 +2812,9 @@ async function startScreen(cfg) {
   const q = QUALITY[cfg.quality] || QUALITY["1080"];
   let stream;
   try {
-    stream = native ? await androidScreenStream(q) : await navigator.mediaDevices.getDisplayMedia({
+    stream = native ? await androidScreenStream(q, cfg.audio) : await navigator.mediaDevices.getDisplayMedia({
       video: { width: { ideal: q.w, max: q.w }, height: { ideal: q.h, max: q.h }, frameRate: { ideal: q.fps, max: q.fps } },
-      audio: cfg.audio ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false } : false,
+      audio: cfg.audio ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false, restrictOwnAudio: true, suppressLocalAudioPlayback: false } : false,
       selfBrowserSurface: "exclude", surfaceSwitching: "include", systemAudio: cfg.audio ? "include" : "exclude"
     });
   } catch (e) {
@@ -2710,6 +2822,10 @@ async function startScreen(cfg) {
     return;
   }
   if (!V.channelId) { stream.getTracks().forEach(t => t.stop()); return; }
+  // garante que o som capturado não traga as vozes da call de volta (eco)
+  for (const t of stream.getAudioTracks()) { try { await t.applyConstraints({ restrictOwnAudio: true }); } catch {} }
+  if (cfg.audio && stream.getAudioTracks().length && window.nexoraDesktop && window.nexoraDesktop.winBuild && window.nexoraDesktop.winBuild < 22000)
+    toast("No Windows 10 o som do PC pode levar as vozes da call junto. Se der eco, use fone de ouvido ou transmita sem som.", "warn", 7000);
   const vt = stream.getVideoTracks()[0];
   if ("contentHint" in vt) vt.contentHint = cfg.mode === "detail" ? "detail" : "motion";
   stream.getAudioTracks().forEach(t => { if ("contentHint" in t) t.contentHint = "music"; });
@@ -2739,18 +2855,61 @@ function stopScreen(silent) {
 /* O app manda quadros JPEG; aqui eles viram um vídeo de verdade      */
 /* (canvas → captureStream) que segue pelo WebRTC como qualquer tela. */
 /* ------------------------------------------------------------------ */
-function androidScreenStream(q) {
+/* Som do celular (Android 10+): o app manda PCM; aqui vira uma faixa de áudio para o WebRTC.
+   Um buffer curto (~0,1 s) mantém o som junto com a imagem. */
+function androidScreenAudio() {
+  if (!ANDROID || !ANDROID.screenAudio || !ANDROID.audio) return null;
+  try { if (ANDROID.screenAudioSupported && !ANDROID.screenAudioSupported()) return null; } catch { return null; }
+  let ctx;
+  try { ctx = new AudioContext({ sampleRate: 48000, latencyHint: "interactive" }); } catch { try { ctx = new AudioContext(); } catch { return null; } }
+  const rate = ctx.sampleRate === 44100 ? 44100 : 48000;
+  const N = rate * 2, L = new Float32Array(N), R = new Float32Array(N);
+  let w = 0, r = 0;
+  const filled = () => (w - r + N) % N;
+  const sp = ctx.createScriptProcessor(2048, 1, 2), dest = ctx.createMediaStreamDestination();
+  sp.onaudioprocess = e => {
+    const oL = e.outputBuffer.getChannelData(0), oR = e.outputBuffer.getChannelData(1), n = oL.length;
+    if (filled() > rate * 0.3) r = (w - Math.round(rate * 0.1) + N) % N;    // atrasou: pula para perto do agora
+    for (let i = 0; i < n; i++) {
+      if (r === w) { oL[i] = 0; oR[i] = 0; continue; }
+      oL[i] = L[r]; oR[i] = R[r]; r = (r + 1) % N;
+    }
+  };
+  sp.connect(dest);
+  ctx.resume().catch(() => {});
+  const pull = setInterval(() => {
+    let b64 = "";
+    try { b64 = ANDROID.audio(); } catch {}
+    if (!b64) return;
+    const bin = atob(b64), n = bin.length >> 2;
+    for (let i = 0; i < n; i++) {
+      const k = i << 2;
+      let l = bin.charCodeAt(k) | (bin.charCodeAt(k + 1) << 8), rr = bin.charCodeAt(k + 2) | (bin.charCodeAt(k + 3) << 8);
+      if (l > 32767) l -= 65536;
+      if (rr > 32767) rr -= 65536;
+      L[w] = l / 32768; R[w] = rr / 32768; w = (w + 1) % N;
+      if (w === r) r = (r + 1) % N;
+    }
+  }, 40);
+  return {
+    rate, track: dest.stream.getAudioTracks()[0],
+    stop() { clearInterval(pull); try { sp.disconnect(); } catch {} ctx.close().catch(() => {}); }
+  };
+}
+function androidScreenStream(q, wantAudio) {
   return new Promise((resolve, reject) => {
     const fps = Math.min(q.fps, 30);
+    const snd = wantAudio ? androidScreenAudio() : null;
+    try { if (ANDROID.screenAudio) ANDROID.screenAudio(!!snd, snd ? snd.rate : 48000); } catch {}
     window.__axScreenResult = ok => {
       window.__axScreenResult = null;
-      if (!ok) { const e = new Error("negado"); e.name = "NotAllowedError"; reject(e); return; }
+      if (!ok) { if (snd) snd.stop(); const e = new Error("negado"); e.name = "NotAllowedError"; reject(e); return; }
       const cv = document.createElement("canvas");
       cv.width = 1280; cv.height = 720;
       const g = cv.getContext("2d");
       const stream = cv.captureStream(fps);
       let busy = false, alive = true, sized = false;
-      const toBlob = b64 => { const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Blob([u], { type: "image/jpeg" }); };
+      const toBlob = b64 => fetch("data:image/jpeg;base64," + b64).then(r => r.blob());
       const pull = setInterval(async () => {
         if (busy || !alive) return;
         let b64 = "";
@@ -2758,7 +2917,7 @@ function androidScreenStream(q) {
         if (!b64) return;
         busy = true;
         try {
-          const bmp = await createImageBitmap(toBlob(b64));
+          const bmp = await createImageBitmap(await toBlob(b64));
           if (!sized || cv.width !== bmp.width || cv.height !== bmp.height) { cv.width = bmp.width; cv.height = bmp.height; sized = true; }
           g.drawImage(bmp, 0, 0);
           bmp.close && bmp.close();
@@ -2767,10 +2926,11 @@ function androidScreenStream(q) {
       }, Math.round(1000 / fps));
       // o usuário pode parar pela notificação do Android
       const watch = setInterval(() => { let on = true; try { on = ANDROID.screenActive(); } catch {} if (!on && alive) stopScreen(); }, 1000);
-      stream._stopNative = () => { alive = false; clearInterval(pull); clearInterval(watch); try { ANDROID.stopScreen(); } catch {} };
+      if (snd && snd.track) stream.addTrack(snd.track);
+      stream._stopNative = () => { alive = false; clearInterval(pull); clearInterval(watch); if (snd) snd.stop(); try { ANDROID.stopScreen(); } catch {} };
       resolve(stream);
     };
-    try { ANDROID.startScreen(q.w, q.h, fps); } catch (e) { window.__axScreenResult = null; reject(e); }
+    try { ANDROID.startScreen(q.w, q.h, fps); } catch (e) { window.__axScreenResult = null; if (snd) snd.stop(); reject(e); }
   });
 }
 
@@ -2878,8 +3038,13 @@ function watch(uid) {
 function unwatch(uid) {
   if (V.controlling && V.controlling.uid === uid) stopControlling();
   V.watching.delete(uid);
-  const p = peerByUser(uid);
+  const p = peerByUser(uid), st = S.voice.get(uid);
   if (p) sig(p.sock, { unwatch: true });
+  if (p && st && st.screen) {
+    const au = p.audios.get(st.screen);
+    if (au) { au.pause(); au.srcObject = null; p.audios.delete(st.screen); }
+    p.streams.delete(st.screen);
+  }
   if (V.focus === uid + ":screen") V.focus = null;
   schedule("stage");
   updateMini();
@@ -3354,8 +3519,108 @@ function renderStage() {
   if (alone && !wait) { wait = document.createElement("div"); wait.className = "stage-wait"; root.querySelector(".stage").prepend(wait); }
   if (alone) wait.innerHTML = `${ic("phone", "sm")}<span>Chamando <b>${esc(dmTitle(c))}</b>… você pode ficar na call esperando.</span>`;
   else if (wait) wait.remove();
+  renderCallChat();
   const micOff = S.muted || S.deaf;
-  $("#stageBar").innerHTML = `<button class="ctl${micOff ? " off" : ""}" data-act="mute" data-tip="${micOff ? "Ativar microfone" : "Silenciar"}">${ic(micOff ? "micOff" : "mic")}</button><button class="ctl${S.deaf ? " off" : ""}" data-act="deafen" data-tip="${S.deaf ? "Ativar áudio" : "Desativar áudio"}">${ic(S.deaf ? "headOff" : "headphones")}</button><button class="ctl${V.cam ? " on" : ""}" data-act="cam" data-tip="${V.cam ? "Desligar câmera" : "Ligar câmera"}">${ic(V.cam ? "camera" : "cameraOff")}</button><button class="ctl${V.screen ? " on" : ""}" data-act="share" data-tip="${V.screen ? "Opções da transmissão" : "Transmitir tela"}">${ic("monitorUp")}</button><span class="ctl-sep"></span><button class="ctl${V.act ? " on" : ""}" data-act="act-menu" data-tip="Atividades: música, lousa, jogos">${ic("rocket")}</button><button class="ctl" data-act="sound-menu" data-tip="Sons para todos">${ic("speaker")}</button><button class="ctl" data-act="react-menu" data-tip="Reações">${ic("smile")}</button><span class="ctl-sep"></span><button class="ctl red" data-act="voice-leave" data-tip="Desconectar">${ic("phoneOff")}</button>`;
+  $("#stageBar").innerHTML = `<button class="ctl${micOff ? " off" : ""}" data-act="mute" data-tip="${micOff ? "Ativar microfone" : "Silenciar"}">${ic(micOff ? "micOff" : "mic")}</button><button class="ctl${S.deaf ? " off" : ""}" data-act="deafen" data-tip="${S.deaf ? "Ativar áudio" : "Desativar áudio"}">${ic(S.deaf ? "headOff" : "headphones")}</button><button class="ctl${V.cam ? " on" : ""}" data-act="cam" data-tip="${V.cam ? "Desligar câmera" : "Ligar câmera"}">${ic(V.cam ? "camera" : "cameraOff")}</button><button class="ctl${V.screen ? " on" : ""}" data-act="share" data-tip="${V.screen ? "Opções da transmissão" : "Transmitir tela"}">${ic("monitorUp")}</button><span class="ctl-sep"></span><button class="ctl${V.act ? " on" : ""}" data-act="act-menu" data-tip="Atividades: música, lousa, jogos">${ic("rocket")}</button><button class="ctl" data-act="sound-menu" data-tip="Sons para todos">${ic("speaker")}</button><button class="ctl" data-act="react-menu" data-tip="Reações">${ic("smile")}</button><button class="ctl cc-btn${CC.open ? " on" : ""}" data-act="call-chat" data-tip="Chat da call">${ic("message")}${CC.unread && !CC.open ? `<span class="cc-badge">${CC.unread > 9 ? "9+" : CC.unread}</span>` : ""}</button><span class="ctl-sep"></span><button class="ctl red" data-act="voice-leave" data-tip="Desconectar">${ic("phoneOff")}</button>`;
+}
+
+/* --- sobreposição de jogo (app de PC): quem está na call, por cima do jogo --- */
+let ovLast = "";
+function overlayState() {
+  if (!V.channelId || !S.me || S.settings.overlay === false) return { on: false };
+  const c = chan(V.channelId);
+  const people = [...S.voice.values()].filter(v => v.channelId === V.channelId).map(v => {
+    const u = user(v.userId);
+    return {
+      id: v.userId, name: u.username || "?", color: u.color || "#555",
+      av: IS_IMG(u.avatar) ? new URL(u.avatar, location.origin).href : u.avatar || "",
+      speaking: V.speaking.has(v.userId) && !(v.userId === S.me.id && (S.muted || S.deaf)),
+      muted: v.userId === S.me.id ? !!(S.muted || S.deaf) : !!v.muted, deaf: v.userId === S.me.id ? !!S.deaf : !!v.deaf, live: !!v.screen
+    };
+  });
+  return { on: true, pos: S.settings.overlayPos || "tl", title: c ? (c.dm ? dmTitle(c) : c.name) : "Call", people };
+}
+if (window.nexoraDesktop && window.nexoraDesktop.overlay) setInterval(() => {
+  let st;
+  try { st = overlayState(); } catch { return; }
+  const j = JSON.stringify(st);
+  if (j === ovLast) return;
+  ovLast = j;
+  try { window.nexoraDesktop.overlay(st); } catch {}
+}, 200);
+function renderOverlaySettings() {
+  const pos = S.settings.overlayPos || "tl", P = [["tl", "↖ Em cima, à esquerda"], ["tr", "↗ Em cima, à direita"], ["bl", "↙ Embaixo, à esquerda"], ["br", "↘ Embaixo, à direita"]];
+  const desk = !!(window.nexoraDesktop && window.nexoraDesktop.overlay);
+  return `${desk ? "" : `<div class="hint" style="margin:-4px 0 14px">⚠️ A sobreposição funciona no <b>app da Auryx para Windows</b>. No navegador ela não aparece.</div>`}
+    ${toggleRow("overlay", "Mostrar sobreposição nos jogos", "Quando você está numa call e vai para o jogo, aparece no canto da tela quem está na call — e acende quem está falando", S.settings.overlay !== false)}
+    <span class="label" style="display:block;margin-top:16px">Posição na tela</span>
+    <div class="ov-pos" style="margin-top:8px">${P.map(([k, t]) => `<button type="button" class="qopt${k === pos ? " on" : ""}" data-ovpos="${k}"><b>${t}</b></button>`).join("")}</div>
+    <div class="hint" style="margin-top:16px">💡 Funciona com jogos em <b>janela</b> ou <b>tela cheia sem bordas</b> (borderless). Em jogos com "tela cheia exclusiva" o Windows não deixa nada aparecer por cima — troque para "sem bordas" nas opções de vídeo do jogo. Os cliques passam direto para o jogo.</div>`;
+}
+function mountOverlaySettings(p) {
+  bindToggles(p);
+  p.addEventListener("click", e => {
+    const b = e.target.closest("[data-ovpos]");
+    if (!b) return;
+    S.settings.overlayPos = b.dataset.ovpos; saveSettings();
+    $$("[data-ovpos]", p).forEach(x => x.classList.toggle("on", x === b));
+  });
+}
+
+/* --- chat da call: mensagens de texto ao lado da chamada --- */
+const CC = { open: false, unread: 0, cid: null };
+function ccMsg(m, prev) {
+  if (m.sys) return `<div class="cc-sys">${esc(m.t || "")}</div>`;
+  const u = user(m.a), same = prev && !prev.sys && prev.a === m.a && m.ts - prev.ts < 300000;
+  return `<div class="cc-msg${same ? " same" : ""}" data-id="${esc(m.id || "")}">${same ? "" : `<div class="cc-head">${avatar(u, 22)}<b>${esc(u.username)}</b><small>${fmtTime(m.ts)}</small></div>`}<div class="cc-t">${m.t ? renderText(m.t).html : ""}${filesHTML(m)}</div></div>`;
+}
+function ccList() {
+  const b = S.msgs.get(V.channelId);
+  return b ? b.list.slice(-80) : [];
+}
+function renderCallChat() {
+  const stage = $("#stageView .stage");
+  if (!stage) return;
+  let el = stage.querySelector(".cc-panel");
+  if (!CC.open || !V.channelId) { if (el) el.remove(); return; }
+  if (CC.cid !== V.channelId) { CC.cid = V.channelId; if (el) { el.remove(); el = null; } }
+  if (!el) {
+    el = document.createElement("aside");
+    el.className = "cc-panel";
+    el.innerHTML = `<header><b>${ic("message", "sm")} Chat da call</b><button class="icon-btn" data-act="call-chat" aria-label="Fechar chat">${ic("x", "sm")}</button></header><div class="cc-list"></div><form class="cc-form"><input maxlength="2000" placeholder="Mensagem para a call…" autocomplete="off"><button class="icon-btn send" aria-label="Enviar">${ic("send", "sm")}</button></form>`;
+    el.querySelector("form").onsubmit = e => { e.preventDefault(); sendCallChat(el.querySelector("input")); };
+    stage.append(el);
+    const b = S.msgs.get(V.channelId);
+    if (!b || !b.loaded) loadHistory(V.channelId).then(() => fillCallChat());
+    fillCallChat();
+    if (!matchMedia("(pointer: coarse)").matches) el.querySelector("input").focus({ preventScroll: true });
+  }
+}
+function fillCallChat() {
+  const list = $("#stageView .cc-list");
+  if (!list) return;
+  const ms = ccList();
+  list.innerHTML = ms.length ? ms.map((m, i) => ccMsg(m, ms[i - 1])).join("") : `<p class="cc-empty">Ninguém escreveu ainda. Mande um link, um print ou um oi pra galera da call 👋</p>`;
+  list.scrollTop = list.scrollHeight;
+  markRead(V.channelId);
+}
+async function sendCallChat(inp) {
+  const text = inp.value.trim();
+  if (!text || !V.channelId) return;
+  inp.value = "";
+  const r = await emit("send", { channelId: V.channelId, text, nonce: Math.random().toString(36).slice(2) });
+  if (r && r.error) { toast(r.error, "error"); inp.value = text; }
+}
+function toggleCallChat() {
+  CC.open = !CC.open;
+  if (CC.open) CC.unread = 0;
+  schedule("stage");
+}
+function callChatOnMsg(channelId, m) {
+  if (!V.channelId || channelId !== V.channelId) return;
+  const open = CC.open && S.view === "stage" && $("#stageView .cc-list");
+  if (open) { fillCallChat(); return; }
+  if (m.a !== S.me.id && !m.sys) { CC.unread++; if (!isDm(channelId)) sfx("mention"); schedule("stage"); }
 }
 
 /* ------------------------------------------------------------------ */
@@ -4165,7 +4430,7 @@ function shareModal() {
         <label class="radio-card${mode === "detail" ? " on" : ""}">${ic("monitor")}<span><b>Texto e detalhes</b><small>Código, documentos e slides — prioriza nitidez</small></span><input type="radio" name="sm" value="detail" ${mode === "detail" ? "checked" : ""}></label>
         <label class="radio-card${mode === "motion" ? " on" : ""}">${ic("play")}<span><b>Movimento</b><small>Jogos e vídeos — prioriza fluidez</small></span><input type="radio" name="sm" value="motion" ${mode === "motion" ? "checked" : ""}></label>
       </div>
-      ${live ? "" : `<div class="toggle-row" style="border:0"><span><b>Transmitir áudio</b><small>Som da aba ou do sistema, quando o navegador permitir</small></span><label class="switch"><input type="checkbox" id="shAudio" ${S.settings.shareAudio ? "checked" : ""}><i></i></label></div>`}
+      ${live ? "" : `<div class="toggle-row" style="border:0"><span><b>Transmitir áudio</b><small>${ANDROID && ANDROID.screenAudio ? "Som do celular (jogos, vídeos e música) — Android 10 ou mais novo. As vozes da call não vão junto." : "Som da aba ou do PC. As vozes da call não vão junto."}</small></span><label class="switch"><input type="checkbox" id="shAudio" ${S.settings.shareAudio ? "checked" : ""}><i></i></label></div>`}
       <div class="hint" style="margin:6px 0 0">💡 O vídeo só é enviado para quem clicar em <b>Assistir</b> — economiza internet e processador.</div>
       <div class="modal-foot">${live ? `<button class="btn danger" data-stop>${ic("stop", "sm")}Parar transmissão</button>` : `<button class="btn ghost" data-close>Cancelar</button>`}<button class="btn primary" data-go>${live ? "Aplicar" : `${ic("monitorUp", "sm")}Ao vivo`}</button></div>`,
     onMount(m, close) {
@@ -4245,6 +4510,7 @@ function userSettings(initial) {
     { id: "stream", name: "Transmissão", render: () => `<p style="color:var(--muted);margin-top:-8px">Padrão usado ao entrar ao vivo. Você pode mudar durante a transmissão.</p><span class="label">Qualidade padrão</span><div class="qgrid" style="margin-top:8px">${Object.entries(QUALITY).map(([k, v]) => `<button type="button" class="qopt${k === S.settings.shareQuality ? " on" : ""}" data-q="${k}">${v.tag ? `<span class="tag">${v.tag}</span>` : ""}<b>${v.label}</b><small>${v.sub}</small></button>`).join("")}</div>${toggleRow("shareAudio", "Transmitir áudio por padrão", "Inclui o som da aba ou do sistema", S.settings.shareAudio)}<div class="hint" style="margin-top:16px">Como a Auryx Nexavória economiza recursos: a tela só é codificada para quem está assistindo, a taxa de bits se divide entre os espectadores, o codec é escolhido pelo modo (VP9 para texto nítido, H.264 com aceleração por hardware para movimento) e o áudio usa Opus com supressão de silêncio.</div>`, mount: p => { p.addEventListener("click", e => { const b = e.target.closest("[data-q]"); if (b) { S.settings.shareQuality = b.dataset.q; saveSettings(); $$("[data-q]", p).forEach(x => x.classList.toggle("on", x === b)); } }); bindToggles(p); } },
     { id: "app", name: "Baixar o app", render: renderAppDl, mount: mountAppDl },
     { id: "games", name: "Jogos e Steam", render: renderGames, mount: mountGames },
+    { id: "overlay", name: "🎮 Sobreposição de jogo", render: renderOverlaySettings, mount: mountOverlaySettings },
     { id: "remote", name: "Controle remoto", render: renderRemote, mount: mountRemote },
     { label: "Aplicativo" },
     { id: "look", name: "Aparência", render: renderLook, mount: mountLook },
@@ -4734,6 +5000,8 @@ const ACTIONS = {
   "admin-tab": a => { S.adminTab = a.dataset.tab; renderAdmin(true); },
   "admin-filter": a => { S.adminFilter = a.dataset.f; renderAdmin(true); },
   games: () => goGames(),
+  ai: () => goAI(),
+  "ai-clear": () => clearAI(),
   "games-cat": a => { S.gameCat = a.dataset.cat || ""; if (S.view !== "games") goGames(); else { renderGamesView(); renderSide(); } },
   "game-play": a => playGame(a.dataset.id),
   "game-tab": a => openGameTab(gameById(a.dataset.id) || GP.game),
@@ -4763,6 +5031,7 @@ const ACTIONS = {
   "act-menu": a => actMenu(a),
   "sound-menu": a => soundMenu(a),
   "react-menu": a => reactMenu(a),
+  "call-chat": toggleCallChat,
   "group-add": a => groupModal(a.dataset.id),
   "group-menu": a => groupMenu(a.dataset.id, a),
   "up-remove": a => removeUpload(a.dataset.key),

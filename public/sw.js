@@ -1,7 +1,7 @@
 /* Auryx Nexavória — service worker
    Guarda só a "casca" do app (HTML, CSS, JS, ícones) para abrir rápido.
    Mensagens, login e voz sempre vão direto para o servidor. */
-const CACHE = "auryx-v8";
+const CACHE = "auryx-v9";
 const SHELL = ["/", "/style.css", "/app.js", "/socket.io/socket.io.min.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 const cacheable = p => SHELL.includes(p) || p.startsWith("/icons/") || p.startsWith("/vendor/") || p === "/noise-worklet.js";
 

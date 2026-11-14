@@ -49,7 +49,8 @@ public class MainActivity extends Activity {
     private WebView web;
     private PermissionRequest pendingPerm;
     private ValueCallback<Uri[]> fileCallback;
-    private int screenW = 1280, screenH = 720, screenFps = 15;
+    private int screenW = 1280, screenH = 720, screenFps = 15, screenRate = 48000;
+    private boolean screenAudio = false;
     private int notifId = 100;
 
     @Override
@@ -197,7 +198,9 @@ public class MainActivity extends Activity {
             if (ok) {
                 Intent i = new Intent(this, ScreenService.class)
                         .putExtra("code", result).putExtra("data", data)
-                        .putExtra("w", screenW).putExtra("h", screenH).putExtra("fps", screenFps);
+                        .putExtra("w", screenW).putExtra("h", screenH).putExtra("fps", screenFps)
+                        .putExtra("audio", screenAudio && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
+                        .putExtra("rate", screenRate);
                 if (Build.VERSION.SDK_INT >= 26) startForegroundService(i); else startService(i);
             }
             web.evaluateJavascript("window.__axScreenResult && window.__axScreenResult(" + ok + ")", null);
@@ -244,6 +247,24 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String frame() {
             return ScreenService.takeFrame();
+        }
+
+        /** Som do celular junto com a tela (Android 10+): chamar antes de startScreen. */
+        @JavascriptInterface
+        public void screenAudio(boolean on, int rate) {
+            screenAudio = on && Build.VERSION.SDK_INT >= 29;
+            screenRate = rate == 44100 ? 44100 : 48000;
+        }
+
+        @JavascriptInterface
+        public boolean screenAudioSupported() {
+            return Build.VERSION.SDK_INT >= 29;
+        }
+
+        /** Som capturado desde a última chamada (PCM 16 bits, estéreo, em base64). */
+        @JavascriptInterface
+        public String audio() {
+            return ScreenService.takeAudio();
         }
 
         @JavascriptInterface
