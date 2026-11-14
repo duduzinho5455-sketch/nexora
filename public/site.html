@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Auryx Nexavória — converse, jogue e fique junto</title>
+<meta name="description" content="Auryx Nexavória: servidores, chamadas de voz e vídeo, transmissão de tela e jogos com os amigos. Grátis no PC, no celular e no navegador.">
+<meta name="theme-color" content="#08090f">
+<meta property="og:title" content="Auryx Nexavória">
+<meta property="og:description" content="Servidores, calls, transmissão de tela e jogos com os amigos. Grátis no PC, Android e navegador.">
+<meta property="og:image" content="/icons/icon-512.png">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<style>
+:root{
+  --bg:#07080e;--bg2:#0d0f19;--card:#12152299;--card-s:#121522;--line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.14);
+  --text:#eef0f8;--text2:#b6bbd3;--muted:#8a90ad;--a1:#8b5cf6;--a2:#22d3ee;--a3:#f472b6;--green:#23d18b;
+  --grad:linear-gradient(135deg,var(--a1),var(--a2));--r:20px;--ease:cubic-bezier(.2,.8,.2,1);
+  --font:"Inter","Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:80px}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 var(--font);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+img,svg{display:block}
+.wrap{width:min(1180px,100% - 40px);margin:0 auto}
+.grad-text{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+
+/* topo */
+.nav{position:sticky;top:0;z-index:20;padding-top:env(safe-area-inset-top);background:rgba(7,8,14,.72);backdrop-filter:blur(14px) saturate(1.3);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid transparent;transition:border-color .3s}
+.nav.scrolled{border-bottom-color:var(--line)}
+.nav .wrap{display:flex;align-items:center;gap:28px;height:68px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px;letter-spacing:-.01em}
+.brand svg{width:34px;height:34px}
+.links{display:flex;gap:22px;margin-left:auto;font-weight:600;font-size:15px;color:var(--text2)}
+.links a:hover{color:var(--text)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;height:48px;padding:0 24px;border-radius:99px;border:0;font:inherit;font-weight:700;font-size:16px;cursor:pointer;transition:transform .18s var(--ease),box-shadow .18s,background .18s;white-space:nowrap}
+.btn:hover{transform:translateY(-2px)}
+.btn svg{width:20px;height:20px;flex:none}
+.btn.primary{background:var(--grad);color:#fff;box-shadow:0 10px 30px rgba(139,92,246,.35)}
+.btn.primary:hover{box-shadow:0 14px 40px rgba(139,92,246,.5)}
+.btn.light{background:#fff;color:#14152a}
+.btn.ghost{background:rgba(255,255,255,.07);color:var(--text);border:1px solid var(--line2)}
+.btn.ghost:hover{background:rgba(255,255,255,.12)}
+.btn.sm{height:40px;padding:0 18px;font-size:14.5px}
+.menu-btn{display:none;margin-left:auto;width:42px;height:42px;border-radius:12px;border:1px solid var(--line2);background:transparent;color:var(--text);cursor:pointer}
+.menu-btn svg{width:22px;height:22px;margin:auto}
+
+/* herói */
+.hero{position:relative;padding:90px 0 40px;overflow:hidden;isolation:isolate}
+.hero::before,.hero::after{content:"";position:absolute;z-index:-1;border-radius:50%;filter:blur(90px);opacity:.55}
+.hero::before{width:620px;height:620px;left:-180px;top:-220px;background:#6d28d9}
+.hero::after{width:560px;height:560px;right:-180px;top:40px;background:#0e7490}
+.stars{position:absolute;inset:0;z-index:-1;background-image:radial-gradient(1.5px 1.5px at 20% 30%,#fff8,transparent),radial-gradient(1px 1px at 70% 20%,#fff6,transparent),radial-gradient(1.5px 1.5px at 85% 60%,#fff5,transparent),radial-gradient(1px 1px at 35% 75%,#fff5,transparent),radial-gradient(1px 1px at 55% 45%,#fff4,transparent),radial-gradient(1.5px 1.5px at 10% 85%,#fff5,transparent)}
+.hero-grid{display:grid;grid-template-columns:1.05fr 1fr;gap:56px;align-items:center}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:99px;background:rgba(255,255,255,.06);border:1px solid var(--line2);font-size:13.5px;font-weight:600;color:var(--text2)}
+.pill i{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 12px var(--green)}
+h1{font-size:clamp(40px,6vw,68px);line-height:1.04;letter-spacing:-.035em;margin:18px 0 18px;font-weight:900}
+.lead{font-size:clamp(17px,2vw,19.5px);color:var(--text2);max-width:540px;margin:0 0 30px}
+.cta{display:flex;gap:14px;flex-wrap:wrap}
+.cta-note{margin-top:14px;font-size:13.5px;color:var(--muted)}
+.cta-note a{text-decoration:underline;text-underline-offset:3px}
+
+/* janela do app desenhada (não é foto) */
+.mock{position:relative;border-radius:18px;background:#0b0d16;border:1px solid var(--line2);box-shadow:0 40px 100px rgba(0,0,0,.6),0 0 0 1px rgba(139,92,246,.15);overflow:hidden;aspect-ratio:16/11;display:grid;grid-template-columns:52px 150px 1fr;transform:perspective(1400px) rotateY(-8deg) rotateX(3deg);transition:transform .6s var(--ease)}
+.mock:hover{transform:perspective(1400px) rotateY(-2deg) rotateX(1deg)}
+.m-rail{background:#07080e;display:flex;flex-direction:column;align-items:center;gap:9px;padding:12px 0}
+.m-rail span{width:32px;height:32px;border-radius:11px;background:#1a1e30}
+.m-rail span:first-child{background:var(--grad)}
+.m-rail span:nth-child(3){background:#f59e0b}.m-rail span:nth-child(4){background:#10b981}.m-rail span:nth-child(5){background:#ec4899}
+.m-side{background:#0e1019;padding:14px 10px;display:flex;flex-direction:column;gap:7px}
+.m-side b{height:10px;border-radius:5px;background:#232842;width:70%;margin-bottom:6px}
+.m-side i{height:8px;border-radius:4px;background:#1a1e30}
+.m-side i.on{background:#2b3150}
+.m-side .vc{display:flex;align-items:center;gap:6px;padding-left:10px}
+.m-side .vc em{width:14px;height:14px;border-radius:50%;flex:none}
+.m-side .vc em+i{flex:1}
+.m-main{display:grid;grid-template-rows:auto 1fr auto;background:#131624}
+.m-top{height:38px;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 14px;gap:8px}
+.m-top i{width:90px;height:9px;border-radius:5px;background:#2b3150}
+.m-stage{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px}
+.tile{border-radius:12px;display:grid;place-items:center;position:relative;overflow:hidden}
+.tile.screen{grid-column:span 2;background:linear-gradient(135deg,#1e1b4b,#312e81 50%,#0e7490);min-height:90px}
+.tile.screen::after{content:"AO VIVO";position:absolute;top:8px;left:8px;font-size:9px;font-weight:800;background:#ef4444;color:#fff;padding:2px 6px;border-radius:5px;letter-spacing:.05em}
+.tile .av{width:38px;height:38px;border-radius:50%}
+.tile.a{background:#1f2440}.tile.b{background:#22283f;box-shadow:inset 0 0 0 2px var(--green)}
+.m-bar{display:flex;justify-content:center;gap:8px;padding:8px}
+.m-bar i{width:28px;height:28px;border-radius:50%;background:#232842}
+.m-bar i:last-child{background:#ef4444}
+.float{position:absolute;padding:10px 14px;border-radius:14px;background:rgba(18,21,34,.92);border:1px solid var(--line2);font-size:13px;font-weight:600;box-shadow:0 14px 40px rgba(0,0,0,.5);display:flex;align-items:center;gap:8px;animation:bob 5s ease-in-out infinite}
+.float.f1{right:-6px;top:22%}.float.f2{left:-10px;bottom:16%;animation-delay:-2.5s}
+.float b{color:var(--green)}
+@keyframes bob{50%{transform:translateY(-8px)}}
+
+/* números */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin:70px 0 10px}
+.stat{padding:22px;border-radius:var(--r);background:var(--card);border:1px solid var(--line);text-align:center}
+.stat b{display:block;font-size:30px;font-weight:900;letter-spacing:-.02em}
+.stat span{color:var(--muted);font-size:14px}
+
+/* seções */
+section{padding:90px 0}
+.kicker{font-size:13px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--a2)}
+h2{font-size:clamp(32px,4.4vw,50px);line-height:1.08;letter-spacing:-.03em;margin:12px 0 16px;font-weight:900}
+.sub{color:var(--text2);font-size:18px;max-width:620px;margin:0}
+.center{text-align:center}.center .sub{margin:0 auto}
+.feature{display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:center;padding:56px 0}
+.feature.rev .f-art{order:-1}
+.feature h3{font-size:clamp(26px,3vw,36px);line-height:1.15;letter-spacing:-.02em;margin:10px 0 14px;font-weight:850}
+.feature p{color:var(--text2);font-size:17.5px;margin:0 0 18px}
+.checks{list-style:none;padding:0;margin:0;display:grid;gap:10px}
+.checks li{display:flex;gap:10px;align-items:flex-start;color:var(--text2)}
+.checks li::before{content:"";flex:none;width:20px;height:20px;margin-top:3px;border-radius:50%;background:var(--grad) center/12px no-repeat;-webkit-mask:none}
+.checks li::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5L20 7'/%3E%3C/svg%3E"),var(--grad)}
+.f-art{position:relative;border-radius:26px;padding:28px;min-height:330px;background:linear-gradient(160deg,#151a2e,#0c0e18);border:1px solid var(--line);overflow:hidden;display:grid;place-items:center}
+.f-art::before{content:"";position:absolute;width:300px;height:300px;border-radius:50%;filter:blur(80px);opacity:.45;background:var(--c,#7c3aed);top:-80px;right:-60px}
+
+/* arte: servidores */
+.srv-list{position:relative;display:grid;gap:12px;width:100%;max-width:360px}
+.srv{display:flex;align-items:center;gap:14px;padding:14px;border-radius:16px;background:rgba(255,255,255,.04);border:1px solid var(--line)}
+.srv .ico{width:46px;height:46px;border-radius:15px;display:grid;place-items:center;font-weight:800;color:#fff;flex:none}
+.srv b{display:block;font-size:15px}.srv small{color:var(--muted);font-size:13px}
+.srv .on{margin-left:auto;font-size:12px;font-weight:700;color:var(--green);display:flex;align-items:center;gap:6px}
+.srv .on::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--green)}
+/* arte: call */
+.call-art{position:relative;display:grid;grid-template-columns:repeat(2,1fr);gap:12px;width:100%;max-width:380px}
+.call-art .t{aspect-ratio:4/3;border-radius:16px;display:grid;place-items:center;background:#1c2138;position:relative}
+.call-art .t .av{width:58px;height:58px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:22px;color:#fff}
+.call-art .t.talk{box-shadow:inset 0 0 0 3px var(--green)}
+.call-art .t small{position:absolute;left:8px;bottom:8px;font-size:11px;font-weight:700;background:#0009;padding:2px 8px;border-radius:6px}
+.call-art .wide{grid-column:span 2;aspect-ratio:auto;height:120px;background:linear-gradient(135deg,#2e1065,#6d28d9 55%,#0891b2)}
+/* arte: jogos */
+.game-art{position:relative;width:100%;max-width:380px;border-radius:18px;overflow:hidden;border:1px solid var(--line2);background:#0b0c12}
+.game-art .cover{height:170px;display:grid;place-items:center;background:radial-gradient(120% 90% at 20% 10%,#dc2626cc,transparent 60%),linear-gradient(160deg,#3b0a0a,#120404);font-weight:900;font-size:34px;letter-spacing:.08em;color:#fff;text-shadow:0 2px 20px #000}
+.game-art .body{padding:16px}
+.game-art .body b{font-size:17px}.game-art .body p{margin:6px 0 12px;font-size:14px;color:var(--muted)}
+.game-art .play{display:flex;align-items:center;justify-content:center;gap:8px;height:40px;border-radius:12px;background:var(--grad);font-weight:700;font-size:14px}
+/* arte: segurança */
+.shield-art{position:relative;display:grid;gap:12px;width:100%;max-width:360px}
+.shield-art .row{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid var(--line);font-weight:600;font-size:15px}
+.shield-art .row em{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;font-style:normal;font-size:18px;background:rgba(255,255,255,.06)}
+
+/* jogos */
+.games-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:40px}
+.gcard{border-radius:var(--r);overflow:hidden;background:var(--card-s);border:1px solid var(--line);transition:transform .25s var(--ease),border-color .25s}
+.gcard:hover{transform:translateY(-4px);border-color:var(--line2)}
+.gcard .cv{height:150px;display:grid;place-items:center;font-weight:900;font-size:26px;letter-spacing:.06em;color:#fff}
+.gcard .bd{padding:16px 18px 18px}
+.gcard .bd b{font-size:17px}.gcard .bd p{margin:6px 0 0;font-size:14px;color:var(--muted)}
+.gcard.soon{opacity:.6}
+.tag{display:inline-block;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:99px;background:rgba(255,255,255,.07);color:var(--text2);margin-left:6px;vertical-align:2px}
+
+/* planos */
+.plans{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:44px}
+.plan{position:relative;padding:26px 22px;border-radius:var(--r);background:var(--card-s);border:1px solid var(--line);display:flex;flex-direction:column}
+.plan.feat{border-color:transparent;background:linear-gradient(var(--card-s),var(--card-s)) padding-box,var(--grad) border-box;border:1.5px solid transparent}
+.plan .flag{position:absolute;top:-12px;left:22px;font-size:12px;font-weight:800;padding:4px 10px;border-radius:99px;background:var(--grad)}
+.plan h3{margin:0;font-size:20px}
+.plan .price{margin:10px 0 16px;font-size:34px;font-weight:900;letter-spacing:-.02em}
+.plan .price small{font-size:14px;color:var(--muted);font-weight:600}
+.plan ul{list-style:none;padding:0;margin:0 0 22px;display:grid;gap:9px;font-size:14.5px;color:var(--text2);flex:1}
+.plan li::before{content:"✓ ";color:var(--a2);font-weight:800}
+.plans-note{margin-top:18px;color:var(--muted);font-size:14px;text-align:center}
+
+/* downloads */
+.dl{position:relative;border-radius:32px;padding:64px 48px;background:linear-gradient(135deg,#1b1240,#141a3a 50%,#0b2a36);border:1px solid var(--line2);overflow:hidden;isolation:isolate}
+.dl::before{content:"";position:absolute;z-index:-1;width:520px;height:520px;border-radius:50%;filter:blur(100px);background:#7c3aed;opacity:.35;right:-120px;top:-200px}
+.dl-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:40px}
+.dcard{padding:26px;border-radius:22px;background:rgba(7,8,14,.55);border:1px solid var(--line2);display:flex;flex-direction:column;gap:10px}
+.dcard.me{box-shadow:0 0 0 2px var(--a2)}
+.dcard .os{width:52px;height:52px;border-radius:16px;display:grid;place-items:center;background:rgba(255,255,255,.07)}
+.dcard .os svg{width:28px;height:28px}
+.dcard h3{margin:6px 0 0;font-size:20px}
+.dcard p{margin:0;color:var(--text2);font-size:14.5px;flex:1}
+.dcard small{color:var(--muted);font-size:12.5px}
+.dcard .btn{margin-top:8px;width:100%}
+.steps{margin:6px 0 0;padding-left:18px;color:var(--text2);font-size:14px;display:grid;gap:4px}
+
+/* perguntas */
+.faq{max-width:820px;margin:40px auto 0;display:grid;gap:12px}
+details{border-radius:16px;background:var(--card-s);border:1px solid var(--line);padding:0 22px}
+summary{cursor:pointer;list-style:none;padding:18px 0;font-weight:700;font-size:17px;display:flex;justify-content:space-between;gap:16px}
+summary::-webkit-details-marker{display:none}
+summary::after{content:"+";font-size:24px;line-height:1;color:var(--a2);transition:transform .2s}
+details[open] summary::after{transform:rotate(45deg)}
+details p{margin:0 0 18px;color:var(--text2)}
+
+/* chamada final e rodapé */
+.final{text-align:center;padding:100px 0 110px}
+.final h2{max-width:760px;margin:12px auto 26px}
+.final .cta{justify-content:center}
+footer{border-top:1px solid var(--line);padding:46px 0 calc(40px + env(safe-area-inset-bottom));color:var(--muted);font-size:14px}
+.foot{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:30px}
+.foot h4{color:var(--text);margin:0 0 12px;font-size:14px}
+.foot a{display:block;padding:3px 0}.foot a:hover{color:var(--text)}
+.foot p{max-width:320px}
+.copy{margin-top:34px;padding-top:20px;border-top:1px solid var(--line);display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+
+/* aparecer ao rolar */
+.reveal{opacity:0;transform:translateY(26px);transition:opacity .7s var(--ease),transform .7s var(--ease)}
+.reveal.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}html{scroll-behavior:auto}.reveal{opacity:1;transform:none}.mock{transform:none}}
+
+/* celular */
+@media (max-width:980px){
+  .hero-grid,.feature{grid-template-columns:1fr;gap:40px}
+  .feature.rev .f-art{order:0}
+  .mock{transform:none;max-width:560px;margin:0 auto;width:100%}
+  .plans{grid-template-columns:repeat(2,1fr)}
+  .dl-grid,.games-grid{grid-template-columns:1fr}
+  .foot{grid-template-columns:1fr 1fr}
+  .stats{grid-template-columns:repeat(2,1fr)}
+}
+@media (max-width:760px){
+  .links{display:none;position:absolute;top:calc(68px + env(safe-area-inset-top));left:0;right:0;flex-direction:column;gap:0;padding:8px 20px 18px;background:#07080e;box-shadow:0 20px 40px rgba(0,0,0,.6);border-bottom:1px solid var(--line)}
+  .links.open{display:flex}
+  .links a{padding:12px 0;border-bottom:1px solid var(--line)}
+  .menu-btn{display:grid}
+  .nav .btn.sm{display:none}
+  .hero{padding:56px 0 20px}
+  section{padding:64px 0}
+  .feature{padding:36px 0}
+  .f-art{min-height:260px;padding:20px}
+  .dl{padding:40px 20px;border-radius:24px}
+  .plans{grid-template-columns:1fr}
+  .cta .btn{flex:1 1 100%}
+  .float{display:none}
+  .mock{grid-template-columns:40px 1fr}
+  .m-side{display:none}
+  .foot{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<header class="nav" id="nav">
+  <div class="wrap">
+    <a class="brand" href="#topo" aria-label="Auryx Nexavória — início">
+      <svg viewBox="0 0 48 48" aria-hidden="true"><defs><linearGradient id="lg1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><path d="M11 37 24 11l13 26M16.5 28h15" fill="none" stroke="url(#lg1)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Auryx Nexavória
+    </a>
+    <nav class="links" id="links">
+      <a href="#recursos">Recursos</a>
+      <a href="#jogos">Jogos</a>
+      <a href="#premium">Premium</a>
+      <a href="#baixar">Baixar</a>
+      <a href="#perguntas">Perguntas</a>
+    </nav>
+    <a class="btn light sm" href="/">Abrir a Auryx</a>
+    <button class="menu-btn" id="menuBtn" aria-label="Abrir menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+
+<main id="topo">
+  <div class="hero">
+    <div class="stars"></div>
+    <div class="wrap hero-grid">
+      <div>
+        <span class="pill"><i></i> Grátis no PC, no celular e no navegador</span>
+        <h1>O seu lugar pra <span class="grad-text">conversar, jogar</span> e ficar junto.</h1>
+        <p class="lead">Crie servidores para a sua galera, entre em calls com voz, vídeo e transmissão de tela, e jogue com os amigos sem sair da Auryx. Tudo leve, rápido e em português.</p>
+        <div class="cta">
+          <a class="btn primary" id="heroDl" href="#baixar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><span>Baixar a Auryx</span></a>
+          <a class="btn ghost" href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>Abrir no navegador</a>
+        </div>
+        <p class="cta-note" id="heroNote">Sem instalar nada: é só abrir no navegador e criar sua conta.</p>
+      </div>
+      <div style="position:relative">
+        <div class="mock" aria-hidden="true">
+          <div class="m-rail"><span></span><span></span><span></span><span></span><span></span></div>
+          <div class="m-side"><b></b><i class="on"></i><i></i><i></i><i style="width:60%"></i><b style="margin-top:10px;width:55%"></b><div class="vc"><em style="background:#8b5cf6"></em><i></i></div><div class="vc"><em style="background:#22d3ee"></em><i></i></div><div class="vc"><em style="background:#f472b6"></em><i></i></div></div>
+          <div class="m-main"><div class="m-top"><i></i></div><div class="m-stage"><div class="tile screen"></div><div class="tile a"><span class="av" style="background:#8b5cf6"></span></div><div class="tile b"><span class="av" style="background:#22d3ee"></span></div></div><div class="m-bar"><i></i><i></i><i></i><i></i></div></div>
+        </div>
+        <div class="float f1">🎮 <span>3 amigos jogando <b>Bunker 9</b></span></div>
+        <div class="float f2">🔊 <span>Call com <b>tela ao vivo</b></span></div>
+      </div>
+    </div>
+    <div class="wrap stats">
+      <div class="stat reveal"><b class="grad-text">100%</b><span>grátis para usar</span></div>
+      <div class="stat reveal"><b class="grad-text">3</b><span>jeitos de usar: PC, celular e web</span></div>
+      <div class="stat reveal"><b class="grad-text">1080p</b><span>na transmissão de tela</span></div>
+      <div class="stat reveal"><b class="grad-text">PT-BR</b><span>feito em português</span></div>
+    </div>
+  </div>
+
+  <section id="recursos">
+    <div class="wrap">
+      <div class="center reveal">
+        <span class="kicker">Recursos</span>
+        <h2>Tudo que a sua galera precisa,<br>num lugar só.</h2>
+        <p class="sub">Servidores, conversas privadas, calls e jogos, sem anúncio e sem complicação.</p>
+      </div>
+
+      <div class="feature reveal">
+        <div>
+          <span class="kicker">Servidores</span>
+          <h3>Um espaço com a cara do seu grupo</h3>
+          <p>Crie um servidor em segundos com modelos prontos: amigos, clã de jogos, estudos ou comunidade. Separe os assuntos em canais de texto e salas de voz.</p>
+          <ul class="checks"><li>Convites por link ou código</li><li>Canais de texto e de voz ilimitados</li><li>Servidor público aparece no Explorar</li></ul>
+        </div>
+        <div class="f-art" style="--c:#7c3aed">
+          <div class="srv-list">
+            <div class="srv"><span class="ico" style="background:#7c3aed">CA</span><div><b>Clã dos Amigos</b><small>#geral · #clipes · Lobby</small></div><span class="on">8</span></div>
+            <div class="srv"><span class="ico" style="background:#0891b2">📚</span><div><b>Grupo de Estudos</b><small>#duvidas · Foco total</small></div><span class="on">5</span></div>
+            <div class="srv"><span class="ico" style="background:#db2777">🎵</span><div><b>Rolê da Música</b><small>#playlists · Palco</small></div><span class="on">12</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="feature rev reveal">
+        <div>
+          <span class="kicker">Calls</span>
+          <h3>Voz, vídeo e tela em alta qualidade</h3>
+          <p>Entre numa sala de voz e fale na hora. Ligue a câmera, transmita a tela do PC ou do celular e use a supressão de ruído para tirar o barulho de fundo.</p>
+          <ul class="checks"><li>Chamada privada direto pela conversa, mesmo sozinho esperando</li><li>Transmissão de tela até 1080p com áudio</li><li>A call continua com a tela do celular bloqueada</li><li>Ouvir música juntos, lousa e jogo da velha na call</li></ul>
+        </div>
+        <div class="f-art" style="--c:#0891b2">
+          <div class="call-art">
+            <div class="t wide"><small>🔴 Tela ao vivo</small></div>
+            <div class="t talk"><span class="av" style="background:#8b5cf6">L</span><small>Lari</small></div>
+            <div class="t"><span class="av" style="background:#f59e0b">D</span><small>Dudu</small></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="feature reveal">
+        <div>
+          <span class="kicker">Segurança</span>
+          <h3>Sua conta protegida de verdade</h3>
+          <p>Senhas guardadas com criptografia forte, confirmação por e-mail e bloqueio automático depois de várias tentativas erradas. A equipe ADM cuida da comunidade.</p>
+          <ul class="checks"><li>Confirmação de conta por e-mail</li><li>Recuperação de senha com código</li><li>Moderação: servidores e contas problemáticas são bloqueados</li></ul>
+        </div>
+        <div class="f-art" style="--c:#059669">
+          <div class="shield-art">
+            <div class="row"><em>🔐</em>Senha criptografada</div>
+            <div class="row"><em>📧</em>Código de confirmação por e-mail</div>
+            <div class="row"><em>🛡️</em>Equipe de moderação ativa</div>
+            <div class="row"><em>🚫</em>Sem anúncios, sem venda de dados</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="jogos" style="background:linear-gradient(180deg,transparent,#0b0d18 30%,#0b0d18 70%,transparent)">
+    <div class="wrap">
+      <div class="feature rev reveal" style="padding-top:0">
+        <div>
+          <span class="kicker">Jogos</span>
+          <h3>Jogue com os amigos sem sair da Auryx</h3>
+          <p>Abra a aba Jogos, escolha um título e jogue direto dentro do app. Minimize para conversar e o jogo continua rodando. Chame a galera pra call e joguem juntos.</p>
+          <ul class="checks"><li>Jogos que abrem na hora, sem instalar</li><li>Multiplayer com os amigos</li><li>Catálogo que cresce com novos jogos</li></ul>
+        </div>
+        <div class="f-art" style="--c:#dc2626">
+          <div class="game-art"><div class="cover">BUNKER 9</div><div class="body"><b>Bunker 9</b><span class="tag">Sobrevivência</span><p>Sobreviva às hordas de zumbis no bunker com seus amigos.</p><div class="play">▶ Jogar</div></div></div>
+        </div>
+      </div>
+      <div class="games-grid">
+        <div class="gcard reveal"><div class="cv" style="background:radial-gradient(120% 90% at 20% 10%,#dc2626cc,transparent 60%),linear-gradient(160deg,#3b0a0a,#120404)">BUNKER 9</div><div class="bd"><b>Bunker 9</b><span class="tag">Sobrevivência</span><p>Multiplayer, armas, perks e muita tensão.</p></div></div>
+        <div class="gcard soon reveal"><div class="cv" style="background:linear-gradient(160deg,#1e3a8a,#0f172a)">EM BREVE</div><div class="bd"><b>Novo jogo</b><span class="tag">Em breve</span><p>Mais jogos chegando ao catálogo.</p></div></div>
+        <div class="gcard soon reveal"><div class="cv" style="background:linear-gradient(160deg,#065f46,#022c22)">EM BREVE</div><div class="bd"><b>Novo jogo</b><span class="tag">Em breve</span><p>Fique de olho na aba Jogos.</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="premium">
+    <div class="wrap">
+      <div class="center reveal">
+        <span class="kicker">Premium</span>
+        <h2>Grátis pra sempre.<br><span class="grad-text">Turbinado se você quiser.</span></h2>
+        <p class="sub">Tudo o que importa é grátis. Os planos deixam seu perfil com mais estilo e ajudam a manter a Auryx no ar.</p>
+      </div>
+      <div class="plans">
+        <div class="plan reveal"><h3>Grátis</h3><div class="price">R$ 0</div><ul><li>Servidores e conversas</li><li>Calls de voz e vídeo</li><li>Transmissão de tela</li><li>Jogos</li><li>Arquivos de até 8 MB</li></ul><a class="btn ghost" href="/">Criar conta</a></div>
+        <div class="plan reveal"><h3>Plus</h3><div class="price">R$ 5,99<small>/mês</small></div><ul><li>Selo Plus no perfil</li><li>Cores do perfil em degradê</li><li>Status com emoji</li><li>Arquivos de até 15 MB</li></ul><a class="btn ghost" href="/?abrir=premium">Assinar Plus</a></div>
+        <div class="plan feat reveal"><span class="flag">Mais escolhido</span><h3>Pro</h3><div class="price">R$ 14,99<small>/mês</small></div><ul><li>Tudo do Plus</li><li>Avatar animado (GIF)</li><li>Banner no perfil</li><li>Efeito no nome</li><li>Arquivos de até 25 MB</li></ul><a class="btn primary" href="/?abrir=premium">Assinar Pro</a></div>
+        <div class="plan reveal"><h3>Max</h3><div class="price">R$ 34,99<small>/mês</small></div><ul><li>Tudo do Pro</li><li>Selo Max exclusivo</li><li>Efeitos animados no perfil</li><li>Arquivos de até 50 MB</li><li>Prioridade no atendimento</li></ul><a class="btn ghost" href="/?abrir=premium">Assinar Max</a></div>
+      </div>
+      <p class="plans-note">Pagamento por Pix. Depois de pagar, você envia o comprovante no app e a equipe libera o plano por 30 dias.</p>
+    </div>
+  </section>
+
+  <section id="baixar">
+    <div class="wrap">
+      <div class="dl reveal">
+        <span class="kicker">Baixar</span>
+        <h2>Leve a Auryx pra onde você for.</h2>
+        <p class="sub">Use no navegador sem instalar nada, ou baixe o app para ter notificações, chamada em segundo plano e transmissão de tela do celular.</p>
+        <div class="dl-grid">
+          <div class="dcard" data-os="windows">
+            <span class="os"><svg viewBox="0 0 24 24" fill="#60a5fa"><path d="M3 5.5 10.5 4.4v7.1H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg></span>
+            <h3>Windows</h3>
+            <p>App de PC com transmissão de tela e áudio do sistema, atalhos e notificações. Fica na bandeja do Windows, pronto para quando te chamarem.</p>
+            <small>Windows 10 ou 11 · 64 bits</small>
+            <a class="btn primary" href="https://github.com/duduzinho5455-sketch/nexora/releases/latest/download/Auryx-Nexavoria-Setup.exe">Baixar para Windows</a>
+          </div>
+          <div class="dcard" data-os="android">
+            <span class="os"><svg viewBox="0 0 24 24" fill="#34d399"><path d="M7 9h10a1 1 0 0 1 1 1v7a2 2 0 0 1-2 2h-1v2.5a1.5 1.5 0 0 1-3 0V19h-0v2.5a1.5 1.5 0 0 1-3 0V19H8a2 2 0 0 1-2-2v-7a1 1 0 0 1 1-1zM4.5 9.5A1.5 1.5 0 0 1 6 11v4a1.5 1.5 0 0 1-3 0v-4a1.5 1.5 0 0 1 1.5-1.5zm15 0A1.5 1.5 0 0 1 21 11v4a1.5 1.5 0 0 1-3 0v-4a1.5 1.5 0 0 1 1.5-1.5zM8.3 3.2l1 1.6A6 6 0 0 1 12 4.2a6 6 0 0 1 2.7.6l1-1.6a.4.4 0 0 1 .7.4l-1 1.6A5.5 5.5 0 0 1 18 8H6a5.5 5.5 0 0 1 2.6-2.8l-1-1.6a.4.4 0 0 1 .7-.4zM9.5 6.3a.7.7 0 1 0 0 1.4.7.7 0 0 0 0-1.4zm5 0a.7.7 0 1 0 0 1.4.7.7 0 0 0 0-1.4z"/></svg></span>
+            <h3>Android</h3>
+            <p>Transmita a tela do celular, continue na call com a tela bloqueada e receba avisos de chamada.</p>
+            <ol class="steps"><li>Baixe o arquivo .apk</li><li>Abra e toque em Instalar</li><li>Se pedir, permita “fontes desconhecidas”</li></ol>
+            <small>Android 7 ou mais novo</small>
+            <a class="btn primary" href="https://github.com/duduzinho5455-sketch/nexora/releases/download/android/Auryx-Nexavoria.apk">Baixar APK</a>
+          </div>
+          <div class="dcard" data-os="ios">
+            <span class="os"><svg viewBox="0 0 24 24" fill="#e5e7eb"><path d="M16.4 12.6c0-2.5 2-3.7 2.1-3.8a4.6 4.6 0 0 0-3.6-2c-1.5-.2-3 .9-3.7.9-.8 0-2-.9-3.2-.9a4.8 4.8 0 0 0-4 2.5c-1.7 3-.4 7.4 1.2 9.8.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8 1.5 0 1.9.8 3.2.8 1.3 0 2.1-1.2 2.9-2.4a10 10 0 0 0 1.3-2.7 4.2 4.2 0 0 1-2.3-3.8zM14 5.3a4.3 4.3 0 0 0 1-3.1 4.4 4.4 0 0 0-2.9 1.5 4.1 4.1 0 0 0-1 3 3.6 3.6 0 0 0 2.9-1.4z"/></svg></span>
+            <h3>iPhone e navegador</h3>
+            <p>Abra no Safari ou em qualquer navegador. No iPhone, dá para colocar na tela de início como um app.</p>
+            <ol class="steps"><li>Abra a Auryx no Safari</li><li>Toque em Compartilhar</li><li>Escolha “Adicionar à Tela de Início”</li></ol>
+            <small>Qualquer navegador atualizado</small>
+            <a class="btn ghost" href="/">Abrir no navegador</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="perguntas">
+    <div class="wrap">
+      <div class="center reveal">
+        <span class="kicker">Perguntas</span>
+        <h2>Dúvidas frequentes</h2>
+      </div>
+      <div class="faq">
+        <details class="reveal"><summary>A Auryx Nexavória é grátis?</summary><p>Sim. Criar conta, servidores, conversar, fazer call, transmitir a tela e jogar é tudo grátis. Os planos Plus, Pro e Max são opcionais e só deixam o perfil com mais estilo e aumentam o limite de arquivos.</p></details>
+        <details class="reveal"><summary>Preciso instalar alguma coisa?</summary><p>Não. Dá para usar direto no navegador. O app de Windows e o de Android são opcionais e trazem extras, como transmitir a tela do celular e continuar na call com a tela bloqueada.</p></details>
+        <details class="reveal"><summary>Como faço uma chamada privada?</summary><p>Abra a conversa com a pessoa e toque no ícone de telefone no topo. Ela recebe o toque na hora (até com o app fechado, pela notificação). Você pode entrar na call e ficar esperando até ela atender.</p></details>
+        <details class="reveal"><summary>O Windows avisou que o app é desconhecido. É seguro?</summary><p>Sim. O aviso aparece porque o app é novo e ainda não tem um certificado pago de editor. Clique em “Mais informações” e depois em “Executar assim mesmo”.</p></details>
+        <details class="reveal"><summary>Como funcionam os pagamentos dos planos?</summary><p>Você escolhe o plano, paga pelo Pix e envia o comprovante pelo app. Um ADM confere se o valor caiu e libera o plano por 30 dias. Você acompanha tudo pelo atendimento dentro do app.</p></details>
+        <details class="reveal"><summary>Esqueci minha senha. E agora?</summary><p>Na tela de entrar, toque em “Esqueci a senha”. Enviamos um código para o seu e-mail e você cria uma senha nova.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <div class="final">
+    <div class="wrap reveal">
+      <span class="kicker">Bora?</span>
+      <h2>Chame a galera e comece agora. <span class="grad-text">É grátis.</span></h2>
+      <div class="cta"><a class="btn primary" href="/">Criar minha conta</a><a class="btn ghost" href="#baixar">Ver downloads</a></div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot">
+      <div><a class="brand" href="#topo"><svg viewBox="0 0 48 48" aria-hidden="true"><defs><linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><path d="M11 37 24 11l13 26M16.5 28h15" fill="none" stroke="url(#lg2)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Auryx Nexavória</a><p>Servidores, calls, transmissão de tela e jogos com os amigos. Feito no Brasil, em português.</p></div>
+      <div><h4>Produto</h4><a href="#recursos">Recursos</a><a href="#jogos">Jogos</a><a href="#premium">Premium</a></div>
+      <div><h4>Baixar</h4><a href="https://github.com/duduzinho5455-sketch/nexora/releases/latest/download/Auryx-Nexavoria-Setup.exe">Windows</a><a href="https://github.com/duduzinho5455-sketch/nexora/releases/download/android/Auryx-Nexavoria.apk">Android</a><a href="/">Navegador</a></div>
+      <div><h4>Ajuda</h4><a href="#perguntas">Perguntas</a><a href="/">Entrar</a><a href="/?abrir=premium">Planos e pagamentos</a></div>
+    </div>
+    <div class="copy"><span>© <span id="yr">2026</span> Auryx Nexavória</span><span>Feito com 💜 para a sua galera</span></div>
+  </div>
+</footer>
+
+<script>
+(() => {
+  const nav = document.getElementById("nav"), links = document.getElementById("links"), mb = document.getElementById("menuBtn");
+  const onScroll = () => nav.classList.toggle("scrolled", scrollY > 8);
+  addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  mb.addEventListener("click", () => { const o = links.classList.toggle("open"); mb.setAttribute("aria-expanded", o); });
+  links.addEventListener("click", e => { if (e.target.closest("a")) { links.classList.remove("open"); mb.setAttribute("aria-expanded", false); } });
+  document.getElementById("yr").textContent = new Date().getFullYear();
+
+  // botão principal já aponta para o download certo do aparelho
+  const ua = navigator.userAgent, os = /Android/i.test(ua) ? "android" : /iPhone|iPad|iPod/i.test(ua) ? "ios" : /Windows/i.test(ua) ? "windows" : "";
+  const card = os && document.querySelector(`.dcard[data-os="${os}"]`);
+  if (card) {
+    card.classList.add("me");
+    const a = card.querySelector(".btn"), dl = document.getElementById("heroDl");
+    if (os !== "ios") { dl.href = a.href; dl.querySelector("span").textContent = os === "android" ? "Baixar para Android" : "Baixar para Windows"; }
+    document.getElementById("heroNote").innerHTML = os === "ios" ? 'No iPhone, abra no Safari e use “Adicionar à Tela de Início”. <a href="#baixar">Como fazer</a>' : 'Prefere não instalar? <a href="/">Use no navegador</a>. Outros sistemas: <a href="#baixar">ver downloads</a>.';
+  }
+
+  // seções aparecem ao rolar (sem animação para quem pediu menos movimento)
+  const els = document.querySelectorAll(".reveal");
+  if (!("IntersectionObserver" in window) || matchMedia("(prefers-reduced-motion: reduce)").matches) { els.forEach(e => e.classList.add("in")); return; }
+  const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } }), { rootMargin: "0px 0px -8% 0px" });
+  els.forEach(e => io.observe(e));
+  setTimeout(() => els.forEach(e => e.classList.add("in")), 4000);   // segurança: nada fica invisível
+})();
+</script>
+</body>
+</html>

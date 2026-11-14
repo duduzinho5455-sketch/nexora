@@ -88,6 +88,7 @@ const P = {
   skip: '<path d="m5 4 10 8-10 8zM19 5v14"/>',
   pause: '<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>',
   sparkles: '<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/>',
+  phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>',
   grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   external: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
   minimize: '<path d="M5 12h14"/>',
@@ -351,7 +352,7 @@ function serverUnread(s) {
   return { mentions, unread };
 }
 function renderRail() {
-  const inServer = (S.view === "chat" && !isDm(S.channelId)) || S.view === "stage";
+  const inServer = (S.view === "chat" || S.view === "stage") && !isDm(S.channelId);
   $("#serverList").innerHTML = sortedServers().map(s => {
     const { mentions, unread } = serverUnread(s);
     const flag = mentions ? `<b class="badge">${mentions > 99 ? "99+" : mentions}</b>` : V.serverId === s.id ? `<span class="vc-dot">${ic("volume")}</span>` : "";
@@ -367,7 +368,7 @@ function renderRail() {
   for (const b of [$('.rail-item[data-act="premium"]'), admBtn]) { const ob = b.querySelector(".badge"); if (ob) ob.remove(); }
   if (tkPings) (S.me && S.me.admin ? admBtn : $('.rail-item[data-act="premium"]')).insertAdjacentHTML("beforeend", `<b class="badge">${tkPings}</b>`);
   const home = $(".rail-item.home");
-  const inHome = S.view === "home" || S.view === "friends" || (S.view === "chat" && isDm(S.channelId));
+  const inHome = S.view === "home" || S.view === "friends" || ((S.view === "chat" || S.view === "stage") && isDm(S.channelId));
   home.classList.toggle("on", inHome);
   let dmPings = 0;
   for (const d of S.dms.values()) dmPings += S.mentions.get(d.id) || 0;
@@ -392,7 +393,7 @@ function vcUser(v) {
 function renderSide() {
   const head = $("#sideHead"), body = $("#sideBody");
   const s = srv();
-  const homeLike = S.view === "home" || S.view === "friends" || (S.view === "chat" && isDm(S.channelId));
+  const homeLike = S.view === "home" || S.view === "friends" || ((S.view === "chat" || S.view === "stage") && isDm(S.channelId));
   const key = homeLike ? "home" : (S.view === "chat" || S.view === "stage") && s ? s.id : S.view;
   const anim = key !== lastSideKey;
   lastSideKey = key;
@@ -435,10 +436,10 @@ function renderSide() {
       <div class="cat"><span>Mensagens diretas</span><button data-act="new-group" data-tip="Novo grupo">${ic("plus", "sm")}</button></div>` +
       (dms.length ? dms.map(d => {
         const n = S.mentions.get(d.id) || 0;
-        if (d.group) return `<div class="dm-item${S.view === "chat" && S.channelId === d.id ? " on" : ""}${n ? " unread" : ""}" data-act="open-dm" data-id="${d.id}" data-group="${d.id}" role="button" tabindex="0">${groupAvatar(d)}<div class="who"><b>${esc(groupTitle(d))}</b><small>${d.members.length} membros</small></div>${n ? `<b class="badge">${n}</b>` : ""}</div>`;
+        if (d.group) return `<div class="dm-item${S.view === "chat" && S.channelId === d.id ? " on" : ""}${n ? " unread" : ""}" data-act="open-dm" data-id="${d.id}" data-group="${d.id}" role="button" tabindex="0">${groupAvatar(d)}<div class="who"><b>${esc(groupTitle(d))}</b><small>${d.members.length} membros</small></div>${dmCallTag(d.id)}${n ? `<b class="badge">${n}</b>` : ""}</div>`;
         const u = user(d.userId);
         const sub = u.game ? `${ic("gamepad", "xs")} ${esc(u.game.name)}` : csText(u) || esc(u.about || "");
-        return `<div class="dm-item${S.view === "chat" && S.channelId === d.id ? " on" : ""}${n ? " unread" : ""}" data-act="open-dm" data-id="${d.id}" data-uid="${u.id}" role="button" tabindex="0">${avatar(u, 32, true)}<div class="who"><b>${esc(u.username)}</b>${sub ? `<small>${sub}</small>` : ""}</div>${n ? `<b class="badge">${n}</b>` : ""}</div>`;
+        return `<div class="dm-item${S.view === "chat" && S.channelId === d.id ? " on" : ""}${n ? " unread" : ""}" data-act="open-dm" data-id="${d.id}" data-uid="${u.id}" role="button" tabindex="0">${avatar(u, 32, true)}<div class="who"><b>${esc(u.username)}</b>${sub ? `<small>${sub}</small>` : ""}</div>${dmCallTag(d.id)}${n ? `<b class="badge">${n}</b>` : ""}</div>`;
       }).join("") : `<p style="padding:0 8px;color:var(--muted);font-size:13px;margin:0">Nenhuma conversa ainda. Adicione amigos e mande um oi! 👋</p>`);
     return;
   }
@@ -482,18 +483,24 @@ function renderTop() {
     icon.innerHTML = ic("users");
     title.textContent = groupTitle(c);
     topic.textContent = `${c.members.length} membros`;
-    actions.innerHTML = `<button class="icon-btn" data-act="group-add" data-id="${c.id}" data-tip="Adicionar pessoas">${ic("userPlus")}</button><button class="icon-btn${S.showMembers ? " on" : ""}" data-act="toggle-members" data-tip="Membros">${ic("users")}</button><button class="icon-btn" data-act="group-menu" data-id="${c.id}" data-tip="Opções do grupo">${ic("settings")}</button>${search}`;
+    actions.innerHTML = callBtn(c.id) + `<button class="icon-btn" data-act="group-add" data-id="${c.id}" data-tip="Adicionar pessoas">${ic("userPlus")}</button><button class="icon-btn${S.showMembers ? " on" : ""}" data-act="toggle-members" data-tip="Membros">${ic("users")}</button><button class="icon-btn" data-act="group-menu" data-id="${c.id}" data-tip="Opções do grupo">${ic("settings")}</button>${search}`;
   } else if (S.view === "chat" && c && c.dm) {
     const u = user(c.userId), f = S.friends.get(u.id);
     icon.innerHTML = ic("at");
     title.textContent = u.username;
     topic.textContent = u.game ? `🎮 Jogando ${u.game.name}` : STATUS[u.status] || "";
-    actions.innerHTML = `${f === "friend" ? "" : `<button class="icon-btn" data-act="add-friend" data-uid="${u.id}" data-tip="${f === "out" ? "Pedido enviado" : "Adicionar amigo"}">${ic(f === "out" ? "userCheck" : "userPlus")}</button>`}<button class="icon-btn" data-act="profile" data-uid="${u.id}" data-tip="Perfil">${ic("users")}</button>${search}`;
+    actions.innerHTML = callBtn(c.id) + `${f === "friend" ? "" : `<button class="icon-btn" data-act="add-friend" data-uid="${u.id}" data-tip="${f === "out" ? "Pedido enviado" : "Adicionar amigo"}">${ic(f === "out" ? "userCheck" : "userPlus")}</button>`}<button class="icon-btn" data-act="profile" data-uid="${u.id}" data-tip="Perfil">${ic("users")}</button>${search}`;
   } else if (S.view === "chat" && c) {
     icon.innerHTML = ic("hash");
     title.textContent = c.name;
     topic.textContent = c.topic || "";
     actions.innerHTML = `<button class="icon-btn" data-act="invite" data-tip="Convidar pessoas">${ic("userPlus")}</button><button class="icon-btn${S.showMembers ? " on" : ""}" data-act="toggle-members" data-tip="Lista de membros">${ic("users")}</button>${search}`;
+  } else if (S.view === "stage" && c && c.dm) {
+    const n = [...S.voice.values()].filter(v => v.channelId === c.id).length;
+    icon.innerHTML = ic("phone");
+    title.textContent = c.group ? groupTitle(c) : user(c.userId).username;
+    topic.textContent = n ? `Chamada privada · ${n} ${n === 1 ? "pessoa" : "pessoas"}` : "Chamada privada";
+    actions.innerHTML = `<button class="icon-btn" data-act="open-dm" data-id="${c.id}" data-tip="Voltar para as mensagens">${ic("message")}</button>${search}`;
   } else if (S.view === "stage" && c) {
     const n = [...S.voice.values()].filter(v => v.channelId === c.id).length;
     icon.innerHTML = ic("volume");
@@ -553,7 +560,7 @@ function renderVoicePanel() {
   const failed = peers.some(p => p.pc.connectionState === "failed");
   const waiting = V.joining || peers.some(p => !["connected", "closed"].includes(p.pc.connectionState));
   el.classList.remove("hidden");
-  el.innerHTML = `<div class="vp-row"><div class="vp-status"><b class="${failed || waiting ? "wait" : ""}" data-ping data-tip="${V.ping != null ? `Latência: ${V.ping} ms` : "Medindo latência…"}">${ic("signal", "sm")}${failed ? "Reconectando…" : waiting ? "Conectando…" : "Voz conectada"}</b><small data-act="open-ch" data-id="${V.channelId}">${esc(c?.name || "")} / ${esc(s?.name || "")}</small></div><button class="icon-btn" data-act="voice-leave" data-tip="Desconectar">${ic("phoneOff")}</button></div>
+  el.innerHTML = `<div class="vp-row"><div class="vp-status"><b class="${failed || waiting ? "wait" : ""}" data-ping data-tip="${V.ping != null ? `Latência: ${V.ping} ms` : "Medindo latência…"}">${ic("signal", "sm")}${failed ? "Reconectando…" : waiting ? "Conectando…" : "Voz conectada"}</b><small data-act="open-ch" data-id="${V.channelId}">${c && c.dm ? `📞 Chamada privada · ${esc(dmTitle(c))}` : `${esc(c?.name || "")} / ${esc(s?.name || "")}`}</small></div><button class="icon-btn" data-act="voice-leave" data-tip="Desconectar">${ic("phoneOff")}</button></div>
     <div class="vp-actions"><button class="btn${V.cam ? " on" : ""}" data-act="cam">${ic(V.cam ? "camera" : "cameraOff", "sm")}Câmera</button><button class="btn${V.screen ? " on" : ""}" data-act="share">${ic("monitorUp", "sm")}${V.screen ? "Ao vivo" : "Tela"}</button></div>`;
 }
 
@@ -792,6 +799,56 @@ async function renderAdmin(soft) {
     body.innerHTML = r.entries.length ? `<div class="audit">${r.entries.map(e => `<div class="au-row"><small>${new Date(e.at).toLocaleString("pt-BR")}</small><b>${esc(e.adminName)}</b><span>${esc(NAMES[e.action] || e.action)}</span><span>→ ${esc(e.targetName === "?" && e.details.game ? e.details.game : e.targetName)}</span><small>${esc([e.details.tier, e.details.days ? e.details.days + " dias" : "", e.details.amount ? fmtMoney(e.details.amount) : "", e.details.server ? "“" + e.details.server + "”" : "", e.details.reason].filter(Boolean).join(" · "))}</small></div>`).join("")}</div>` : `<div class="empty">${ic("shield")}<p>Nenhuma ação registrada ainda.</p></div>`;
   }
 }
+/* --- chamada privada (conversa ou grupo) --- */
+const dmCallOn = cid => [...S.voice.values()].some(v => v.channelId === cid);
+const dmCallTag = cid => dmCallOn(cid) ? `<span class="dm-call" data-tip="Em chamada">${ic("phone", "xs")}</span>` : "";
+function callBtn(cid) {
+  const inIt = V.channelId === cid, on = dmCallOn(cid);
+  return `<button class="icon-btn call-btn${on ? " live" : ""}" data-act="dm-call" data-id="${cid}" data-tip="${inIt ? "Voltar para a chamada" : on ? "Entrar na chamada" : "Iniciar chamada de voz"}">${ic("phone")}</button>`;
+}
+function openDMCall(cid, join = true) {
+  if (!S.dms.get(cid)) return;
+  if (S.view === "chat" && S.channelId) S.drafts[S.channelId] = $("#input").value;
+  S.serverId = null; S.channelId = cid;
+  setView("stage");
+  if (join && V.channelId !== cid) joinVoice(cid);
+  renderRail(); renderSide(); renderTop(); renderMembers(); renderStage(); updateMini();
+}
+const RING = { el: null, cid: null, t: 0, snd: 0 };
+function stopRing(cid) {
+  if (cid && RING.cid !== cid) return;
+  clearTimeout(RING.t); clearInterval(RING.snd);
+  if (RING.el) RING.el.remove();
+  RING.el = RING.cid = null;
+}
+function showRing({ channelId, from }) {
+  if (V.channelId === channelId || !S.dms.get(channelId)) return;
+  stopRing();
+  const d = S.dms.get(channelId), u = user(from);
+  const el = document.createElement("div");
+  el.className = "ring";
+  el.setAttribute("role", "alertdialog");
+  el.innerHTML = `<div class="ring-av">${avatar(u, 72)}</div><b>${esc(u.username)}</b><small>${d.group ? `está ligando no grupo ${esc(groupTitle(d))}` : "está te ligando…"}</small>
+    <div class="ring-acts"><button class="ring-btn no" data-ring="no" aria-label="Recusar">${ic("phoneOff")}</button><button class="ring-btn yes" data-ring="yes" aria-label="Atender">${ic("phone")}</button></div>`;
+  el.addEventListener("click", e => {
+    const b = e.target.closest("[data-ring]");
+    if (!b) return;
+    stopRing();
+    if (b.dataset.ring === "yes") openDMCall(channelId);
+    else emit("call:decline", { channelId });
+  });
+  document.body.append(el);
+  RING.el = el; RING.cid = channelId;
+  const beep = () => { try { sfx("mention"); } catch {} if (navigator.vibrate) try { navigator.vibrate([200, 120, 200]); } catch {} };
+  beep(); RING.snd = setInterval(beep, 2200);
+  RING.t = setTimeout(() => stopRing(channelId), 45000);   // ninguém atendeu
+  if (document.hidden) {   // app em segundo plano: aviso do sistema
+    const t = `📞 ${u.username} está te ligando`;
+    if (ANDROID && ANDROID.notify) { try { ANDROID.notify(t, "Toque para atender", "/?atender=" + encodeURIComponent(channelId)); } catch {} }
+    else if ("Notification" in window && Notification.permission === "granted") { try { const n = new Notification(t, { body: "Clique para atender", tag: "call:" + channelId, requireInteraction: true }); n.onclick = () => { window.focus(); n.close(); stopRing(); openDMCall(channelId); }; } catch {} }
+  }
+}
+
 /* --- ADM: servidores, contas e aviso geral --- */
 function admReason(title, sub, label, btn, ph, run) {
   modal({
@@ -1213,6 +1270,7 @@ function openServer(id) {
   if (c) openChannel(c.id);
 }
 function openChannel(cid, join = true) {
+  if (isDm(cid) && V.channelId === cid) { openDMCall(cid, false); return; }
   if (isDm(cid) || isTicket(cid)) { openDM(cid); return; }
   const s = serverOf(cid), c = chan(cid);
   if (!s || !c) return;
@@ -1982,6 +2040,9 @@ function connect() {
   sock.on("order:update", ({ order }) => onOrderUpdate(order));
   sock.on("order:new", ({ order }) => { if (S.me && S.me.admin) { sfx("mention"); toast(`Novo pedido: ${order.user ? order.user.username : "?"} — plano ${order.plan}`, "info", 5000); } });
   sock.on("announce", showAnnounce);
+  sock.on("call:ring", showRing);
+  sock.on("call:end", ({ channelId }) => stopRing(channelId));
+  sock.on("call:declined", ({ userId }) => toast(`${user(userId).username} recusou a chamada. Você pode continuar esperando na call.`, "info", 4500));
   sock.on("banned", ({ reason }) => toast(`Sua conta foi suspensa pela equipe.${reason ? " Motivo: " + reason : ""}`, "error", 8000));
   sock.on("games:changed", async () => {
     if (S.view === "games") { if (await loadGames(true) && S.view === "games") { renderGamesView(); renderSide(); } }
@@ -2351,9 +2412,11 @@ function meterTick() {
 
 async function joinVoice(cid) {
   if (V.joining) return;
-  const s = serverOf(cid), c = chan(cid);
-  if (!s || !c || c.type !== "voice") return;
+  const dmc = isDm(cid) ? S.dms.get(cid) : null;
+  const s = dmc ? { id: cid } : serverOf(cid), c = chan(cid);
+  if (!s || !c || (!dmc && c.type !== "voice")) return;
   if (V.channelId === cid) return;
+  stopRing(cid);
   if (!window.RTCPeerConnection || !navigator.mediaDevices) { toast("Seu navegador não suporta chamadas de voz.", "error"); return; }
   V.joining = true;
   schedule("vpanel");
@@ -2770,7 +2833,8 @@ function showUpdateBar() {
 }
 function openFromUrl(url) {
   try {
-    const u = new URL(url, location.origin), c = u.searchParams.get("c"), a = u.searchParams.get("abrir");
+    const u = new URL(url, location.origin), c = u.searchParams.get("c"), a = u.searchParams.get("abrir"), call = u.searchParams.get("atender");
+    if (call && S.dms.get(call)) { stopRing(); if ([...S.voice.values()].some(v => v.channelId === call)) openDMCall(call); else openDM(call); return; }
     if (c && isTicket(c)) openTicket(c.slice(2));
     else if (c && chan(c)) openChannel(c);
     else if (a === "amigos") goFriends();
@@ -3241,7 +3305,7 @@ function renderStage() {
     const people = [...S.voice.values()].filter(v => v.channelId === c.id);
     const names = people.slice(0, 3).map(v => esc(user(v.userId).username)).join(", ");
     const full = people.length >= S.voiceLimit;
-    root.innerHTML = `<div class="stage-empty">${people.length ? `<div class="faces">${people.slice(0, 6).map(v => avatar(user(v.userId), 56)).join("")}</div>` : `<div style="width:76px;height:76px;border-radius:50%;background:#1a1e30;display:grid;place-items:center">${ic("volume", "lg")}</div>`}<h2>${esc(c.name)}</h2><p>${people.length ? `${names}${people.length > 3 ? ` e mais ${people.length - 3}` : ""} ${people.length === 1 ? "está" : "estão"} na sala` : "Ninguém por aqui ainda. Que tal começar a conversa?"}</p><button class="btn green big" style="width:auto;padding:0 28px" data-act="join-voice" data-id="${c.id}" ${full || V.joining ? "disabled" : ""}>${V.joining ? "Conectando…" : full ? "Sala cheia" : "Entrar na sala"}</button></div>`;
+    root.innerHTML = `<div class="stage-empty">${people.length ? `<div class="faces">${people.slice(0, 6).map(v => avatar(user(v.userId), 56)).join("")}</div>` : `<div style="width:76px;height:76px;border-radius:50%;background:#1a1e30;display:grid;place-items:center">${ic("volume", "lg")}</div>`}<h2>${esc(c.dm ? dmTitle(c) : c.name)}</h2><p>${people.length ? `${names}${people.length > 3 ? ` e mais ${people.length - 3}` : ""} ${people.length === 1 ? "está" : "estão"} na sala` : "Ninguém por aqui ainda. Que tal começar a conversa?"}</p><button class="btn green big" style="width:auto;padding:0 28px" data-act="join-voice" data-id="${c.id}" ${full || V.joining ? "disabled" : ""}>${V.joining ? "Conectando…" : full ? "Sala cheia" : c.dm ? "Entrar na chamada" : "Entrar na sala"}</button></div>`;
     return;
   }
   if (!root.querySelector(".stage")) root.innerHTML = `<div class="stage"><div class="stage-grid" id="stageGrid"></div><div class="stage-bar" id="stageBar"></div></div>`;
@@ -3275,6 +3339,11 @@ function renderStage() {
     if (strip) { [...strip.children].forEach(e => grid.append(e)); strip.remove(); }
     els.forEach((e, i) => { if (grid.children[i] !== e) grid.insertBefore(e, grid.children[i] || null); });
   }
+  let wait = root.querySelector(".stage-wait");
+  const alone = c.dm && ![...S.voice.values()].some(v => v.channelId === c.id && v.userId !== S.me.id);
+  if (alone && !wait) { wait = document.createElement("div"); wait.className = "stage-wait"; root.querySelector(".stage").prepend(wait); }
+  if (alone) wait.innerHTML = `${ic("phone", "sm")}<span>Chamando <b>${esc(dmTitle(c))}</b>… você pode ficar na call esperando.</span>`;
+  else if (wait) wait.remove();
   const micOff = S.muted || S.deaf;
   $("#stageBar").innerHTML = `<button class="ctl${micOff ? " off" : ""}" data-act="mute" data-tip="${micOff ? "Ativar microfone" : "Silenciar"}">${ic(micOff ? "micOff" : "mic")}</button><button class="ctl${S.deaf ? " off" : ""}" data-act="deafen" data-tip="${S.deaf ? "Ativar áudio" : "Desativar áudio"}">${ic(S.deaf ? "headOff" : "headphones")}</button><button class="ctl${V.cam ? " on" : ""}" data-act="cam" data-tip="${V.cam ? "Desligar câmera" : "Ligar câmera"}">${ic(V.cam ? "camera" : "cameraOff")}</button><button class="ctl${V.screen ? " on" : ""}" data-act="share" data-tip="${V.screen ? "Opções da transmissão" : "Transmitir tela"}">${ic("monitorUp")}</button><span class="ctl-sep"></span><button class="ctl${V.act ? " on" : ""}" data-act="act-menu" data-tip="Atividades: música, lousa, jogos">${ic("rocket")}</button><button class="ctl" data-act="sound-menu" data-tip="Sons para todos">${ic("speaker")}</button><button class="ctl" data-act="react-menu" data-tip="Reações">${ic("smile")}</button><span class="ctl-sep"></span><button class="ctl red" data-act="voice-leave" data-tip="Desconectar">${ic("phoneOff")}</button>`;
 }
@@ -4714,6 +4783,7 @@ const ACTIONS = {
   "ch-settings": a => channelSettings(a.dataset.id),
   "new-channel": a => channelModal(a.dataset.type),
   "join-voice": a => joinVoice(a.dataset.id),
+  "dm-call": a => openDMCall(a.dataset.id, true),
   invite: () => inviteModal(),
   "toggle-members": () => {
     if (innerWidth <= 1100) { $("#app").classList.toggle("show-members"); return; }
@@ -5068,7 +5138,7 @@ function boot() {
     S.pendingInvite = null;
   }
   if (new URLSearchParams(location.search).get("abrir") === "amigos") S.openFriends = true;
-  if (/[?&](c|abrir)=/.test(location.search)) S.openUrl = location.href;
+  if (/[?&](c|abrir|atender)=/.test(location.search)) S.openUrl = location.href;
   if (!LOCAL && "serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
   }

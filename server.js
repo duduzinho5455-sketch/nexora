@@ -250,6 +250,8 @@ function vView(sock, v) {
 }
 // servidores bloqueados pela equipe somem para os membros (ficam guardados na pasta "Bloqueados" do Painel ADM)
 const userServers = uid => Object.values(db.servers).filter(s => !s.blocked && s.members.includes(uid));
+// para quem avisar das mudanças na call: membros do servidor, ou as pessoas da conversa privada
+const vTo = sid => { const d = db.dms && db.dms[sid]; return io.to(d ? d.members.map(m => "u:" + m) : "s:" + sid); };
 const voiceOf = serverId => [...voice].filter(([, v]) => v.sid === serverId).map(([k, v]) => vView(k, v));
 const onlineCount = s => s.members.reduce((n, id) => n + (db.users[id] && presence(db.users[id]) !== "offline" ? 1 : 0), 0);
 
@@ -265,7 +267,8 @@ const MIME = {
 const fileCache = new Map();
 
 async function serveStatic(req, res, pathname) {
-  const rel = pathname === "/" || !path.extname(pathname) ? "/index.html" : pathname;
+  const SITE = { "/site": 1, "/baixar": 1, "/download": 1, "/sobre": 1 };   // site de apresentação
+  const rel = SITE[pathname.replace(/\/+$/, "")] ?"/site.html" : pathname === "/" || !path.extname(pathname) ? "/index.html" : pathname;
   const file = path.join(PUBLIC_DIR, path.normalize(rel).replace(/^[/\\]+/, ""));
   if (!file.startsWith(PUBLIC_DIR + path.sep)) { res.writeHead(403); res.end(); return; }
   let st;
@@ -744,10 +747,11 @@ function leaveVoice(sock) {
   voice.delete(sock);
   for (const [k, val] of sockAlias) if (val === sock || k === sock) sockAlias.delete(k);
   io.in(sock).socketsLeave("v:" + v.cid);
-  io.to("s:" + v.sid).emit("voice:leave", { sock, userId: v.uid, channelId: v.cid, serverId: v.sid });
+  vTo(v.sid).emit("voice:leave", { sock, userId: v.uid, channelId: v.cid, serverId: v.sid });
+  if (db.dms && db.dms[v.sid] && ![...voice.values()].some(x => x.cid === v.cid)) vTo(v.sid).emit("call:end", { channelId: v.cid });
   if (![...voice.values()].some(x => x.cid === v.cid) && acts.has(v.cid)) {
     acts.delete(v.cid);
-    io.to("s:" + v.sid).emit("act:sum", { channelId: v.cid, type: null });
+    vTo(v.sid).emit("act:sum", { channelId: v.cid, type: null });
   }
 }
 /* Atividades da call: um estado por sala de voz, guardado só na memória */
@@ -831,7 +835,7 @@ io.on("connection", socket => {
     for (const id of Object.keys(friends)) addU(id);
     const dms = dmsOf(uid);
     for (const d of dms) for (const id of d.members) addU(id);
-    const ids = new Set(mine.map(s => s.id));
+    const ids = new Set([...mine.map(s => s.id), ...dms.map(d => d.id)]);
     socket.emit("ready", {
       me: meView(me()),
       servers: mine.map(serverView),
@@ -1556,6 +1560,7 @@ io.on("connection", socket => {
   });
   on("group:leave", ({ id }) => {
     const d = getGroup(id);
+    for (const [k, v] of voice) if (v.uid === uid && v.cid === d.id) { leaveVoice(k); io.to(k).emit("voice:kicked", {}); }
     d.members = d.members.filter(x => x !== uid);
     io.to("u:" + uid).emit("dm:remove", { id: d.id });
     if (!d.members.length) { delete db.dms[d.id]; delete db.messages[d.id]; save(); return; }
@@ -1589,7 +1594,9 @@ io.on("connection", socket => {
 
   /* ---------- Voz / vídeo / tela (sinalização WebRTC) ---------- */
   on("voice:join", ({ channelId, muted, deaf }) => {
-    const { s, c } = getChannel(channelId, "voice");
+    const dm = typeof channelId === "string" && db.dms && db.dms[channelId];
+    if (dm && !dm.members.includes(uid)) fail("Conversa não encontrada.");
+    const { s, c } = dm ? { s: { id: dm.id }, c: { id: dm.id } } : getChannel(channelId, "voice");
     for (const [k, v] of voice) {
       if (v.uid === uid && k !== socket.id) { leaveVoice(k); io.to(k).emit("voice:kicked", { reason: "Você entrou em uma sala por outro dispositivo." }); }
     }
@@ -1599,7 +1606,14 @@ io.on("connection", socket => {
     const st = { uid, sid: s.id, cid: c.id, muted: !!muted, deaf: !!deaf, screen: null, cam: null, at: Date.now() };
     voice.set(socket.id, st);
     socket.join("v:" + c.id);
-    io.to("s:" + s.id).emit("voice:state", vView(socket.id, st));
+    vTo(s.id).emit("voice:state", vView(socket.id, st));
+    if (dm && !peers.length) {   // call privada começando: chama as outras pessoas (mesmo com o app fechado)
+      const u = me();
+      for (const m of dm.members) if (m !== uid) {
+        io.to("u:" + m).emit("call:ring", { channelId: dm.id, from: uid });
+        pushTo(m, { title: `📞 ${u.username} está te ligando`, body: dm.group ? `Call no grupo ${dm.name || ""}`.trim() : "Toque para atender", url: "/?atender=" + dm.id, tag: "call:" + dm.id });
+      }
+    }
     return { peers: peers.map(([k, v]) => vView(k, v)), iceServers: ICE_SERVERS, act: actView(c.id, acts.get(c.id)), now: Date.now() };
   });
 
@@ -1614,13 +1628,13 @@ io.on("connection", socket => {
     const a = { type, state, by: uid, strokes: [] };
     acts.set(v.cid, a);
     io.to("v:" + v.cid).emit("act", actView(v.cid, a));
-    io.to("s:" + v.sid).emit("act:sum", { channelId: v.cid, type });
+    vTo(v.sid).emit("act:sum", { channelId: v.cid, type });
   });
   on("act:stop", () => {
     const v = myVoice();
     acts.delete(v.cid);
     io.to("v:" + v.cid).emit("act", actView(v.cid, null));
-    io.to("s:" + v.sid).emit("act:sum", { channelId: v.cid, type: null });
+    vTo(v.sid).emit("act:sum", { channelId: v.cid, type: null });
   });
   on("act:state", ({ state }) => {
     const v = myVoice(), a = acts.get(v.cid);
@@ -1657,10 +1671,16 @@ io.on("connection", socket => {
     if (deaf !== undefined) st.deaf = !!deaf;
     if (screen !== undefined) st.screen = screen ? str(screen, 64) : null;
     if (cam !== undefined) st.cam = cam ? str(cam, 64) : null;
-    io.to("s:" + st.sid).emit("voice:state", vView(socket.id, st));
+    vTo(st.sid).emit("voice:state", vView(socket.id, st));
   });
 
   on("voice:leave", () => { leaveVoice(socket.id); });
+  on("call:decline", ({ channelId }) => {
+    const d = typeof channelId === "string" && db.dms && db.dms[channelId];
+    if (!d || !d.members.includes(uid)) return;
+    io.to("u:" + uid).emit("call:end", { channelId: d.id, mine: true });   // some o toque nos outros aparelhos da pessoa
+    for (const [k, v] of voice) if (v.cid === d.id) io.to(k).emit("call:declined", { channelId: d.id, userId: uid });
+  });
 
   // voltou depois de cair: assume o lugar guardado sem refazer a chamada
   on("voice:resume", ({ oldSock, channelId }) => {
@@ -1672,8 +1692,8 @@ io.on("connection", socket => {
     voice.set(socket.id, v);
     sockAlias.set(oldSock, socket.id);
     socket.join("v:" + v.cid);
-    io.to("s:" + v.sid).emit("voice:resock", { old: oldSock, sock: socket.id, userId: uid, channelId: v.cid });
-    io.to("s:" + v.sid).emit("voice:state", vView(socket.id, v));
+    vTo(v.sid).emit("voice:resock", { old: oldSock, sock: socket.id, userId: uid, channelId: v.cid });
+    vTo(v.sid).emit("voice:state", vView(socket.id, v));
     const peers = [...voice].filter(([k, x]) => x.cid === v.cid && k !== socket.id).map(([k, x]) => vView(k, x));
     return { peers, act: actView(v.cid, acts.get(v.cid)), now: Date.now() };
   });
