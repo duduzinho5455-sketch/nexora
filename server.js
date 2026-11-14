@@ -248,7 +248,8 @@ function serverView(s) {
 function vView(sock, v) {
   return { sock, userId: v.uid, serverId: v.sid, channelId: v.cid, muted: v.muted, deaf: v.deaf, screen: v.screen, cam: v.cam, at: v.at };
 }
-const userServers = uid => Object.values(db.servers).filter(s => s.members.includes(uid));
+// servidores bloqueados pela equipe somem para os membros (ficam guardados na pasta "Bloqueados" do Painel ADM)
+const userServers = uid => Object.values(db.servers).filter(s => !s.blocked && s.members.includes(uid));
 const voiceOf = serverId => [...voice].filter(([, v]) => v.sid === serverId).map(([k, v]) => vView(k, v));
 const onlineCount = s => s.members.reduce((n, id) => n + (db.users[id] && presence(db.users[id]) !== "offline" ? 1 : 0), 0);
 
@@ -442,6 +443,7 @@ async function handleAuth(req, res, kind) {
       throw new HttpError(401, "Usuário ou senha incorretos.");
     }
     failKey.delete(user.id);
+    if (user.banned) throw new HttpError(403, `Sua conta foi suspensa pela equipe da Auryx.${user.banned.reason ? " Motivo: " + user.banned.reason : ""}`);
     const token = newSession(req, res, user);
     sendJson(res, 200, { token, verify: needsVerify(user), email: maskEmail(user.email) });
   } catch (e) {
@@ -634,6 +636,7 @@ io.use((socket, next) => {
   const sess = typeof t === "string" && t.length < 100 ? db.sessions[tokenKey(t)] : null;
   const user = sess && db.users[sess.userId];
   if (!user) return next(new Error("auth"));
+  if (user.banned) { const e = new Error("banned"); e.data = { reason: user.banned.reason || "" }; return next(e); }
   // app de PC antigo (NEXORA) foi desativado: só conecta o app novo ou o navegador
   const ua = String(socket.handshake.headers["user-agent"] || "");
   if (/\bNEXORA\/\d/.test(ua) && /Electron\//.test(ua)) return next(new Error("update"));
@@ -776,6 +779,15 @@ function addMember(s, userId) {
   save();
   return true;
 }
+function deleteServer(s, reason) {
+  for (const [k, v] of voice) if (v.sid === s.id) { leaveVoice(k); io.to(k).emit("voice:kicked", {}); }
+  io.to("s:" + s.id).emit("server:remove", { serverId: s.id, reason });
+  io.in("s:" + s.id).socketsLeave("s:" + s.id);
+  for (const c of s.channels) { delete db.messages[c.id]; chanIndex.delete(c.id); }
+  for (const [code, inv] of Object.entries(db.invites)) if (inv.serverId === s.id) delete db.invites[code];
+  delete db.servers[s.id];
+  save();
+}
 function removeMember(s, userId, reason) {
   for (const [k, v] of voice) if (v.uid === userId && v.sid === s.id) { leaveVoice(k); io.to(k).emit("voice:kicked", {}); }
   s.members = s.members.filter(id => id !== userId);
@@ -853,6 +865,7 @@ io.on("connection", socket => {
   const getServer = (id, owner) => {
     const s = typeof id === "string" ? db.servers[id] : null;
     if (!s || !s.members.includes(uid)) fail("Servidor não encontrado.");
+    if (s.blocked) fail("Este servidor foi bloqueado pela equipe da Auryx.");
     if (owner && s.ownerId !== uid) fail("Apenas o dono do servidor pode fazer isso.");
     return s;
   };
@@ -1034,12 +1047,7 @@ io.on("connection", socket => {
   on("server:delete", ({ serverId }) => {
     const s = getServer(serverId, true);
     for (const [k, v] of voice) if (v.sid === s.id) { leaveVoice(k); io.to(k).emit("voice:kicked", {}); }
-    io.to("s:" + s.id).emit("server:remove", { serverId: s.id, reason: `O servidor "${s.name}" foi excluído.` });
-    io.in("s:" + s.id).socketsLeave("s:" + s.id);
-    for (const c of s.channels) { delete db.messages[c.id]; chanIndex.delete(c.id); }
-    for (const [code, inv] of Object.entries(db.invites)) if (inv.serverId === s.id) delete db.invites[code];
-    delete db.servers[s.id];
-    save();
+    deleteServer(s, `O servidor "${s.name}" foi excluído.`);
   });
 
   on("server:leave", ({ serverId }) => {
@@ -1077,7 +1085,7 @@ io.on("connection", socket => {
   on("invite:info", ({ code }) => {
     const inv = db.invites[parseCode(code)];
     const s = inv && db.servers[inv.serverId];
-    if (!s) fail("Convite inválido ou expirado.");
+    if (!s || s.blocked) fail("Convite inválido ou expirado.");
     const inviter = db.users[inv.by];
     return {
       server: { ...serverMeta(s), members: s.members.length, online: onlineCount(s) },
@@ -1090,7 +1098,7 @@ io.on("connection", socket => {
     const key = parseCode(code);
     const inv = db.invites[key];
     const s = inv && db.servers[inv.serverId];
-    if (!s) fail("Convite inválido ou expirado.");
+    if (!s || s.blocked) fail("Convite inválido ou expirado.");
     if (addMember(s, uid)) { inv.uses++; save(); }
     return { serverId: s.id };
   });
@@ -1099,7 +1107,7 @@ io.on("connection", socket => {
     const query = str(q, 40).toLowerCase();
     return {
       servers: Object.values(db.servers)
-        .filter(s => s.public && (!query || s.name.toLowerCase().includes(query) || (s.description || "").toLowerCase().includes(query)))
+        .filter(s => s.public && !s.blocked && (!query || s.name.toLowerCase().includes(query) || (s.description || "").toLowerCase().includes(query)))
         .map(s => ({ ...serverMeta(s), members: s.members.length, online: onlineCount(s), joined: s.members.includes(uid) }))
         .sort((a, b) => b.online - a.online || b.members - a.members)
         .slice(0, 60)
@@ -1108,7 +1116,7 @@ io.on("connection", socket => {
 
   on("discover:join", ({ serverId }) => {
     const s = typeof serverId === "string" ? db.servers[serverId] : null;
-    if (!s || !s.public) fail("Servidor não encontrado.");
+    if (!s || !s.public || s.blocked) fail("Servidor não encontrado.");
     addMember(s, uid);
     return { serverId: s.id };
   });
@@ -1319,7 +1327,7 @@ io.on("connection", socket => {
     const list = Object.values(db.users).filter(u => !s || u.username.toLowerCase().includes(s) || (u.email || "").includes(s) || (s === "premium" && planOf(u)));
     return {
       users: list.sort((a, b) => rankOf(b) - rankOf(a) || a.username.localeCompare(b.username)).slice(0, 100)
-        .map(u => ({ id: u.id, username: u.username, color: u.color, avatar: pubUser(u).avatar, email: u.email || "", emailVerified: !!u.emailVerified, plan: planOf(u), until: planOf(u) ? u.plan.until : 0, created: u.created, admin: isAdmin(u) }))
+        .map(u => ({ id: u.id, username: u.username, color: u.color, avatar: pubUser(u).avatar, email: u.email || "", emailVerified: !!u.emailVerified, plan: planOf(u), until: planOf(u) ? u.plan.until : 0, created: u.created, admin: isAdmin(u), banned: u.banned ? { at: u.banned.at, reason: u.banned.reason || "" } : null }))
     };
   });
   on("admin:grant", ({ userId, tier, days }) => {
@@ -1348,6 +1356,79 @@ io.on("connection", socket => {
     io.to("u:" + u.id).emit("me:update", { me: meView(u) });
     io.to("u:" + u.id).emit("plan:revoked", { reason });
   });
+  /* ---------- painel ADM: servidores, contas e aviso geral ---------- */
+  const srvAdmView = x => ({ ...serverMeta(x), owner: (db.users[x.ownerId] || {}).username || "?", members: x.members.length, online: onlineCount(x), channels: x.channels.length,
+    blocked: x.blocked ? { at: x.blocked.at, reason: x.blocked.reason || "", by: (db.users[x.blocked.by] || {}).username || "?" } : null });
+  const admServer = id => { const x = typeof id === "string" ? db.servers[id] : null; if (!x) fail("Servidor não encontrado."); return x; };
+  on("admin:servers", ({ q, filter }) => {
+    requireAdmin();
+    const k = str(q, 60).toLowerCase();
+    const all = Object.values(db.servers);
+    const list = all.filter(x => (filter === "blocked" ? !!x.blocked : !x.blocked) && (!k || x.name.toLowerCase().includes(k) || ((db.users[x.ownerId] || {}).username || "").toLowerCase().includes(k)));
+    return { servers: list.sort((a, b) => b.members.length - a.members.length || b.created - a.created).slice(0, 200).map(srvAdmView), total: all.length, blocked: all.filter(x => x.blocked).length };
+  });
+  on("admin:server:block", ({ serverId, reason }) => {
+    requireAdmin();
+    const x = admServer(serverId);
+    if (x.blocked) fail("Esse servidor já está bloqueado.");
+    reason = str(reason, 300);
+    for (const [k, v] of voice) if (v.sid === x.id) { leaveVoice(k); io.to(k).emit("voice:kicked", {}); }
+    x.blocked = { at: Date.now(), by: uid, reason };
+    io.to("s:" + x.id).emit("server:remove", { serverId: x.id, reason: `O servidor "${x.name}" foi bloqueado pela equipe da Auryx.${reason ? " Motivo: " + reason : ""}` });
+    io.in("s:" + x.id).socketsLeave("s:" + x.id);
+    audit("server:block", x.ownerId, { server: x.name, reason });
+    save();
+    return { server: srvAdmView(x) };
+  });
+  on("admin:server:unblock", ({ serverId }) => {
+    requireAdmin();
+    const x = admServer(serverId);
+    if (!x.blocked) fail("Esse servidor não está bloqueado.");
+    delete x.blocked;
+    for (const id of x.members) {
+      io.in("u:" + id).socketsJoin("s:" + x.id);
+      io.to("u:" + id).emit("server:add", { server: serverView(x), users: x.members.map(m => db.users[m]).filter(Boolean).map(pubUser), voice: voiceOf(x.id) });
+    }
+    audit("server:unblock", x.ownerId, { server: x.name });
+    save();
+    return { server: srvAdmView(x) };
+  });
+  on("admin:server:delete", ({ serverId, confirm }) => {
+    requireAdmin();
+    const x = admServer(serverId);
+    if (str(confirm, 100) !== x.name) fail("Digite o nome exato do servidor para confirmar.");
+    audit("server:delete", x.ownerId, { server: x.name, members: x.members.length });
+    deleteServer(x, `O servidor "${x.name}" foi excluído pela equipe da Auryx.`);
+  });
+  on("admin:ban", ({ userId, reason }) => {
+    const adm = requireAdmin();
+    const u = db.users[userId];
+    if (!u) fail("Usuário não encontrado.");
+    if (isAdmin(u)) fail("Não dá para suspender um ADM.");
+    if (u.id === adm.id) fail("Você não pode suspender a si mesmo.");
+    reason = str(reason, 300);
+    u.banned = { at: Date.now(), by: uid, reason };
+    io.to("u:" + u.id).emit("banned", { reason });
+    setTimeout(() => io.in("u:" + u.id).disconnectSockets(true), 300);
+    audit("user:ban", u.id, { reason });
+    save();
+  });
+  on("admin:unban", ({ userId }) => {
+    requireAdmin();
+    const u = db.users[userId];
+    if (!u || !u.banned) fail("Essa conta não está suspensa.");
+    delete u.banned;
+    audit("user:unban", u.id, {});
+    save();
+  });
+  on("admin:broadcast", ({ text }) => {
+    requireAdmin();
+    text = str(text, 500);
+    if (text.length < 3) fail("Escreva o aviso.");
+    io.emit("announce", { text, by: me().username, at: Date.now() });
+    audit("broadcast", uid, { reason: text });
+  });
+
   on("admin:audit", () => {
     requireAdmin();
     const name = id => (db.users[id] || {}).username || ((db.games || []).find(g => g.id === id) || {}).name || "?";

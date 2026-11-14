@@ -744,8 +744,8 @@ async function renderAdmin(soft) {
   const root = $("#adminView");
   if (!root || !S.me.admin) return;
   const tab = S.adminTab;
-  const tabs = [["orders", "Solicitações"], ["users", "Usuários e planos"], ["games", "Jogos"], ["audit", "Histórico"]];
-  const head = `<div class="page admin"><div class="hero adm-hero"><h1>${ic("shield", "lg")} Painel ADM</h1><p>Confira no extrato do banco se o Pix caiu antes de aprovar. Toda decisão fica registrada com o seu nome.</p></div><div class="tabs-row">${tabs.map(([k, n]) => `<button class="tab${k === tab ? " on" : ""}" data-act="admin-tab" data-tab="${k}">${n}</button>`).join("")}</div><div class="adm-body"></div></div>`;
+  const tabs = [["orders", "Solicitações"], ["users", "Usuários e planos"], ["servers", "Servidores"], ["games", "Jogos"], ["audit", "Histórico"]];
+  const head = `<div class="page admin"><div class="hero adm-hero"><h1>${ic("shield", "lg")} Painel ADM</h1><p>Confira no extrato do banco se o Pix caiu antes de aprovar. Toda decisão fica registrada com o seu nome.</p><button class="btn adm-announce" data-act="admin-broadcast">📢 Aviso geral</button></div><div class="tabs-row">${tabs.map(([k, n]) => `<button class="tab${k === tab ? " on" : ""}" data-act="admin-tab" data-tab="${k}">${n}</button>`).join("")}</div><div class="adm-body"></div></div>`;
   if (!soft || !root.querySelector(".adm-body")) root.innerHTML = head;
   else root.querySelectorAll(".tabs-row .tab").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
   const body = root.querySelector(".adm-body");
@@ -769,7 +769,17 @@ async function renderAdmin(soft) {
     const list = body.querySelector("[data-ulist]");
     const r = await emit("admin:users", { q: S.adminQ || "" });
     if (r.error) { list.innerHTML = esc(r.error); return; }
-    list.innerHTML = r.users.map(u => `<div class="adm-user">${avatar(u, 36)}<div class="who"><b>${esc(u.username)}${u.admin ? ` <span class="ost st-rev">ADM</span>` : ""}</b><small>${esc(u.email || "sem e-mail")}${u.email && !u.emailVerified ? " (não confirmado)" : ""}</small></div><div>${u.plan ? `<span class="ost st-ok">${esc({ plus: "Plus", pro: "Pro", max: "Max" }[u.plan])}</span><small style="display:block;color:var(--muted)">até ${fmtDate(u.until)}</small>` : `<small style="color:var(--muted)">sem plano</small>`}</div><div class="ao-acts"><button class="btn sm" data-act="admin-grant" data-uid="${u.id}" data-name="${esc(u.username)}">Dar plano</button>${u.plan ? `<button class="btn sm danger" data-act="admin-revoke" data-uid="${u.id}" data-name="${esc(u.username)}">Revogar</button>` : ""}</div></div>`).join("") || `<p style="color:var(--muted)">Ninguém encontrado.</p>`;
+    list.innerHTML = r.users.map(u => `<div class="adm-user">${avatar(u, 36)}<div class="who"><b>${esc(u.username)}${u.admin ? ` <span class="ost st-rev">ADM</span>` : ""}</b><small>${esc(u.email || "sem e-mail")}${u.email && !u.emailVerified ? " (não confirmado)" : ""}</small></div><div>${u.plan ? `<span class="ost st-ok">${esc({ plus: "Plus", pro: "Pro", max: "Max" }[u.plan])}</span><small style="display:block;color:var(--muted)">até ${fmtDate(u.until)}</small>` : `<small style="color:var(--muted)">sem plano</small>`}</div><div class="ao-acts">${u.banned ? `<span class="ost st-bad" data-tip="${esc(u.banned.reason || "sem motivo")}">Suspensa</span>` : ""}<button class="btn sm" data-act="admin-grant" data-uid="${u.id}" data-name="${esc(u.username)}">Dar plano</button>${u.plan ? `<button class="btn sm danger" data-act="admin-revoke" data-uid="${u.id}" data-name="${esc(u.username)}">Revogar</button>` : ""}${u.admin ? "" : u.banned ? `<button class="btn sm green" data-act="admin-unban" data-uid="${u.id}" data-name="${esc(u.username)}">Reativar conta</button>` : `<button class="btn sm danger" data-act="admin-ban" data-uid="${u.id}" data-name="${esc(u.username)}">Suspender</button>`}</div></div>`).join("") || `<p style="color:var(--muted)">Ninguém encontrado.</p>`;
+  } else if (tab === "servers") {
+    const f = S.adminSrvF || "active";
+    body.innerHTML = `<div class="adm-games-head"><div class="chips"><button class="chip${f === "active" ? " on" : ""}" data-act="admin-srv-f" data-f="active">Ativos</button><button class="chip${f === "blocked" ? " on" : ""}" data-act="admin-srv-f" data-f="blocked">🔒 Bloqueados <b data-bcount></b></button></div><form class="add-box" data-ssearch style="flex:1;max-width:380px"><input placeholder="Buscar servidor ou dono" value="${esc(S.adminSrvQ || "")}"><button class="btn primary">Buscar</button></form></div><div data-slist><p style="color:var(--muted)">Carregando…</p></div>`;
+    const r = await emit("admin:servers", { q: S.adminSrvQ || "", filter: f === "blocked" ? "blocked" : "active" });
+    const list = body.querySelector("[data-slist]");
+    if (!list) return;
+    if (r.error) { list.innerHTML = esc(r.error); return; }
+    body.querySelector("[data-bcount]").textContent = r.blocked ? `(${r.blocked})` : "";
+    list.innerHTML = r.servers.length ? r.servers.map(x => `<div class="adm-user adm-srv${x.blocked ? " is-blocked" : ""}">${serverIcon(x)}<div class="who"><b>${esc(x.name)}${x.public ? ` <span class="ost st-rev">Público</span>` : ""}</b><small>Dono: <span class="ow">${esc(x.owner)}</span> · ${x.members} membro${x.members === 1 ? "" : "s"} (${x.online} online) · ${x.channels} canais · criado em ${fmtDate(x.created)}</small>${x.blocked ? `<small class="ao-note">🔒 Bloqueado por ${esc(x.blocked.by)} em ${fmtDate(x.blocked.at)}${x.blocked.reason ? " — " + esc(x.blocked.reason) : ""}</small>` : ""}</div><div class="ao-acts">${x.blocked ? `<button class="btn sm green" data-act="admin-srv-unblock" data-id="${x.id}">Desbloquear</button>` : `<button class="btn sm" data-act="admin-srv-block" data-id="${x.id}" data-name="${esc(x.name)}">🔒 Bloquear</button>`}<button class="btn sm danger" data-act="admin-srv-del" data-id="${x.id}" data-name="${esc(x.name)}">${ic("trash", "sm")}Excluir</button></div></div>`).join("")
+      : `<div class="empty">${ic("grid")}<p>${f === "blocked" ? "Nenhum servidor bloqueado." : "Nenhum servidor encontrado."}</p></div>`;
   } else if (tab === "games") {
     if (!(await loadGames(true))) { body.innerHTML = `<p>Não deu para carregar os jogos.</p>`; return; }
     body.innerHTML = `<div class="adm-games-head"><p>Os jogos aparecem para todo mundo na aba <b>Jogos</b>. Só endereços <b>https://</b> são aceitos.</p><button class="btn primary" data-act="admin-game-edit">${ic("plus", "sm")}Adicionar jogo</button></div>` +
@@ -778,10 +788,59 @@ async function renderAdmin(soft) {
   } else {
     const r = await emit("admin:audit", {});
     if (r.error) { body.innerHTML = esc(r.error); return; }
-    const NAMES = { "order:approve": "Aprovou pedido", "order:reject": "Recusou pedido", "order:review": "Pôs em análise", "plan:grant": "Deu plano", "plan:revoke": "Revogou plano", "game:save": "Salvou jogo", "game:delete": "Removeu jogo" };
-    body.innerHTML = r.entries.length ? `<div class="audit">${r.entries.map(e => `<div class="au-row"><small>${new Date(e.at).toLocaleString("pt-BR")}</small><b>${esc(e.adminName)}</b><span>${esc(NAMES[e.action] || e.action)}</span><span>→ ${esc(e.targetName === "?" && e.details.game ? e.details.game : e.targetName)}</span><small>${esc([e.details.tier, e.details.days ? e.details.days + " dias" : "", e.details.amount ? fmtMoney(e.details.amount) : "", e.details.reason].filter(Boolean).join(" · "))}</small></div>`).join("")}</div>` : `<div class="empty">${ic("shield")}<p>Nenhuma ação registrada ainda.</p></div>`;
+    const NAMES = { "order:approve": "Aprovou pedido", "order:reject": "Recusou pedido", "order:review": "Pôs em análise", "plan:grant": "Deu plano", "plan:revoke": "Revogou plano", "game:save": "Salvou jogo", "game:delete": "Removeu jogo", "server:block": "Bloqueou servidor de", "server:unblock": "Desbloqueou servidor de", "server:delete": "Excluiu servidor de", "user:ban": "Suspendeu", "user:unban": "Reativou", "broadcast": "Enviou aviso geral" };
+    body.innerHTML = r.entries.length ? `<div class="audit">${r.entries.map(e => `<div class="au-row"><small>${new Date(e.at).toLocaleString("pt-BR")}</small><b>${esc(e.adminName)}</b><span>${esc(NAMES[e.action] || e.action)}</span><span>→ ${esc(e.targetName === "?" && e.details.game ? e.details.game : e.targetName)}</span><small>${esc([e.details.tier, e.details.days ? e.details.days + " dias" : "", e.details.amount ? fmtMoney(e.details.amount) : "", e.details.server ? "“" + e.details.server + "”" : "", e.details.reason].filter(Boolean).join(" · "))}</small></div>`).join("")}</div>` : `<div class="empty">${ic("shield")}<p>Nenhuma ação registrada ainda.</p></div>`;
   }
 }
+/* --- ADM: servidores, contas e aviso geral --- */
+function admReason(title, sub, label, btn, ph, run) {
+  modal({
+    title, sub,
+    body: `<label class="field"><span>${label}</span><textarea data-r maxlength="300" placeholder="${ph}"></textarea></label><div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn danger" data-go>${btn}</button></div>`,
+    onMount(m, close) {
+      const go = m.querySelector("[data-go]");
+      go.onclick = async () => { go.classList.add("loading"); const ok = await run(m.querySelector("[data-r]").value.trim()); go.classList.remove("loading"); if (ok) close(); };
+    }
+  });
+}
+const admRun = async (ev, data, msg) => { const r = await emit(ev, data); if (r.error) { toast(r.error, "error"); return false; } toast(msg, "ok"); renderAdmin(true); return true; };
+function adminSrvBlock(id, name) {
+  admReason("Bloquear servidor", esc(name), "Motivo (os membros vão ver)", "🔒 Bloquear", "Ex.: conteúdo proibido / golpe / spam",
+    reason => admRun("admin:server:block", { serverId: id, reason }, "Servidor bloqueado. Ele está na pasta Bloqueados."));
+}
+function adminSrvDelete(id, name) {
+  modal({
+    title: "Excluir servidor", sub: esc(name),
+    body: `<p style="color:var(--text-2)">Isso apaga <b>para sempre</b> o servidor, todos os canais e todas as mensagens. Não dá para desfazer. Se quiser só tirar do ar, use <b>Bloquear</b>.</p><label class="field"><span>Digite o nome do servidor para confirmar</span><input data-c placeholder="${esc(name)}" autocomplete="off"></label><div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn danger" data-go disabled>Excluir para sempre</button></div>`,
+    onMount(m, close) {
+      const inp = m.querySelector("[data-c]"), go = m.querySelector("[data-go]");
+      inp.oninput = () => { go.disabled = inp.value !== name; };
+      go.onclick = async () => { if (await admRun("admin:server:delete", { serverId: id, confirm: inp.value }, "Servidor excluído.")) close(); };
+    }
+  });
+}
+function adminBan(uid, name) {
+  admReason("Suspender conta", esc(name), "Motivo (a pessoa vai ver)", "Suspender", "Ex.: golpe / ofensas / spam",
+    reason => admRun("admin:ban", { userId: uid, reason }, `Conta de ${name} suspensa.`));
+}
+function adminBroadcast() {
+  modal({
+    title: "📢 Aviso geral", sub: "Aparece na tela de todo mundo que está online agora",
+    body: `<label class="field"><span>Mensagem</span><textarea data-t maxlength="500" placeholder="Ex.: Manutenção hoje às 22h, o app pode cair por 5 minutos."></textarea></label><div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" data-go>Enviar para todos</button></div>`,
+    onMount(m, close) {
+      m.querySelector("[data-go]").onclick = async () => {
+        const r = await emit("admin:broadcast", { text: m.querySelector("[data-t]").value.trim() });
+        if (r.error) { toast(r.error, "error"); return; }
+        close(); toast("Aviso enviado para todos online.", "ok");
+      };
+    }
+  });
+}
+function showAnnounce({ text, by }) {
+  try { sfx("mention"); } catch {}
+  modal({ title: "📢 Aviso da equipe Auryx", sub: by ? `por ${esc(by)}` : "", body: `<p style="white-space:pre-wrap;color:var(--text)">${esc(text)}</p><div class="modal-foot"><button class="btn primary" data-close>Entendi</button></div>` });
+}
+
 /* aviso (uma vez por aparelho) para quem é administrador */
 function adminWelcome() {
   store.set("admOk:" + S.me.id, true);
@@ -1900,6 +1959,7 @@ function connect() {
   S.socket = sock;
   sock.on("connect_error", err => {
     if (err && err.message === "auth") { store.del("token"); S.token = null; sock.disconnect(); showAuth("Sua sessão expirou. Entre novamente."); return; }
+    if (err && err.message === "banned") { store.del("token"); S.token = null; sock.disconnect(); showAuth(`Sua conta foi suspensa pela equipe da Auryx.${err.data && err.data.reason ? " Motivo: " + err.data.reason : ""}`); return; }
     if (err && err.message === "verify") { sock.disconnect(); showAuth(); setAuthMode("verify", "Confirme seu e-mail para entrar. Digite o código que enviamos (ou peça outro)."); return; }
     if (S.ready) $("#connBar").classList.remove("hidden");
   });
@@ -1921,6 +1981,8 @@ function connect() {
   });
   sock.on("order:update", ({ order }) => onOrderUpdate(order));
   sock.on("order:new", ({ order }) => { if (S.me && S.me.admin) { sfx("mention"); toast(`Novo pedido: ${order.user ? order.user.username : "?"} — plano ${order.plan}`, "info", 5000); } });
+  sock.on("announce", showAnnounce);
+  sock.on("banned", ({ reason }) => toast(`Sua conta foi suspensa pela equipe.${reason ? " Motivo: " + reason : ""}`, "error", 8000));
   sock.on("games:changed", async () => {
     if (S.view === "games") { if (await loadGames(true) && S.view === "games") { renderGamesView(); renderSide(); } }
     else S.games = null;
@@ -4602,6 +4664,13 @@ const ACTIONS = {
   "game-full": () => gameFullscreen(),
   "game-reload": () => { const f = GP.el && GP.el.querySelector("iframe"); if (f) { GP.el.classList.remove("ready"); GP.loaded = false; f.src = GP.game.url; } },
   "admin-game-edit": a => adminGameEdit(a.dataset.id),
+  "admin-srv-f": a => { S.adminSrvF = a.dataset.f; renderAdmin(true); },
+  "admin-srv-block": a => adminSrvBlock(a.dataset.id, a.dataset.name),
+  "admin-srv-unblock": a => admRun("admin:server:unblock", { serverId: a.dataset.id }, "Servidor desbloqueado e de volta para os membros."),
+  "admin-srv-del": a => adminSrvDelete(a.dataset.id, a.dataset.name),
+  "admin-ban": a => adminBan(a.dataset.uid, a.dataset.name),
+  "admin-unban": a => admRun("admin:unban", { userId: a.dataset.uid }, `Conta de ${a.dataset.name} reativada.`),
+  "admin-broadcast": () => adminBroadcast(),
   "admin-game-del": a => adminGameDel(a.dataset.id),
   "receipt-view": a => { const lb = document.createElement("div"); lb.className = "lightbox"; lb.innerHTML = `<img src="${esc(a.dataset.src)}" alt="Comprovante">`; lb.onclick = () => lb.remove(); document.body.append(lb); },
   "order-review": async a => { const r = await emit("order:review", { id: a.dataset.id }); if (r.error) toast(r.error, "error"); },
@@ -4697,6 +4766,8 @@ const ACTIONS = {
 function wire() {
   wireControlInput();
   document.addEventListener("submit", e => {
+    const ss = e.target.closest("[data-ssearch]");
+    if (ss) { e.preventDefault(); S.adminSrvQ = ss.querySelector("input").value.trim(); renderAdmin(true); return; }
     const f = e.target.closest("[data-usearch]");
     if (!f) return;
     e.preventDefault();

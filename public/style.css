@@ -1218,3 +1218,13 @@ html.reduce-motion .gp-spin { border-top-color: var(--accent); border-right-colo
   .form-2 { grid-template-columns: 1fr 90px; }
   .gp-chip { bottom: calc(76px + env(safe-area-inset-bottom)); }
 }
+
+/* Painel ADM: servidores, contas e aviso geral */
+.adm-hero { position: relative; }
+.adm-announce { position: absolute; top: 18px; right: 18px; background: rgba(255,255,255,.14); color: #fff; border: 1px solid rgba(255,255,255,.25); }
+.adm-announce:hover { background: rgba(255,255,255,.24); }
+.adm-srv .srv-icon { width: 40px; height: 40px; flex: none; font-size: 14px; border-radius: 12px; }
+.adm-srv.is-blocked { opacity: .85; border-left: 3px solid var(--red); }
+.adm-srv .who .ow { color: var(--text-2); font-weight: 600; }
+@media (max-width: 640px) { .adm-announce { position: static; margin-top: 12px; } }
+.adm-srv .who small { display: block; }
