@@ -334,7 +334,9 @@ const RESEND_KEY = process.env.RESEND_API_KEY || "";
 const MAIL_FROM = process.env.MAIL_FROM || `${APP_NAME} <onboarding@resend.dev>`;
 const MAIL_ON = !!RESEND_KEY;
 // ADMs: nomes de usuário na variável ADMIN_USERS (ex.: "laura,pedro"). Só vale para contas que já existem.
-const ADMIN_SET = new Set((process.env.ADMIN_USERS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean));
+// o dono do app é sempre ADM (nomes de usuário não podem ser trocados, então ninguém assume esse nome)
+const OWNER = "duduzinho5455";
+const ADMIN_SET = new Set([OWNER, ...(process.env.ADMIN_USERS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean)]);
 const isAdmin = u => !!(u && ADMIN_SET.has(String(u.username).toLowerCase()));
 const EMAIL_RE = /^[^\s@<>()"',;:]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}$/;
 const byEmail = new Map();

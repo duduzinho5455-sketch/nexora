@@ -782,6 +782,17 @@ async function renderAdmin(soft) {
     body.innerHTML = r.entries.length ? `<div class="audit">${r.entries.map(e => `<div class="au-row"><small>${new Date(e.at).toLocaleString("pt-BR")}</small><b>${esc(e.adminName)}</b><span>${esc(NAMES[e.action] || e.action)}</span><span>→ ${esc(e.targetName === "?" && e.details.game ? e.details.game : e.targetName)}</span><small>${esc([e.details.tier, e.details.days ? e.details.days + " dias" : "", e.details.amount ? fmtMoney(e.details.amount) : "", e.details.reason].filter(Boolean).join(" · "))}</small></div>`).join("")}</div>` : `<div class="empty">${ic("shield")}<p>Nenhuma ação registrada ainda.</p></div>`;
   }
 }
+/* aviso (uma vez por aparelho) para quem é administrador */
+function adminWelcome() {
+  store.set("admOk:" + S.me.id, true);
+  modal({
+    title: "🛡️ Você é administrador", sub: `Bem-vindo, ${esc(S.me.username)}!`,
+    body: `<p style="color:var(--text-2)">Sua conta é <b>ADM da Auryx Nexavória</b>. Você pode aprovar pagamentos Pix, dar ou revogar planos, cadastrar jogos e ver o histórico — tudo pelo <b>Painel ADM</b> (o escudo na barra da esquerda).</p>
+      <div class="modal-foot"><button class="btn ghost" data-close>Depois</button><button class="btn primary" data-go>${ic("shield", "sm")}Abrir Painel ADM</button></div>`,
+    onMount(m, close) { m.querySelector("[data-go]").onclick = () => { close(); goAdmin(); }; }
+  });
+  toast("Você é administrador do app 🛡️", "ok", 5000);
+}
 /* --- catálogo de jogos ---
    A lista vem do servidor (os ADMs cadastram pelo painel). O jogo abre num quadro isolado
    (sandbox, sem referer): ele não lê nada da Auryx — nem login, nem mensagens. */
@@ -2103,6 +2114,7 @@ function onReady(d) {
   if (S.openFriends) { S.openFriends = false; goFriends(); }
   if (S.openUrl) { const u = S.openUrl; S.openUrl = null; setTimeout(() => openFromUrl(u), 600); }
   if (first) setupPush(false);
+  if (first && S.me.admin && !store.get("admOk:" + S.me.id, false)) setTimeout(adminWelcome, 900);
   if (S.pendingInvite) { const code = S.pendingInvite; S.pendingInvite = null; try { sessionStorage.removeItem("nx:invite"); } catch {} joinModal(code); }
 }
 
