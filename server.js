@@ -623,6 +623,9 @@ io.use((socket, next) => {
   const sess = typeof t === "string" && t.length < 100 ? db.sessions[tokenKey(t)] : null;
   const user = sess && db.users[sess.userId];
   if (!user) return next(new Error("auth"));
+  // app de PC antigo (NEXORA) foi desativado: só conecta o app novo ou o navegador
+  const ua = String(socket.handshake.headers["user-agent"] || "");
+  if (/\bNEXORA\/\d/.test(ua) && /Electron\//.test(ua)) return next(new Error("update"));
   if (needsVerify(user)) return next(new Error("verify"));
   socket.data.uid = user.id;
   socket.data.tk = tokenKey(t);

@@ -4571,6 +4571,12 @@ function boot() {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
   }
   if (DESKTOP) document.documentElement.classList.add("desktop-app");
+  // App de PC antigo (NEXORA): bloqueado — só funciona depois de instalar o Auryx Nexavória novo
+  if (DESKTOP && /\bNEXORA\/\d/.test(navigator.userAgent)) {
+    hideBoot();
+    document.body.innerHTML = `<div class="auth" style="position:fixed;inset:0;display:grid;place-items:center;background:#08090f"><div class="auth-card" style="text-align:center"><div class="brand"><span class="logo">${LOGO()}</span><h1>Auryx Nexavória</h1></div><p class="auth-sub">Este aplicativo (NEXORA) está desatualizado e foi desativado.</p><p style="color:var(--text-2)">Baixe e instale o app novo para continuar. Suas contas, servidores e mensagens continuam iguais.</p><a class="btn primary big" href="${DESKTOP_URL}" target="_blank" rel="noopener">Baixar Auryx Nexavória</a><p style="color:var(--muted);font-size:13px;margin-top:14px">Depois de instalar, pode desinstalar o NEXORA antigo em Configurações do Windows › Aplicativos.</p></div></div>`;
+    return;
+  }
   $$(".seg button").forEach(b => (b.onclick = () => setAuthMode(b.dataset.mode)));
   $("#authForm").addEventListener("submit", doAuth);
   $("#authForm").addEventListener("click", e => { const a = e.target.closest("[data-auth]"); if (a) { e.preventDefault(); authLink(a.dataset.auth); } });
