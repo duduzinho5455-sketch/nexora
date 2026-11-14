@@ -34,7 +34,14 @@ function createWindow() {
   win.loadURL(APP_URL);
 
   // links externos (Steam, lojas, sites) abrem fora do app
-  win.webContents.setWindowOpenHandler(({ url }) => { openExternal(url); return { action: "deny" }; });
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    // login do Spotify: abre dentro do app, para o player de música da call tocar a música inteira
+    try {
+      const h = new URL(url).hostname;
+      if (/(^|\.)spotify\.com$/.test(h)) return { action: "allow", overrideBrowserWindowOptions: { width: 480, height: 760, parent: win, autoHideMenuBar: true, title: "Entrar no Spotify", backgroundColor: "#121212", webPreferences: { contextIsolation: true, sandbox: true } } };
+    } catch {}
+    openExternal(url); return { action: "deny" };
+  });
   win.webContents.on("will-navigate", (e, url) => {
     if (!url.startsWith(ORIGIN)) { e.preventDefault(); openExternal(url); }
   });

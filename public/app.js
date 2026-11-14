@@ -3978,12 +3978,22 @@ function spMeta(uri) {
     .then(r => (r.ok ? r.json() : null)).then(j => { const v = j ? { title: j.title || "", img: j.thumbnail_url || "" } : null; spInfo.set(uri, v); return v; })
     .catch(() => null);
 }
+// Entrar no Spotify sem sair da Auryx: o login fica guardado no app e o player passa a tocar a música inteira
+const SP_LOGIN = "https://accounts.spotify.com/login?continue=" + encodeURIComponent("https://open.spotify.com/");
+function spotifyLogin(done) {
+  if (ANDROID && ANDROID.spotifyLogin) { try { ANDROID.spotifyLogin(); } catch {} window.__axSpotifyDone = () => { toast("Pronto! Se entrou, a música toca inteira agora.", "ok"); done && done(); }; return; }
+  if (ANDROID) { toast("Atualize o app Android para entrar no Spotify por aqui.", "warn", 6000); return; }
+  const w = window.open(SP_LOGIN, "spotify-login", "width=480,height=720");
+  if (!w) { toast("O navegador bloqueou a janela. Entre em open.spotify.com nesta mesma janela do navegador e volte.", "warn", 8000); return; }
+  toast("Entre na sua conta do Spotify e feche a janela quando terminar.", "info", 6000);
+  const t = setInterval(() => { if (w.closed) { clearInterval(t); toast("Pronto! Se entrou, a música toca inteira agora.", "ok"); done && done(); } }, 800);
+}
 function mountSpotify(el) {
   el.innerHTML = `<div class="yt-wrap sp-wrap"><div class="sp-player"><div class="sp-frame"></div><div class="yt-empty sp-empty">${ic("music", "lg")}<b>Ouvir juntos no Spotify</b><small>Cole aqui embaixo o link de uma música, álbum, playlist ou podcast do Spotify (Compartilhar › Copiar link). Todo mundo na call ouve junto.</small></div></div>
     <div class="yt-bar"><button class="icon-btn" data-sp="toggle" data-tip="Tocar / pausar para todos">${ic("play")}</button><button class="icon-btn" data-sp="skip" data-tip="Próxima da fila">${ic("skip")}</button><span class="yt-time">0:00</span><input type="range" class="yt-seek" min="0" max="100" value="0" step="0.5"><span class="yt-dur">0:00</span><span class="mm-sep"></span><button class="icon-btn" data-mm="mute" data-tip="Mutar a música (só para você)">${ic(musicMuted() ? "volumeX" : "volume")}</button><button class="icon-btn" data-mm="min" data-tip="Diminuir / aumentar o player">${ic("minimize")}</button></div>
     <form class="yt-add"><input placeholder="Cole um link do Spotify para tocar ou pôr na fila…" spellcheck="false"><button class="btn sm primary">${ic("plus", "sm")}Adicionar</button></form>
     <div class="yt-queue"></div>
-    <small class="sp-note">🎧 Quem estiver logado no Spotify (Premium) ouve as músicas inteiras; sem login, o Spotify toca só uma prévia de 30 s.</small></div>`;
+    <div class="sp-login"><small>🎧 Tocando só 30 s? O Spotify só toca a música inteira para quem está logado nele.</small><button class="btn sm" type="button" data-sp="login">${ic("headphones", "sm")}Entrar no Spotify</button></div></div>`;
   let ctl = null, ready = false, lastUri = "", seeking = false, pb = { paused: true, pos: 0, dur: 0 }, alive = true;
   const st = () => (V.act && V.act.type === "sp" ? V.act.state : null);
   const push = s => emit("act:state", { state: s }).then(r => r.error && toast(r.error, "error"));
@@ -4055,6 +4065,7 @@ function mountSpotify(el) {
     if (!b) return;
     if (b.dataset.sp === "toggle" && s.uri) push({ ...s, playing: !s.playing, pos: spSingle(s.uri) ? posOf(s) : 0 });
     if (b.dataset.sp === "skip") next();
+    if (b.dataset.sp === "login") spotifyLogin(() => { const s2 = st(); if (ctl && s2 && s2.uri) { lastUri = ""; sync(); } });
   });
   const seek = el.querySelector(".yt-seek");
   seek.addEventListener("input", () => { seeking = true; });

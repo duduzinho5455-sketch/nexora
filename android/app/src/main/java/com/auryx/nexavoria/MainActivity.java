@@ -21,6 +21,8 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.app.Dialog;
+import android.view.ViewGroup;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
@@ -85,6 +87,8 @@ public class MainActivity extends Activity {
         s.setAllowFileAccess(false);
         s.setUserAgentString(s.getUserAgentString() + " AuryxAndroid/1.0");
         CookieManager.getInstance().setAcceptCookie(true);
+        // o player do Spotify (dentro da página) precisa enxergar o login do Spotify
+        CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
 
         web.addJavascriptInterface(new Bridge(), "AuryxAndroid");
         web.setWebViewClient(new WebViewClient() {
@@ -247,6 +251,39 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String frame() {
             return ScreenService.takeFrame();
+        }
+
+        /** Entrar no Spotify numa janela por cima do app; o login fica salvo para o player da call. */
+        @JavascriptInterface
+        public void spotifyLogin() {
+            runOnUiThread(() -> {
+                Dialog d = new Dialog(MainActivity.this, android.R.style.Theme_Black_NoTitleBar);
+                WebView w = new WebView(MainActivity.this);
+                w.getSettings().setJavaScriptEnabled(true);
+                w.getSettings().setDomStorageEnabled(true);
+                CookieManager.getInstance().setAcceptThirdPartyCookies(w, true);
+                w.setWebViewClient(new WebViewClient() {
+                    @Override
+                    public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
+                        String h = req.getUrl().getHost();
+                        if (h != null && (h.endsWith("spotify.com") || h.endsWith("google.com") || h.endsWith("facebook.com") || h.endsWith("apple.com"))) return false;
+                        return true;
+                    }
+                    @Override
+                    public void onPageFinished(WebView view, String url) {
+                        // terminou o login e caiu na página do Spotify: fecha sozinho
+                        if (url != null && url.startsWith("https://open.spotify.com")) d.dismiss();
+                    }
+                });
+                d.setContentView(w, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                d.setOnDismissListener(x -> {
+                    CookieManager.getInstance().flush();
+                    try { w.destroy(); } catch (Exception ignored) { }
+                    web.evaluateJavascript("window.__axSpotifyDone && window.__axSpotifyDone()", null);
+                });
+                d.show();
+                w.loadUrl("https://accounts.spotify.com/login?continue=https%3A%2F%2Fopen.spotify.com%2F");
+            });
         }
 
         /** Som do celular junto com a tela (Android 10+): chamar antes de startScreen. */
