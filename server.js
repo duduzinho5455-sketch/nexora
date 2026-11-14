@@ -74,6 +74,14 @@ async function loadDb() {
   db.dms = db.dms || {};
   db.orders = db.orders || {};
   setupPush();
+  // catálogo de jogos: começa com o Bunker 9 (os ADMs adicionam outros pelo painel)
+  if (!Array.isArray(db.games)) {
+    db.games = [{
+      id: "bunker9", name: "Bunker 9", url: "https://bunker9-multiplayer.onrender.com", category: "Sobrevivência", status: "on", embed: true, img: "",
+      desc: "Sobreviva às hordas de zumbis no bunker com seus amigos. Multiplayer, armas, perks e muita tensão.", order: 1, created: Date.now()
+    }];
+    save();
+  }
   db.audit = db.audit || [];
   for (const u of Object.values(db.users)) { byName.set(u.username.toLowerCase(), u.id); if (u.email) byEmail.set(u.email, u.id); }
   for (const s of Object.values(db.servers)) for (const c of s.channels) chanIndex.set(c.id, s.id);
@@ -713,10 +721,23 @@ async function pollSteam() {
   }
 }
 setInterval(pollSteam, 60000).unref();
+// Quando a conexão cai (tela bloqueada, troca de rede), a pessoa fica 60 s "segurando o lugar"
+// na sala; se voltar nesse tempo, retoma a MESMA chamada sem desligar.
+const VOICE_GRACE = 60000;
+const sockAlias = new Map();   // socket antigo -> socket novo (para os sinais de quem ainda usa o id antigo)
+function holdVoice(sock) {
+  const v = voice.get(sock);
+  if (!v) return;
+  v.away = Date.now();
+  clearTimeout(v.awayTimer);
+  v.awayTimer = setTimeout(() => { if (voice.get(sock) === v && v.away) leaveVoice(sock); }, VOICE_GRACE);
+}
 function leaveVoice(sock) {
   const v = voice.get(sock);
   if (!v) return;
+  clearTimeout(v.awayTimer);
   voice.delete(sock);
+  for (const [k, val] of sockAlias) if (val === sock || k === sock) sockAlias.delete(k);
   io.in(sock).socketsLeave("v:" + v.cid);
   io.to("s:" + v.sid).emit("voice:leave", { sock, userId: v.uid, channelId: v.cid, serverId: v.sid });
   if (![...voice.values()].some(x => x.cid === v.cid) && acts.has(v.cid)) {
@@ -1327,8 +1348,41 @@ io.on("connection", socket => {
   });
   on("admin:audit", () => {
     requireAdmin();
-    const name = id => (db.users[id] || {}).username || "?";
+    const name = id => (db.users[id] || {}).username || ((db.games || []).find(g => g.id === id) || {}).name || "?";
     return { entries: db.audit.slice(-300).reverse().map(e => ({ ...e, adminName: name(e.admin), targetName: name(e.target) })) };
+  });
+
+  /* ---------- catálogo de jogos ---------- */
+  const gameView = g => ({ id: g.id, name: g.name, url: g.url, category: g.category || "", status: g.status, embed: g.embed !== false, img: g.img || "", desc: g.desc || "", order: g.order || 0 });
+  on("games:list", () => ({ games: (db.games || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name)).map(gameView) }));
+  on("games:save", ({ game }) => {
+    requireAdmin();
+    if (!game || typeof game !== "object") fail("Dados inválidos.");
+    const name = str(game.name, 60), url = str(game.url, 400), category = str(game.category, 30), desc = str(game.desc, 300);
+    if (name.length < 2) fail("Dê um nome ao jogo.");
+    let u;
+    try { u = new URL(url); } catch { fail("Endereço inválido. Use um link https://"); }
+    if (u.protocol !== "https:") fail("O endereço precisa começar com https://");
+    const img = typeof game.img === "string" && (game.img === "" || /^https:\/\/\S+$/.test(game.img) || FILE_URL_RE.test(game.img)) ? game.img.slice(0, 400) : "";
+    const status = ["on", "off", "soon"].includes(game.status) ? game.status : "on";
+    db.games = db.games || [];
+    let g = typeof game.id === "string" ? db.games.find(x => x.id === game.id) : null;
+    if (!g) { if (db.games.length >= 200) fail("Limite de jogos atingido."); g = { id: newId(), created: Date.now(), order: db.games.length + 1 }; db.games.push(g); }
+    Object.assign(g, { name, url: u.href, category, desc, img, status, embed: game.embed !== false });
+    if (Number.isFinite(+game.order)) g.order = Math.max(0, Math.min(999, Math.round(+game.order)));
+    audit("game:save", g.id, { game: g.name, status });
+    save();
+    io.emit("games:changed", {});
+    return { game: gameView(g) };
+  });
+  on("games:delete", ({ id }) => {
+    requireAdmin();
+    const g = (db.games || []).find(x => x.id === id);
+    if (!g) fail("Jogo não encontrado.");
+    db.games = db.games.filter(x => x !== g);
+    audit("game:delete", g.id, { game: g.name });
+    save();
+    io.emit("games:changed", {});
   });
 
   /* ---------- e-mail da conta ---------- */
@@ -1525,11 +1579,28 @@ io.on("connection", socket => {
 
   on("voice:leave", () => { leaveVoice(socket.id); });
 
+  // voltou depois de cair: assume o lugar guardado sem refazer a chamada
+  on("voice:resume", ({ oldSock, channelId }) => {
+    const v = typeof oldSock === "string" ? voice.get(oldSock) : null;
+    if (!v || v.uid !== uid || v.cid !== channelId || oldSock === socket.id) fail("Lugar na sala expirou.");
+    clearTimeout(v.awayTimer);
+    v.away = 0;
+    voice.delete(oldSock);
+    voice.set(socket.id, v);
+    sockAlias.set(oldSock, socket.id);
+    socket.join("v:" + v.cid);
+    io.to("s:" + v.sid).emit("voice:resock", { old: oldSock, sock: socket.id, userId: uid, channelId: v.cid });
+    io.to("s:" + v.sid).emit("voice:state", vView(socket.id, v));
+    const peers = [...voice].filter(([k, x]) => x.cid === v.cid && k !== socket.id).map(([k, x]) => vView(k, x));
+    return { peers, act: actView(v.cid, acts.get(v.cid)), now: Date.now() };
+  });
+
   socket.on("voice:signal", msg => {
     if (!msg || typeof msg.to !== "string" || !msg.data || typeof msg.data !== "object" || !signals()) return;
-    const a = voice.get(socket.id), b = voice.get(msg.to);
+    const to = sockAlias.get(msg.to) || msg.to;
+    const a = voice.get(socket.id), b = voice.get(to);
     if (!a || !b || a.cid !== b.cid) return;
-    io.to(msg.to).emit("voice:signal", { from: socket.id, userId: uid, data: msg.data });
+    io.to(to).emit("voice:signal", { from: socket.id, userId: uid, data: msg.data });
   });
 
   /* ---------- push e visibilidade ---------- */
@@ -1552,9 +1623,11 @@ io.on("connection", socket => {
   });
   on("push:unsub", ({ endpoint }) => { const u = me(); u.push = (u.push || []).filter(x => x.endpoint !== endpoint); save(); });
 
-  socket.on("disconnect", () => {
+  socket.on("disconnect", reason => {
     setVisible(false);
-    leaveVoice(socket.id);
+    // saída de propósito: sai na hora; queda de conexão: segura o lugar por 60 s
+    if (reason === "client namespace disconnect" || reason === "server namespace disconnect") leaveVoice(socket.id);
+    else holdVoice(socket.id);
     const set = online.get(uid);
     if (set) {
       set.delete(socket.id);

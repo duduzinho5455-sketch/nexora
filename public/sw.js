@@ -1,31 +1,50 @@
 /* Auryx Nexavória — service worker
    Guarda só a "casca" do app (HTML, CSS, JS, ícones) para abrir rápido.
    Mensagens, login e voz sempre vão direto para o servidor. */
-const CACHE = "auryx-v5";
-const SHELL = ["/", "/style.css", "/app.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
+const CACHE = "auryx-v7";
+const SHELL = ["/", "/style.css", "/app.js", "/socket.io/socket.io.min.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
+const cacheable = p => SHELL.includes(p) || p.startsWith("/icons/") || p.startsWith("/vendor/") || p === "/noise-worklet.js";
 
 self.addEventListener("install", e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).catch(() => {}).then(() => self.skipWaiting()));
 });
 self.addEventListener("activate", e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
+
+/* Abertura instantânea: entrega a "casca" guardada na hora (mesmo com o servidor dormindo)
+   e busca a versão nova em segundo plano. Se mudou, avisa a página para oferecer "Atualizar". */
+let warned = false;
+async function warnUpdate() {
+  if (warned) return;
+  warned = true;
+  for (const c of await self.clients.matchAll({ type: "window" })) c.postMessage({ type: "update" });
+}
+async function fromCacheThenNetwork(e, req, key) {
+  const cache = await caches.open(CACHE);
+  const cached = await cache.match(key);
+  const network = fetch(req).then(async res => {
+    if (res && res.ok && res.status === 200) {
+      const oldTag = cached && cached.headers.get("etag"), newTag = res.headers.get("etag");
+      await cache.put(key, res.clone());
+      if (oldTag && newTag && oldTag !== newTag && (key === "/" || key === "/app.js" || key === "/style.css")) warnUpdate();
+    }
+    return res;
+  }).catch(() => null);
+  if (cached) { e.waitUntil(network); return cached; }
+  const res = await network;
+  return res || Response.error();
+}
 self.addEventListener("fetch", e => {
   const req = e.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
-  if (url.pathname.startsWith("/socket.io") || url.pathname.startsWith("/api/") || url.pathname === "/health" || url.pathname.startsWith("/agente/")) return;
-  // Rede primeiro (sempre a versão mais nova); cache só se estiver sem internet.
-  e.respondWith(
-    fetch(req).then(res => {
-      if (res.ok && (SHELL.includes(url.pathname) || url.pathname.startsWith("/icons/"))) {
-        const copy = res.clone();
-        caches.open(CACHE).then(c => c.put(req, copy));
-      }
-      return res;
-    }).catch(() => caches.match(req).then(r => r || (req.mode === "navigate" ? caches.match("/") : Response.error())))
-  );
+  const p = url.pathname;
+  // dados ao vivo, login, arquivos privados e o agente: sempre direto no servidor
+  if ((p.startsWith("/socket.io") && p !== "/socket.io/socket.io.min.js") || p.startsWith("/api/") || p.startsWith("/f/") || p === "/health" || p.startsWith("/agente/")) return;
+  if (req.mode === "navigate") { e.respondWith(fromCacheThenNetwork(e, req, "/")); return; }
+  if (cacheable(p)) e.respondWith(fromCacheThenNetwork(e, req, p));
 });
 
 /* Notificações push: chegam mesmo com o app fechado */

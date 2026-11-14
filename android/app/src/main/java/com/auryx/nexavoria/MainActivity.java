@@ -68,6 +68,7 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
+                if (!req.isForMainFrame()) return false;   // jogos dentro da Auryx (iframe) carregam no lugar
                 Uri u = req.getUrl();
                 if ("https".equals(u.getScheme()) && HOST.equals(u.getHost())) return false;
                 openExternal(u);           // Pix do Nubank, Steam, links de fora: abrem no app certo

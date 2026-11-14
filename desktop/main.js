@@ -29,6 +29,8 @@ function createWindow() {
   });
   Menu.setApplicationMenu(null);
   win.once("ready-to-show", () => win.show());
+  // se a página demorar (servidor acordando), mostra a janela mesmo assim em vez de ficar invisível
+  setTimeout(() => { if (!win.isDestroyed() && !win.isVisible()) win.show(); }, 2500);
   win.loadURL(APP_URL);
 
   // links externos (Steam, lojas, sites) abrem fora do app

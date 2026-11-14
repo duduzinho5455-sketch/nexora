@@ -87,7 +87,11 @@ const P = {
   rocket: '<path d="M4.5 16.5c-1.5 1.3-2 5-2 5s3.7-.5 5-2c.7-.8.7-2.1-.1-2.9a2.2 2.2 0 0 0-2.9-.1z"/><path d="m12 15-3-3a22 22 0 0 1 2-4A12.9 12.9 0 0 1 22 2c0 2.7-.8 7.5-6 11a22.4 22.4 0 0 1-4 2z"/><path d="M9 12H4s.6-3 2-4c1.6-1.1 5 0 5 0M12 15v5s3-.6 4-2c1.1-1.6 0-5 0-5"/>',
   skip: '<path d="m5 4 10 8-10 8zM19 5v14"/>',
   pause: '<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>',
-  sparkles: '<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/>'
+  sparkles: '<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/>',
+  grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  external: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  minimize: '<path d="M5 12h14"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/>'
 };
 const ic = (n, c = "") => `<svg class="ic ${c}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ""}</svg>`;
 // cada logo ganha um id de degradê próprio (um logo escondido não "apaga" os outros)
@@ -373,6 +377,7 @@ function renderRail() {
   if (old) old.remove();
   if (total) home.insertAdjacentHTML("beforeend", `<b class="badge">${total > 99 ? "99+" : total}</b>`);
   $('.rail-item[data-act="discover"]').classList.toggle("on", S.view === "discover");
+  $('.rail-item[data-act="games"]').classList.toggle("on", S.view === "games");
 }
 
 /* ------------------------------------------------------------------ */
@@ -407,6 +412,14 @@ function renderSide() {
         `<div class="cat"><span>${adm ? "Atendimentos" : "Meus atendimentos"}</span></div>` +
         (list.length ? list.map(o => { const n = S.mentions.get("t." + o.id) || 0; return `<div class="dm-item${S.channelId === "t." + o.id ? " on" : ""}${n ? " unread" : ""}" data-act="open-ticket" data-id="${o.id}" role="button" tabindex="0"><span class="av" style="--c:${{ plus: "#22d3ee", pro: "#7c5cff", max: "#f59e0b" }[o.tier]};--s:32px">${ic("gem", "sm")}</span><div class="who"><b>${adm && o.user ? esc(o.user.username) + " · " : ""}${esc(o.plan)}</b><small>${ORDER_STATUS[o.status][0]} · ${fmtMoney(o.amount)}</small></div>${n ? `<b class="badge">${n}</b>` : ""}</div>`; }).join("")
           : `<p style="padding:0 8px;color:var(--muted);font-size:13px;margin:0">${adm ? "Abra o painel para carregar os pedidos." : "Nenhum pedido ainda."}</p>`);
+      return;
+    }
+    if (S.view === "games") {
+      head.innerHTML = `<span class="title">Jogos</span>`;
+      const cats = gameCats();
+      body.innerHTML = `<div class="cat">Categorias</div>` + ["", ...cats].map(c => `<div class="ch${(S.gameCat || "") === c ? " on" : ""}" data-act="games-cat" data-cat="${esc(c)}" role="button" tabindex="0">${ic(c ? "gamepad" : "grid")}<span class="ch-name">${esc(c || "Todos os jogos")}</span></div>`).join("") +
+        (GP.game ? `<div class="cat">Jogando agora</div><div class="ch" data-act="game-resume" role="button" tabindex="0">${ic("play")}<span class="ch-name">${esc(GP.game.name)}</span></div>` : "") +
+        `<div class="cat">Dica</div><p style="padding:0 8px;color:var(--muted);font-size:13.5px;margin:0">Chame os amigos para uma call e joguem juntos. O jogo continua rodando se você minimizar.</p>`;
       return;
     }
     if (S.view === "discover") {
@@ -493,6 +506,8 @@ function renderTop() {
     icon.innerHTML = ic("users"); title.textContent = "Amigos"; topic.textContent = ""; actions.innerHTML = search;
   } else if (S.view === "premium") {
     icon.innerHTML = ic("gem"); title.textContent = "Central de Pagamentos"; topic.textContent = "Planos Plus, Pro e Max"; actions.innerHTML = search;
+  } else if (S.view === "games") {
+    icon.innerHTML = ic("gamepad"); title.textContent = "Jogos"; topic.textContent = "Jogue com os amigos sem sair da Auryx"; actions.innerHTML = search;
   } else if (S.view === "admin") {
     icon.innerHTML = ic("shield"); title.textContent = "Painel ADM"; topic.textContent = "Pagamentos, planos e histórico"; actions.innerHTML = search;
   } else {
@@ -551,7 +566,7 @@ function renderTitle() {
 /* ------------------------------------------------------------------ */
 /* Navegação                                                           */
 /* ------------------------------------------------------------------ */
-const VIEWS = { chat: "#chatView", stage: "#stageView", home: "#homeView", discover: "#discoverView", friends: "#friendsView", premium: "#premiumView", admin: "#adminView" };
+const VIEWS = { chat: "#chatView", stage: "#stageView", home: "#homeView", discover: "#discoverView", friends: "#friendsView", premium: "#premiumView", admin: "#adminView", games: "#gamesView" };
 function setView(view) {
   if (S.view === "chat" && S.channelId) S.drafts[S.channelId] = $("#input").value;
   const changed = S.view !== view;
@@ -729,7 +744,7 @@ async function renderAdmin(soft) {
   const root = $("#adminView");
   if (!root || !S.me.admin) return;
   const tab = S.adminTab;
-  const tabs = [["orders", "Solicitações"], ["users", "Usuários e planos"], ["audit", "Histórico"]];
+  const tabs = [["orders", "Solicitações"], ["users", "Usuários e planos"], ["games", "Jogos"], ["audit", "Histórico"]];
   const head = `<div class="page admin"><div class="hero adm-hero"><h1>${ic("shield", "lg")} Painel ADM</h1><p>Confira no extrato do banco se o Pix caiu antes de aprovar. Toda decisão fica registrada com o seu nome.</p></div><div class="tabs-row">${tabs.map(([k, n]) => `<button class="tab${k === tab ? " on" : ""}" data-act="admin-tab" data-tab="${k}">${n}</button>`).join("")}</div><div class="adm-body"></div></div>`;
   if (!soft || !root.querySelector(".adm-body")) root.innerHTML = head;
   else root.querySelectorAll(".tabs-row .tab").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
@@ -755,12 +770,214 @@ async function renderAdmin(soft) {
     const r = await emit("admin:users", { q: S.adminQ || "" });
     if (r.error) { list.innerHTML = esc(r.error); return; }
     list.innerHTML = r.users.map(u => `<div class="adm-user">${avatar(u, 36)}<div class="who"><b>${esc(u.username)}${u.admin ? ` <span class="ost st-rev">ADM</span>` : ""}</b><small>${esc(u.email || "sem e-mail")}${u.email && !u.emailVerified ? " (não confirmado)" : ""}</small></div><div>${u.plan ? `<span class="ost st-ok">${esc({ plus: "Plus", pro: "Pro", max: "Max" }[u.plan])}</span><small style="display:block;color:var(--muted)">até ${fmtDate(u.until)}</small>` : `<small style="color:var(--muted)">sem plano</small>`}</div><div class="ao-acts"><button class="btn sm" data-act="admin-grant" data-uid="${u.id}" data-name="${esc(u.username)}">Dar plano</button>${u.plan ? `<button class="btn sm danger" data-act="admin-revoke" data-uid="${u.id}" data-name="${esc(u.username)}">Revogar</button>` : ""}</div></div>`).join("") || `<p style="color:var(--muted)">Ninguém encontrado.</p>`;
+  } else if (tab === "games") {
+    if (!(await loadGames(true))) { body.innerHTML = `<p>Não deu para carregar os jogos.</p>`; return; }
+    body.innerHTML = `<div class="adm-games-head"><p>Os jogos aparecem para todo mundo na aba <b>Jogos</b>. Só endereços <b>https://</b> são aceitos.</p><button class="btn primary" data-act="admin-game-edit">${ic("plus", "sm")}Adicionar jogo</button></div>` +
+      (S.games.length ? S.games.map(g => `<div class="adm-user adm-game"><div class="ag-thumb">${gameCover(g)}</div><div class="who"><b>${esc(g.name)}</b><small>${esc(g.category || "sem categoria")} · ${esc(hostOf(g.url))}${g.embed ? "" : " · abre em nova aba"}</small></div><div>${gameTag(g)}</div><div class="ao-acts"><button class="btn sm" data-act="admin-game-edit" data-id="${g.id}">${ic("edit", "sm")}Editar</button><button class="btn sm danger" data-act="admin-game-del" data-id="${g.id}">${ic("trash", "sm")}Remover</button></div></div>`).join("")
+        : `<div class="empty">${ic("gamepad")}<p>Nenhum jogo no catálogo.</p></div>`);
   } else {
     const r = await emit("admin:audit", {});
     if (r.error) { body.innerHTML = esc(r.error); return; }
-    const NAMES = { "order:approve": "Aprovou pedido", "order:reject": "Recusou pedido", "order:review": "Pôs em análise", "plan:grant": "Deu plano", "plan:revoke": "Revogou plano" };
-    body.innerHTML = r.entries.length ? `<div class="audit">${r.entries.map(e => `<div class="au-row"><small>${new Date(e.at).toLocaleString("pt-BR")}</small><b>${esc(e.adminName)}</b><span>${esc(NAMES[e.action] || e.action)}</span><span>→ ${esc(e.targetName)}</span><small>${esc([e.details.tier, e.details.days ? e.details.days + " dias" : "", e.details.amount ? fmtMoney(e.details.amount) : "", e.details.reason].filter(Boolean).join(" · "))}</small></div>`).join("")}</div>` : `<div class="empty">${ic("shield")}<p>Nenhuma ação registrada ainda.</p></div>`;
+    const NAMES = { "order:approve": "Aprovou pedido", "order:reject": "Recusou pedido", "order:review": "Pôs em análise", "plan:grant": "Deu plano", "plan:revoke": "Revogou plano", "game:save": "Salvou jogo", "game:delete": "Removeu jogo" };
+    body.innerHTML = r.entries.length ? `<div class="audit">${r.entries.map(e => `<div class="au-row"><small>${new Date(e.at).toLocaleString("pt-BR")}</small><b>${esc(e.adminName)}</b><span>${esc(NAMES[e.action] || e.action)}</span><span>→ ${esc(e.targetName === "?" && e.details.game ? e.details.game : e.targetName)}</span><small>${esc([e.details.tier, e.details.days ? e.details.days + " dias" : "", e.details.amount ? fmtMoney(e.details.amount) : "", e.details.reason].filter(Boolean).join(" · "))}</small></div>`).join("")}</div>` : `<div class="empty">${ic("shield")}<p>Nenhuma ação registrada ainda.</p></div>`;
   }
+}
+/* --- catálogo de jogos ---
+   A lista vem do servidor (os ADMs cadastram pelo painel). O jogo abre num quadro isolado
+   (sandbox, sem referer): ele não lê nada da Auryx — nem login, nem mensagens. */
+const GP = { game: null, el: null, chip: null, loaded: false, t: 0 };
+const GSTATUS = { on: ["Disponível", "st-ok"], soon: ["Em breve", "st-pend"], off: ["Indisponível", "st-bad"] };
+const hostOf = u => { try { return new URL(u).host; } catch { return ""; } };
+const gameTag = g => { const s = GSTATUS[g.status] || GSTATUS.on; return `<span class="ost ${s[1]}">${s[0]}</span>`; };
+const gameCats = () => [...new Set((S.games || []).map(g => g.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+const gameById = id => (S.games || []).find(g => g.id === id);
+async function loadGames(force) {
+  if (S.games && !force) return true;
+  if (LOCAL) { S.games = S.games || []; return true; }
+  const r = await emit("games:list", {});
+  if (r.error) { toast(r.error, "error"); return false; }
+  S.games = r.games;
+  return true;
+}
+async function goGames() {
+  setView("games");
+  S.serverId = null; S.channelId = null;
+  store.set("last", { view: "games" });
+  if (!S.games) $("#gamesView").innerHTML = `<div class="page"><div class="hero"><h1>${ic("gamepad", "lg")} Carregando jogos…</h1></div></div>`;
+  else renderGamesView();
+  renderAll(); updateMini();
+  if (await loadGames(true) && S.view === "games") { renderGamesView(); renderSide(); }
+}
+function gameCover(g) {
+  if (g.img) return `<img src="${esc(g.img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`;
+  let h = 0;
+  for (const ch of g.name) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return `<div class="gc-art" style="--h:${g.id === "bunker9" ? 4 : h}"><span>${ic("gamepad")}</span><b>${esc(g.name)}</b></div>`;
+}
+function gameCard(g) {
+  const can = g.status === "on";
+  return `<article class="game-card${can ? "" : " off"}">
+    <div class="gc-cover"${can ? ` data-act="game-play" data-id="${g.id}" role="button" tabindex="0" aria-label="Jogar ${esc(g.name)}"` : ""}>${gameCover(g)}${can ? `<span class="gc-play">${ic("play")}</span>` : `<span class="gc-flag">${gameTag(g)}</span>`}</div>
+    <div class="gc-body"><div class="gc-top"><h3>${esc(g.name)}</h3>${g.category ? `<span class="gc-cat">${esc(g.category)}</span>` : ""}</div>
+      <p>${esc(g.desc || "")}</p>
+      <div class="gc-acts">${can ? `<button class="btn primary" data-act="game-play" data-id="${g.id}">${ic("play", "sm")}${GP.game && GP.game.id === g.id ? "Voltar ao jogo" : "Jogar"}</button><button class="icon-btn" data-act="game-tab" data-id="${g.id}" data-tip="Abrir em nova aba">${ic("external")}</button>` : `<button class="btn" disabled>${(GSTATUS[g.status] || GSTATUS.off)[0]}</button>`}</div>
+    </div></article>`;
+}
+function gamesGrid() {
+  const q = (S.gameQ || "").trim().toLowerCase(), cat = S.gameCat || "";
+  const list = (S.games || []).filter(g => (!cat || g.category === cat) && (!q || `${g.name} ${g.desc} ${g.category}`.toLowerCase().includes(q)));
+  return list.length ? `<div class="game-grid">${list.map(gameCard).join("")}</div>`
+    : `<div class="empty">${ic("gamepad")}<p>${(S.games || []).length ? "Nenhum jogo encontrado com esse filtro." : "Nenhum jogo no catálogo ainda."}</p></div>`;
+}
+function renderGamesView() {
+  const root = $("#gamesView");
+  if (!root || !S.games) return;
+  const cat = S.gameCat || "";
+  root.innerHTML = `<div class="page games">
+    <div class="hero games-hero"><h1>${ic("gamepad", "lg")} Jogos</h1><p>Jogue direto na Auryx Nexavória — sozinho ou com a galera da call.</p></div>
+    <div class="games-bar"><label class="games-search">${ic("search", "sm")}<input data-gq type="search" placeholder="Buscar jogo" value="${esc(S.gameQ || "")}" maxlength="40" aria-label="Buscar jogo"></label>
+      <div class="chips">${["", ...gameCats()].map(c => `<button class="chip${cat === c ? " on" : ""}" data-act="games-cat" data-cat="${esc(c)}">${esc(c || "Todos")}</button>`).join("")}</div></div>
+    <div data-ggrid>${gamesGrid()}</div>
+  </div>`;
+  const inp = root.querySelector("[data-gq]");
+  inp.oninput = () => { S.gameQ = inp.value; clearTimeout(inp._t); inp._t = setTimeout(() => { const g = root.querySelector("[data-ggrid]"); if (g) g.innerHTML = gamesGrid(); }, 150); };
+}
+function openGameTab(g) {
+  if (!g) return;
+  const w = window.open(g.url, "_blank", "noopener,noreferrer");
+  if (!w && !DESKTOP && !ANDROID) location.href = g.url;
+}
+function playGame(id) {
+  const g = gameById(id);
+  if (!g || g.status !== "on") { toast("Esse jogo não está disponível agora.", "warn"); return; }
+  if (!g.embed) { openGameTab(g); return; }
+  if (GP.game && GP.game.id === id) { showGame(); return; }
+  closeGame(true);
+  GP.game = g; GP.loaded = false;
+  const el = document.createElement("div");
+  el.className = "game-player";
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-label", g.name);
+  el.innerHTML = `<div class="gp-bar"><div class="gp-title">${ic("gamepad", "sm")}<b>${esc(g.name)}</b><small data-gp-st>Carregando…</small></div>
+    <div class="gp-acts"><button class="icon-btn" data-act="game-reload" data-tip="Recarregar">${ic("refresh")}</button><button class="icon-btn" data-act="game-full" data-tip="Tela cheia">${ic("maximize")}</button><button class="icon-btn" data-act="game-tab" data-id="${g.id}" data-tip="Abrir em nova aba">${ic("external")}</button><button class="icon-btn" data-act="game-min" data-tip="Minimizar (o jogo continua)">${ic("minimize")}</button><button class="icon-btn gp-x" data-act="game-close" data-tip="Fechar jogo">${ic("x")}</button></div></div>
+    <div class="gp-stage"><div class="gp-wait"><span class="gp-spin"></span><p>Abrindo ${esc(g.name)}…</p><small data-gp-hint></small><button class="btn sm hidden" data-act="game-tab" data-id="${g.id}" data-gp-alt>${ic("external", "sm")}Abrir em nova aba</button></div></div>`;
+  const fr = document.createElement("iframe");
+  fr.title = g.name;
+  fr.allow = "fullscreen; gamepad; autoplay; clipboard-write; screen-wake-lock";
+  fr.allowFullscreen = true;
+  fr.referrerPolicy = "no-referrer";
+  fr.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-pointer-lock allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads");
+  fr.addEventListener("load", () => {
+    GP.loaded = true; clearTimeout(GP.t);
+    el.classList.add("ready");
+    const st = el.querySelector("[data-gp-st]"); if (st) st.textContent = "";
+  });
+  fr.src = g.url;
+  el.querySelector(".gp-stage").append(fr);
+  document.body.append(el);
+  GP.el = el;
+  clearTimeout(GP.t);
+  GP.t = setTimeout(() => {   // o servidor do jogo pode estar "dormindo" (Render): avisa e oferece a nova aba
+    if (GP.loaded || GP.el !== el) return;
+    el.querySelector("[data-gp-hint]").textContent = "O servidor do jogo pode estar acordando — isso leva até 1 minuto. Se preferir, abra em uma nova aba.";
+    el.querySelector("[data-gp-alt]").classList.remove("hidden");
+  }, 12000);
+  if (S.view === "games") { const gg = $("#gamesView [data-ggrid]"); if (gg) gg.innerHTML = gamesGrid(); renderSide(); }
+}
+function showGame() {
+  if (!GP.el) return;
+  GP.el.classList.remove("min");
+  GP.chip && GP.chip.remove(); GP.chip = null;
+}
+function minimizeGame() {
+  if (!GP.el) return;
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  GP.el.classList.add("min");
+  if (!GP.chip) {
+    const c = document.createElement("button");
+    c.className = "gp-chip";
+    c.dataset.act = "game-resume";
+    c.innerHTML = `${ic("gamepad", "sm")}<span>${esc(GP.game.name)}</span><small>Voltar</small>`;
+    document.body.append(c);
+    GP.chip = c;
+  }
+}
+function closeGame(silent) {
+  if (!GP.el) return;
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  clearTimeout(GP.t);
+  const fr = GP.el.querySelector("iframe");
+  if (fr) fr.src = "about:blank";   // libera memória e a conexão do jogo
+  GP.el.remove(); GP.chip && GP.chip.remove();
+  GP.el = GP.chip = GP.game = null;
+  if (!silent && S.view === "games") { const gg = $("#gamesView [data-ggrid]"); if (gg) gg.innerHTML = gamesGrid(); renderSide(); }
+}
+function askCloseGame() {
+  if (!GP.game) return;
+  modal({
+    title: "Fechar o jogo?", sub: esc(GP.game.name),
+    body: `<p style="color:var(--text-2)">Se você estiver no meio de uma partida, vai sair dela. Para continuar jogando depois, use <b>Minimizar</b>.</p><div class="modal-foot"><button class="btn ghost" data-min>Minimizar</button><button class="btn danger" data-go>Fechar jogo</button></div>`,
+    onMount(m, close) {
+      m.querySelector("[data-go]").onclick = () => { close(); closeGame(); };
+      m.querySelector("[data-min]").onclick = () => { close(); minimizeGame(); };
+    }
+  });
+}
+function gameFullscreen() {
+  const st = GP.el && GP.el.querySelector(".gp-stage");
+  if (!st) return;
+  if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return; }
+  if (st.requestFullscreen) st.requestFullscreen().catch(() => GP.el.classList.toggle("full"));
+  else GP.el.classList.toggle("full");
+}
+function adminGameEdit(id) {
+  const g = id ? gameById(id) : null;
+  const v = g || { name: "", url: "https://", category: "", desc: "", img: "", status: "on", embed: true, order: (S.games || []).length + 1 };
+  modal({
+    title: g ? "Editar jogo" : "Adicionar jogo", sub: g ? esc(g.name) : "Ele aparece para todo mundo na aba Jogos",
+    body: `<label class="field"><span>Nome</span><input data-f="name" maxlength="60" value="${esc(v.name)}" placeholder="Ex.: Bunker 9"></label>
+      <label class="field"><span>Endereço do jogo (https://)</span><input data-f="url" maxlength="400" value="${esc(v.url)}" inputmode="url" placeholder="https://meujogo.onrender.com"></label>
+      <div class="form-2"><label class="field"><span>Categoria</span><input data-f="category" maxlength="30" value="${esc(v.category)}" placeholder="Ex.: Ação, Corrida" list="gameCatList"><datalist id="gameCatList">${gameCats().map(c => `<option value="${esc(c)}">`).join("")}</datalist></label>
+      <label class="field"><span>Ordem</span><input data-f="order" type="number" min="0" max="999" value="${+v.order || 0}"></label></div>
+      <label class="field"><span>Descrição</span><textarea data-f="desc" maxlength="300" placeholder="Uma ou duas frases sobre o jogo">${esc(v.desc)}</textarea></label>
+      <label class="field"><span>Imagem de capa (link https://, opcional)</span><input data-f="img" maxlength="400" value="${esc(v.img)}" placeholder="Deixe vazio para gerar uma capa automática"></label>
+      <span class="label">Situação</span><div class="chips" style="margin:8px 0 14px">${Object.entries(GSTATUS).map(([k, s]) => `<label class="chip${v.status === k ? " on" : ""}"><input type="radio" name="gst" value="${k}" ${v.status === k ? "checked" : ""} hidden>${s[0]}</label>`).join("")}</div>
+      <label class="radio-card${v.embed ? " on" : ""}"><span><b>Abrir dentro da Auryx</b><small>Desmarque se o site do jogo não deixar ser aberto dentro de outro site — aí ele abre em uma nova aba.</small></span><input type="checkbox" data-f="embed" ${v.embed ? "checked" : ""}></label>
+      <div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" data-go>${g ? "Salvar" : "Adicionar"}</button></div>`,
+    onMount(m, close) {
+      m.addEventListener("change", e => {
+        if (e.target.name === "gst") $$(".chips .chip", m).forEach(c => c.classList.toggle("on", c.querySelector("input").checked));
+        if (e.target.dataset.f === "embed") e.target.closest(".radio-card").classList.toggle("on", e.target.checked);
+      });
+      const go = m.querySelector("[data-go]");
+      go.onclick = async () => {
+        const f = k => m.querySelector(`[data-f="${k}"]`);
+        const game = { id: g ? g.id : undefined, name: f("name").value.trim(), url: f("url").value.trim(), category: f("category").value.trim(), desc: f("desc").value.trim(), img: f("img").value.trim(), order: +f("order").value, embed: f("embed").checked, status: m.querySelector('input[name="gst"]:checked').value };
+        go.classList.add("loading");
+        const r = await emit("games:save", { game });
+        go.classList.remove("loading");
+        if (r.error) { toast(r.error, "error"); return; }
+        close(); toast(g ? "Jogo atualizado." : "Jogo adicionado ao catálogo.", "ok");
+        await loadGames(true); renderAdmin(true);
+      };
+    }
+  });
+}
+function adminGameDel(id) {
+  const g = gameById(id);
+  if (!g) return;
+  modal({
+    title: "Remover jogo", sub: esc(g.name),
+    body: `<p style="color:var(--text-2)">Ele some da aba Jogos para todo mundo. O jogo em si não é afetado — dá para adicionar de novo depois.</p><div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn danger" data-go>Remover</button></div>`,
+    onMount(m, close) {
+      m.querySelector("[data-go]").onclick = async () => {
+        const r = await emit("games:delete", { id });
+        if (r.error) { toast(r.error, "error"); return; }
+        close(); toast("Jogo removido do catálogo.", "ok");
+        await loadGames(true); renderAdmin(true);
+      };
+    }
+  });
 }
 function adminApprove(id) {
   const o = S.orders.get(id);
@@ -1693,6 +1910,10 @@ function connect() {
   });
   sock.on("order:update", ({ order }) => onOrderUpdate(order));
   sock.on("order:new", ({ order }) => { if (S.me && S.me.admin) { sfx("mention"); toast(`Novo pedido: ${order.user ? order.user.username : "?"} — plano ${order.plan}`, "info", 5000); } });
+  sock.on("games:changed", async () => {
+    if (S.view === "games") { if (await loadGames(true) && S.view === "games") { renderGamesView(); renderSide(); } }
+    else S.games = null;
+  });
   sock.on("plan:revoked", ({ reason }) => toast(`Seu plano foi removido pela equipe. Motivo: ${reason}`, "warn", 8000));
   sock.on("friend:update", ({ userId, state, user: u }) => {
     if (u) S.users.set(u.id, u);
@@ -1801,6 +2022,22 @@ function connect() {
   sock.on("voice:state", onVoiceState);
   sock.on("voice:leave", onVoiceLeave);
   sock.on("voice:signal", onSignal);
+  // alguém da call caiu e voltou: só troca o "endereço" da conexão, sem desligar
+  sock.on("voice:resock", ({ old, sock: ns, userId }) => {
+    const p = V.peers.get(old);
+    if (p) {
+      V.peers.delete(old);
+      p.sock = ns;
+      p.polite = S.socket.id < ns;
+      V.peers.set(ns, p);
+      if (["failed", "disconnected"].includes(p.pc.connectionState)) { try { p.pc.restartIce(); } catch {} }
+    }
+    const st = S.voice.get(userId);
+    if (st && st.sock === old) st.sock = ns;
+    if (V.viewers.delete(old)) V.viewers.add(ns);
+    if (V.granted.has(old)) { V.granted.set(ns, V.granted.get(old)); V.granted.delete(old); }
+    if (V.controlling && V.controlling.sock === old) V.controlling.sock = ns;
+  });
   sock.on("act", onAct);
   sock.on("act:sum", ({ channelId, type }) => { if (type) S.acts.set(channelId, type); else S.acts.delete(channelId); schedule("side"); });
   sock.on("act:ev", ev => { if (V.actEl && V.actEl._onEv) V.actEl._onEv(ev); });
@@ -1808,9 +2045,26 @@ function connect() {
   sock.on("voice:kicked", ({ reason } = {}) => { teardownVoice(); if (reason) toast(reason, "warn", 5000); renderAll(); });
 }
 
+// Volta depois de uma queda: retoma a mesma chamada (o servidor guardou o lugar por 60 s)
+async function resumeVoice(cid) {
+  const r = await emit("voice:resume", { oldSock: V.mySock, channelId: cid });
+  if (r.error) { teardownVoice(true); if (chan(cid)) joinVoice(cid); return; }
+  V.mySock = S.socket.id;
+  if (r.now) S.clockOff = r.now - Date.now();
+  for (const p of V.peers.values()) p.polite = S.socket.id < p.sock;
+  for (const p of [...V.peers.values()]) if (!r.peers.some(x => x.sock === p.sock)) closePeer(p);
+  for (const pv of r.peers) {
+    const p = V.peers.get(pv.sock);
+    if (p && ["failed", "closed"].includes(p.pc.connectionState)) closePeer(p);
+    if (!p || p.pc.connectionState === "closed" || p.pc.connectionState === "failed") createPeer(pv.sock, pv.userId, true);
+    else if (p.pc.connectionState === "disconnected") { try { p.pc.restartIce(); } catch {} }
+  }
+  if (r.act) { V.act = r.act.type ? r.act : null; if (!V.act) destroyAct(); }
+  callBackground(true);
+  renderAll();
+}
 function onReady(d) {
   const rejoin = V.channelId;
-  if (rejoin) teardownVoice(true);
   S.me = d.me;
   S.users = new Map(d.users.map(u => [u.id, u]));
   S.servers = new Map(d.servers.map(s => [s.id, s]));
@@ -1835,12 +2089,17 @@ function onReady(d) {
   }
   if (S.channelId && chan(S.channelId) && (isDm(S.channelId) || S.servers.has(S.serverId))) openChannel(S.channelId, false);
   else if (!first && S.view === "friends") goFriends();
+  else if (!first && S.view === "games") goGames();       // reconectou: continua na mesma tela
+  else if (!first && S.view === "premium") goPremium();
+  else if (!first && S.view === "admin" && S.me.admin) goAdmin();
+  else if (!first && S.view === "discover") goDiscover();
   else if (first) {
     const last = store.get("last", {});
-    if (last.server && S.servers.has(last.server)) openServer(last.server); else goHome();
+    if (last.server && S.servers.has(last.server)) openServer(last.server); else if (last.view === "games") goGames(); else goHome();
   } else goHome();
   renderAll();
-  if (rejoin && chan(rejoin)) joinVoice(rejoin);
+  if (rejoin && chan(rejoin)) resumeVoice(rejoin);
+  else if (rejoin) teardownVoice();
   if (S.openFriends) { S.openFriends = false; goFriends(); }
   if (S.openUrl) { const u = S.openUrl; S.openUrl = null; setTimeout(() => openFromUrl(u), 600); }
   if (first) setupPush(false);
@@ -2044,6 +2303,7 @@ async function joinVoice(cid) {
     if (!V.loop) V.loop = setInterval(meterTick, 90);
     if (!V.statsTimer) V.statsTimer = setInterval(statsTick, 2000);
     sfx("join");
+    V.mySock = S.socket.id;
     callBackground(true);
   } catch (e) {
     toast(e.message || "Não foi possível entrar na sala.", "error");
@@ -2423,6 +2683,17 @@ async function setupPush(ask) {
     return !r.error;
   } catch (e) { console.warn("[push]", e); return false; }
 }
+// o app abriu da cópia guardada e o servidor tem versão nova: oferece atualizar (sem interromper a call)
+function showUpdateBar() {
+  if ($("#updBar")) return;
+  const el = document.createElement("div");
+  el.id = "updBar";
+  el.className = "upd-bar";
+  el.innerHTML = `${ic("sparkles", "sm")}<span>Nova versão da Auryx Nexavória disponível</span><button class="btn sm primary" type="button">Atualizar</button><button class="icon-btn" type="button" aria-label="Depois">${ic("x", "sm")}</button>`;
+  el.querySelector(".btn").onclick = () => { if (V.channelId && !confirm("Atualizar agora vai sair da chamada. Continuar?")) return; location.reload(); };
+  el.querySelector(".icon-btn").onclick = () => el.remove();
+  document.body.append(el);
+}
 function openFromUrl(url) {
   try {
     const u = new URL(url, location.origin), c = u.searchParams.get("c"), a = u.searchParams.get("abrir");
@@ -2430,6 +2701,7 @@ function openFromUrl(url) {
     else if (c && chan(c)) openChannel(c);
     else if (a === "amigos") goFriends();
     else if (a === "premium") goPremium();
+    else if (a === "jogos") goGames();
   } catch {}
 }
 async function applyScreenQuality() {
@@ -4308,6 +4580,17 @@ const ACTIONS = {
   "open-ticket": a => openTicket(a.dataset.id),
   "admin-tab": a => { S.adminTab = a.dataset.tab; renderAdmin(true); },
   "admin-filter": a => { S.adminFilter = a.dataset.f; renderAdmin(true); },
+  games: () => goGames(),
+  "games-cat": a => { S.gameCat = a.dataset.cat || ""; if (S.view !== "games") goGames(); else { renderGamesView(); renderSide(); } },
+  "game-play": a => playGame(a.dataset.id),
+  "game-tab": a => openGameTab(gameById(a.dataset.id) || GP.game),
+  "game-resume": () => showGame(),
+  "game-min": () => minimizeGame(),
+  "game-close": () => askCloseGame(),
+  "game-full": () => gameFullscreen(),
+  "game-reload": () => { const f = GP.el && GP.el.querySelector("iframe"); if (f) { GP.el.classList.remove("ready"); GP.loaded = false; f.src = GP.game.url; } },
+  "admin-game-edit": a => adminGameEdit(a.dataset.id),
+  "admin-game-del": a => adminGameDel(a.dataset.id),
   "receipt-view": a => { const lb = document.createElement("div"); lb.className = "lightbox"; lb.innerHTML = `<img src="${esc(a.dataset.src)}" alt="Comprovante">`; lb.onclick = () => lb.remove(); document.body.append(lb); },
   "order-review": async a => { const r = await emit("order:review", { id: a.dataset.id }); if (r.error) toast(r.error, "error"); },
   "order-approve": a => adminApprove(a.dataset.id),
@@ -4479,8 +4762,13 @@ function wire() {
     }
     if (!document.hidden) maybeRead();
   });
-  if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", e => { if (e.data && e.data.type === "open") openFromUrl(e.data.url); });
+  if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", e => {
+    if (e.data && e.data.type === "open") openFromUrl(e.data.url);
+    if (e.data && e.data.type === "update") showUpdateBar();
+  });
   window.__axOpen = url => openFromUrl(url);   // usado pelo app Android ao tocar numa notificação
+  // fechou a aba/janela de verdade: sai da sala na hora (queda de conexão é diferente: o lugar fica guardado)
+  window.addEventListener("pagehide", e => { if (!e.persisted && V.channelId && S.socket && S.socket.connected) S.socket.emit("voice:leave", {}); });
 
   // rolagem das mensagens
   const mb = box();
@@ -4716,6 +5004,15 @@ function boot() {
   if (S.token) connect(); else showAuth();
 }
 // Nunca deixar a tela de carregamento presa: se algo falhar ou o servidor demorar, mostra o login.
-setTimeout(() => { if (!S.ready && $("#auth").classList.contains("hidden")) showAuth(LOCAL ? "" : "O servidor está demorando para responder. Se ele estava dormindo (Render gratuito), aguarde uns segundos e tente entrar."); }, 9000);
+// Logado e o servidor demorando (ele "dorme" no plano grátis do Render): avisa na tela de abertura e continua tentando.
+// Sem login salvo: mostra a tela de entrar. Nunca fica uma tela escura parada.
+setTimeout(() => {
+  if (S.ready || !$("#auth").classList.contains("hidden")) return;
+  if (!S.token || LOCAL) { showAuth(LOCAL ? "" : "O servidor está demorando para responder. Aguarde uns segundos e tente entrar."); return; }
+  const b = $("#boot");
+  if (b && !b.querySelector(".boot-msg")) b.insertAdjacentHTML("beforeend", `<p class="boot-msg">Acordando o servidor… pode levar até 1 minuto na primeira abertura.</p><button class="btn sm ghost boot-out" type="button">Sair da conta</button>`);
+  const out = b && b.querySelector(".boot-out");
+  if (out) out.onclick = () => { store.del("token"); location.reload(); };
+}, 4000);
 try { boot(); } catch (e) { console.error(e); try { showAuth("Erro ao iniciar: " + e.message); } catch {} }
 })();
