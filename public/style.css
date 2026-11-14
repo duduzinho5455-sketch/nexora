@@ -1344,7 +1344,7 @@ html.reduce-motion .gp-spin { border-top-color: var(--accent); border-right-colo
 /* player de música diminuído: só a imagem e os botões */
 .mm-sep { width: 1px; height: 20px; background: rgba(255,255,255,.12); margin: 0 2px; }
 .act-panel:not(.big) .yt-add, .act-panel:not(.big) .yt-queue, .act-panel:not(.big) .sp-note,
-.act-panel:not(.big) .yt-seek, .act-panel:not(.big) .yt-vol, .act-panel:not(.big) .yt-time, .act-panel:not(.big) .yt-dur { display: none; }
+.act-panel:not(.big) .yt-seek, .act-panel:not(.big) .yt-time, .act-panel:not(.big) .yt-dur { display: none; }
 .act-panel:not(.big) .yt-wrap { padding: 6px; gap: 4px; }
 .act-panel:not(.big) .yt-bar { justify-content: center; }
 .act-panel:not(.big) .yt-player, .act-panel:not(.big) .sp-player { min-height: 0; }
