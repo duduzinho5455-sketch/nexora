@@ -776,7 +776,7 @@ async function renderAdmin(soft) {
     const list = body.querySelector("[data-ulist]");
     const r = await emit("admin:users", { q: S.adminQ || "" });
     if (r.error) { list.innerHTML = esc(r.error); return; }
-    list.innerHTML = r.users.map(u => `<div class="adm-user">${avatar(u, 36)}<div class="who"><b>${esc(u.username)}${u.admin ? ` <span class="ost st-rev">ADM</span>` : ""}</b><small>${esc(u.email || "sem e-mail")}${u.email && !u.emailVerified ? " (não confirmado)" : ""}</small></div><div>${u.plan ? `<span class="ost st-ok">${esc({ plus: "Plus", pro: "Pro", max: "Max" }[u.plan])}</span><small style="display:block;color:var(--muted)">até ${fmtDate(u.until)}</small>` : `<small style="color:var(--muted)">sem plano</small>`}</div><div class="ao-acts">${u.banned ? `<span class="ost st-bad" data-tip="${esc(u.banned.reason || "sem motivo")}">Suspensa</span>` : ""}<button class="btn sm" data-act="admin-grant" data-uid="${u.id}" data-name="${esc(u.username)}">Dar plano</button>${u.plan ? `<button class="btn sm danger" data-act="admin-revoke" data-uid="${u.id}" data-name="${esc(u.username)}">Revogar</button>` : ""}${u.admin ? "" : u.banned ? `<button class="btn sm green" data-act="admin-unban" data-uid="${u.id}" data-name="${esc(u.username)}">Reativar conta</button>` : `<button class="btn sm danger" data-act="admin-ban" data-uid="${u.id}" data-name="${esc(u.username)}">Suspender</button>`}</div></div>`).join("") || `<p style="color:var(--muted)">Ninguém encontrado.</p>`;
+    list.innerHTML = r.users.map(u => `<div class="adm-user">${avatar(u, 36)}<div class="who"><b>${esc(u.username)}${u.admin ? ` <span class="ost st-rev">ADM</span>` : ""}</b><small>${esc(u.email || "sem e-mail")}${u.email && !u.emailVerified ? " (não confirmado)" : ""}</small></div><div>${u.plan ? `<span class="ost st-ok">${esc({ plus: "Plus", pro: "Pro", max: "Max" }[u.plan])}</span><small style="display:block;color:var(--muted)">até ${fmtDate(u.until)}</small>` : `<small style="color:var(--muted)">sem plano</small>`}</div><div class="ao-acts">${u.banned ? `<span class="ost st-bad" data-tip="${esc(u.banned.reason || "sem motivo")}">Suspensa</span>` : ""}${u.admin ? "" : `<button class="btn sm" data-act="admin-pass" data-uid="${u.id}" data-name="${esc(u.username)}">🔑 Senha</button>`}<button class="btn sm" data-act="admin-grant" data-uid="${u.id}" data-name="${esc(u.username)}">Dar plano</button>${u.plan ? `<button class="btn sm danger" data-act="admin-revoke" data-uid="${u.id}" data-name="${esc(u.username)}">Revogar</button>` : ""}${u.admin ? "" : u.banned ? `<button class="btn sm green" data-act="admin-unban" data-uid="${u.id}" data-name="${esc(u.username)}">Reativar conta</button>` : `<button class="btn sm danger" data-act="admin-ban" data-uid="${u.id}" data-name="${esc(u.username)}">Suspender</button>`}</div></div>`).join("") || `<p style="color:var(--muted)">Ninguém encontrado.</p>`;
   } else if (tab === "servers") {
     const f = S.adminSrvF || "active";
     body.innerHTML = `<div class="adm-games-head"><div class="chips"><button class="chip${f === "active" ? " on" : ""}" data-act="admin-srv-f" data-f="active">Ativos</button><button class="chip${f === "blocked" ? " on" : ""}" data-act="admin-srv-f" data-f="blocked">🔒 Bloqueados <b data-bcount></b></button></div><form class="add-box" data-ssearch style="flex:1;max-width:380px"><input placeholder="Buscar servidor ou dono" value="${esc(S.adminSrvQ || "")}"><button class="btn primary">Buscar</button></form></div><div data-slist><p style="color:var(--muted)">Carregando…</p></div>`;
@@ -879,6 +879,16 @@ function adminSrvDelete(id, name) {
 function adminBan(uid, name) {
   admReason("Suspender conta", esc(name), "Motivo (a pessoa vai ver)", "Suspender", "Ex.: golpe / ofensas / spam",
     reason => admRun("admin:ban", { userId: uid, reason }, `Conta de ${name} suspensa.`));
+}
+function adminSetPass(uid, name) {
+  modal({
+    title: "🔑 Alterar senha", sub: esc(name),
+    body: `<p style="color:var(--text-2)">A pessoa vai sair de todos os aparelhos e precisará entrar com a nova senha. Avise ela qual é.</p><label class="field"><span>Nova senha (8+ caracteres, letras e números)</span><input data-p type="text" maxlength="128" autocomplete="off" spellcheck="false"></label><div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" data-go>Salvar senha</button></div>`,
+    onMount(m, close) {
+      const go = m.querySelector("[data-go]");
+      go.onclick = async () => { go.classList.add("loading"); const ok = await admRun("admin:setpass", { userId: uid, password: m.querySelector("[data-p]").value }, `Senha de ${name} alterada.`); go.classList.remove("loading"); if (ok) close(); };
+    }
+  });
 }
 function adminBroadcast() {
   modal({
@@ -4737,6 +4747,7 @@ const ACTIONS = {
   "admin-srv-block": a => adminSrvBlock(a.dataset.id, a.dataset.name),
   "admin-srv-unblock": a => admRun("admin:server:unblock", { serverId: a.dataset.id }, "Servidor desbloqueado e de volta para os membros."),
   "admin-srv-del": a => adminSrvDelete(a.dataset.id, a.dataset.name),
+  "admin-pass": a => adminSetPass(a.dataset.uid, a.dataset.name),
   "admin-ban": a => adminBan(a.dataset.uid, a.dataset.name),
   "admin-unban": a => admRun("admin:unban", { userId: a.dataset.uid }, `Conta de ${a.dataset.name} reativada.`),
   "admin-broadcast": () => adminBroadcast(),

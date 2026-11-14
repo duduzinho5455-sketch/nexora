@@ -1417,6 +1417,23 @@ io.on("connection", socket => {
     audit("user:ban", u.id, { reason });
     save();
   });
+  on("admin:setpass", async ({ userId, password }) => {
+    const adm = requireAdmin();
+    const u = db.users[userId];
+    if (!u) fail("Usuário não encontrado.");
+    if (isAdmin(u) && u.id !== adm.id) fail("Não dá para trocar a senha de outro ADM.");
+    password = typeof password === "string" ? password : "";
+    if (password.length < 8 || password.length > 128 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) fail("A nova senha precisa ter 8+ caracteres, com letras e números.");
+    u.salt = crypto.randomBytes(16).toString("hex");
+    u.hash = (await scrypt(password, u.salt)).toString("hex");
+    failKey.delete(u.id);
+    if (u.id !== adm.id) {
+      for (const [k, v] of Object.entries(db.sessions)) if (v.userId === u.id) delete db.sessions[k];   // sai de todos os aparelhos
+      io.in("u:" + u.id).disconnectSockets(true);
+    }
+    audit("user:setpass", u.id, {});
+    save();
+  });
   on("admin:unban", ({ userId }) => {
     requireAdmin();
     const u = db.users[userId];
