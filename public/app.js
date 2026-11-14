@@ -1,5 +1,5 @@
 /* =====================================================================
-   NEXORA — cliente
+   Auryx Nexavória — cliente
    Sem frameworks: renderização com delegação de eventos e agendamento
    por requestAnimationFrame. Voz/vídeo/tela via WebRTC em malha P2P.
    ===================================================================== */
@@ -74,6 +74,9 @@ const P = {
   userCheck: '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="m17 11 2 2 4-4"/>',
   message: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   steam: '<circle cx="12" cy="12" r="10"/><circle cx="15.5" cy="9.5" r="2.5"/><path d="m2.5 14 5 2a3 3 0 1 0 1.6-3.9l3.7-2.6"/>',
+  gem: '<path d="M6 3h12l4 6-10 12L2 9z"/><path d="M11 3 8 9l4 12 4-12-3-6M2 9h20"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
+  receipt: '<path d="M4 2v20l3-2 3 2 2-2 2 2 3-2 3 2V2l-3 2-3-2-2 2-2-2-3 2z"/><path d="M8 8h8M8 12h8M8 16h5"/>',
   clip: '<path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/>',
   file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
@@ -87,10 +90,12 @@ const P = {
   sparkles: '<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/>'
 };
 const ic = (n, c = "") => `<svg class="ic ${c}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ""}</svg>`;
-const LOGO = '<svg viewBox="0 0 48 48" aria-hidden="true"><defs><linearGradient id="nxg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><path d="M14 35V13l20 22V13" fill="none" stroke="url(#nxg)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+// cada logo ganha um id de degradê próprio (um logo escondido não "apaga" os outros)
+let logoN = 0;
+const LOGO = () => { const id = "axg" + (++logoN); return `<svg viewBox="0 0 48 48" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><path d="M11 37 24 11l13 26M16.5 28h15" fill="none" stroke="url(#${id})" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`; };
 
 const DESKTOP = window.nexoraDesktop || null;
-const DESKTOP_URL = "https://github.com/duduzinho5455-sketch/nexora/releases/latest/download/NEXORA-Setup.exe";
+const DESKTOP_URL = "https://github.com/duduzinho5455-sketch/nexora/releases/latest/download/Auryx-Nexavoria-Setup.exe";
 let installPrompt = null;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPrompt = e; });
 window.addEventListener("appinstalled", () => { installPrompt = null; });
@@ -99,7 +104,7 @@ const COLORS = ["#7c5cff", "#22d3ee", "#f472b6", "#34d399", "#fbbf24", "#f87171"
 const STATUS = { online: "Disponível", idle: "Ausente", dnd: "Não perturbe", invisible: "Invisível", offline: "Offline" };
 const EMOJIS = "😀 😂 🤣 😊 😍 🥰 😎 🤩 🥳 😅 😭 😤 😡 🤯 😱 🤔 🫡 😴 🙄 😏 🤡 💀 👻 👽 🤖 💩 👍 👎 👏 🙌 🙏 🤝 💪 👀 🫶 ❤️ 🧡 💛 💚 💙 💜 🖤 💯 🔥 ✨ ⚡ 🎉 🎮 🏆 🎧 🍕 🍔 ☕ 🍺 🚀 ✅ ❌ ⭐ 🌙".split(" ");
 const QUICK = ["👍", "😂", "❤️"];
-const SYS = { join: "entrou no servidor. Deem as boas-vindas! 🎉", gcreate: "criou o grupo. 🎉", gjoin: "entrou no grupo. 👋", gleave: "saiu do grupo.", gname: "mudou o nome do grupo." };
+const SYS = { ocreate: "abriu este pedido. A equipe vai conferir se o Pix caiu na conta.", oreview: "colocou o pedido em análise. 🔎", oapprove: "aprovou o pagamento e liberou o plano! 🎉", oreject: "recusou o pedido.", join: "entrou no servidor. Deem as boas-vindas! 🎉", gcreate: "criou o grupo. 🎉", gjoin: "entrou no grupo. 👋", gleave: "saiu do grupo.", gname: "mudou o nome do grupo." };
 const QUALITY = {
   "720": { label: "720p", sub: "30 FPS · leve", w: 1280, h: 720, fps: 30, br: 2500000 },
   "720-60": { label: "720p", sub: "60 FPS · jogo leve", w: 1280, h: 720, fps: 60, br: 4500000, tag: "COOP" },
@@ -135,6 +140,7 @@ const S = {
   volumes: store.get("volumes", {}), localMute: {}, order: store.get("order", []),
   pendingInvite: null, voiceLimit: 12, ready: false,
   friends: new Map(), dms: new Map(), friendsTab: "online", steamAuto: false,
+  orders: new Map(), tickets: new Map(), plans: [], adminTab: "orders", adminFilter: "open",
   acts: new Map(), clockOff: 0
 };
 const V = {
@@ -148,12 +154,27 @@ const V = {
 
 const srv = () => S.servers.get(S.serverId);
 function chan(cid = S.channelId) {
+  if (isTicket(cid)) {
+    const o = S.orders.get(cid.slice(2));
+    if (!o) return null;
+    let t = S.tickets.get(cid);
+    if (!t) S.tickets.set(cid, (t = { id: cid, type: "text", ticket: true, last: o.last || null }));
+    t.order = o;
+    t.name = `Pedido ${o.plan}`;
+    t.topic = `${fmtMoney(o.amount)} · ${ORDER_STATUS[o.status][0]}`;
+    return t;
+  }
   const d = S.dms.get(cid);
   if (d) { d.type = "text"; d.dm = true; if (!d.group) d.name = user(d.userId).username; d.topic = ""; return d; }
   for (const s of S.servers.values()) { const c = s.channels.find(x => x.id === cid); if (c) return c; }
   return null;
 }
 const isDm = cid => typeof cid === "string" && (cid.startsWith("d.") || cid.startsWith("g."));
+const isTicket = cid => typeof cid === "string" && cid.startsWith("t.");
+const fmtMoney = c => "R$ " + (c / 100).toFixed(2).replace(".", ",");
+const ORDER_STATUS = { pending: ["Pendente", "st-pend"], review: ["Em análise", "st-rev"], approved: ["Aprovado", "st-ok"], rejected: ["Recusado", "st-bad"] };
+const PLAN_RANK = { plus: 1, pro: 2, max: 3 };
+const myRank = () => (S.me && PLAN_RANK[S.me.plan]) || 0;
 const groupTitle = d => d.name || d.members.filter(id => !S.me || id !== S.me.id).map(id => user(id).username).slice(0, 4).join(", ") || "Grupo";
 const dmTitle = d => (d.group ? groupTitle(d) : user(d.userId).username);
 function groupAvatar(d, size = 32) {
@@ -200,9 +221,9 @@ function nameHTML(u) {
 const csText = u => (u.cs ? `${u.cs.e ? esc(u.cs.e) + " " : ""}${esc(u.cs.t || "")}` : "");
 function badges(u) {
   const b = [];
-  if (u.created && u.created < Date.UTC(2027, 0, 1)) b.push(["⭐", "Fundador — chegou no começo do NEXORA"]);
-  if ([...S.servers.values()].some(s => s.ownerId === u.id)) b.push(["👑", "Dono de servidor"]);
-  if (u.banner || u.theme || u.fx || u.pfx) b.push(["⚡", "Perfil Turbo"]);
+  if (u.plan) b.push([{ plus: "💠", pro: "💎", max: "👑" }[u.plan] || "💠", `Assinante ${{ plus: "Plus", pro: "Pro", max: "Max" }[u.plan] || ""}`]);
+  if (u.created && u.created < Date.UTC(2027, 0, 1)) b.push(["⭐", "Fundador — chegou no começo da Auryx Nexavória"]);
+  if ([...S.servers.values()].some(s => s.ownerId === u.id)) b.push(["🏰", "Dono de servidor"]);
   if (u.steam) b.push(["🎮", "Steam conectada"]);
   return b.length ? `<div class="badges">${b.map(([e, t]) => `<span data-tip="${esc(t)}">${e}</span>`).join("")}</div>` : "";
 }
@@ -211,13 +232,14 @@ function bannerStyle(u) {
   const t = u.theme || [u.banner && u.banner.startsWith("#") ? u.banner : u.color || "#7c5cff", null];
   return `background:linear-gradient(135deg, ${esc(t[0])}, ${esc(t[1] || `color-mix(in srgb, ${t[0]} 30%, #000)`)})`;
 }
-function uploadBlob(file) {
+function uploadBlob(file, kind) {
   return new Promise((resolve, reject) => {
-    if (LOCAL) return reject(new Error("Disponível na versão online do NEXORA."));
-    if (file.size > 8 * 1024 * 1024) return reject(new Error("Arquivo muito grande (máximo 8 MB)."));
+    if (LOCAL) return reject(new Error("Disponível na versão online da Auryx Nexavória."));
+    if (file.size > [8, 15, 25, 50][kind === "receipt" ? 0 : myRank()] * 1024 * 1024) return reject(new Error("Arquivo muito grande para o seu plano."));
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/upload");
     xhr.setRequestHeader("authorization", "Bearer " + S.token);
+    if (kind === "receipt") xhr.setRequestHeader("x-private", "receipt");
     xhr.setRequestHeader("x-file-name", encodeURIComponent(file.name || "imagem"));
     xhr.setRequestHeader("content-type", file.type || "application/octet-stream");
     xhr.onload = () => { let j = {}; try { j = JSON.parse(xhr.responseText); } catch {} if (xhr.status === 200 && j.url) resolve(j); else reject(new Error(j.error || "Falha no envio.")); };
@@ -329,6 +351,15 @@ function renderRail() {
     const flag = mentions ? `<b class="badge">${mentions > 99 ? "99+" : mentions}</b>` : V.serverId === s.id ? `<span class="vc-dot">${ic("volume")}</span>` : "";
     return `<div class="rail-item${inServer && s.id === S.serverId ? " on" : ""}${unread ? " unread" : ""}" data-act="server" data-id="${s.id}" data-tip="${esc(s.name)}" role="button" tabindex="0" draggable="true"><span class="pill"></span>${serverIcon(s)}${flag}</div>`;
   }).join("");
+  const premView = S.view === "premium" || (S.view === "chat" && isTicket(S.channelId) && !(S.me && S.me.admin));
+  $('.rail-item[data-act="premium"]').classList.toggle("on", premView);
+  const admBtn = $('.rail-item[data-act="admin"]');
+  admBtn.classList.toggle("hidden", !(S.me && S.me.admin));
+  admBtn.classList.toggle("on", S.view === "admin" || (S.view === "chat" && isTicket(S.channelId) && !!(S.me && S.me.admin)));
+  let tkPings = 0;
+  for (const [cid, n] of S.mentions) if (isTicket(cid)) tkPings += n;
+  for (const b of [$('.rail-item[data-act="premium"]'), admBtn]) { const ob = b.querySelector(".badge"); if (ob) ob.remove(); }
+  if (tkPings) (S.me && S.me.admin ? admBtn : $('.rail-item[data-act="premium"]')).insertAdjacentHTML("beforeend", `<b class="badge">${tkPings}</b>`);
   const home = $(".rail-item.home");
   const inHome = S.view === "home" || S.view === "friends" || (S.view === "chat" && isDm(S.channelId));
   home.classList.toggle("on", inHome);
@@ -364,6 +395,18 @@ function renderSide() {
   if (!(S.view === "chat" || S.view === "stage") || !s) {
     head.className = "side-head";
     delete head.dataset.act;
+    if (S.view === "premium" || S.view === "admin" || (S.view === "chat" && isTicket(S.channelId))) {
+      const adm = S.me.admin && S.view !== "premium";
+      head.innerHTML = `<span class="title">${adm ? "Painel ADM" : "Premium"}</span>`;
+      const list = [...S.orders.values()].filter(o => (adm ? true : o.uid === S.me.id)).sort((a, b) => ((b.last && b.last.ts) || b.created) - ((a.last && a.last.ts) || a.created)).slice(0, 40);
+      body.innerHTML = (adm
+        ? `<div class="ch${S.view === "admin" ? " on" : ""}" data-act="admin" role="button" tabindex="0">${ic("shield")}<span class="ch-name">Painel ADM</span></div><div class="ch" data-act="premium" role="button" tabindex="0">${ic("gem")}<span class="ch-name">Ver planos</span></div>`
+        : `<div class="ch${S.view === "premium" ? " on" : ""}" data-act="premium" role="button" tabindex="0">${ic("gem")}<span class="ch-name">Planos</span></div>`) +
+        `<div class="cat"><span>${adm ? "Atendimentos" : "Meus atendimentos"}</span></div>` +
+        (list.length ? list.map(o => { const n = S.mentions.get("t." + o.id) || 0; return `<div class="dm-item${S.channelId === "t." + o.id ? " on" : ""}${n ? " unread" : ""}" data-act="open-ticket" data-id="${o.id}" role="button" tabindex="0"><span class="av" style="--c:${{ plus: "#22d3ee", pro: "#7c5cff", max: "#f59e0b" }[o.tier]};--s:32px">${ic("gem", "sm")}</span><div class="who"><b>${adm && o.user ? esc(o.user.username) + " · " : ""}${esc(o.plan)}</b><small>${ORDER_STATUS[o.status][0]} · ${fmtMoney(o.amount)}</small></div>${n ? `<b class="badge">${n}</b>` : ""}</div>`; }).join("")
+          : `<p style="padding:0 8px;color:var(--muted);font-size:13px;margin:0">${adm ? "Abra o painel para carregar os pedidos." : "Nenhum pedido ainda."}</p>`);
+      return;
+    }
     if (S.view === "discover") {
       head.innerHTML = `<span class="title">Explorar</span>`;
       body.innerHTML = `<div class="cat">Descobrir</div><div class="ch on">${ic("compass")}<span class="ch-name">Comunidades</span></div><div class="cat">Dica</div><p style="padding:0 8px;color:var(--muted);font-size:13.5px;margin:0">Torne seu servidor público em <b>Configurações do servidor</b> para ele aparecer aqui.</p>`;
@@ -413,7 +456,14 @@ function renderTop() {
   const icon = $("#topIcon"), title = $("#topTitle"), topic = $("#topTopic"), actions = $("#topActions");
   const c = chan();
   const search = `<button class="icon-btn" data-act="switcher" data-tip="Ir para… (Ctrl+K)">${ic("search")}</button>`;
-  if (S.view === "chat" && c && c.dm && c.group) {
+  if (S.view === "chat" && c && c.ticket) {
+    const o = c.order, st = ORDER_STATUS[o.status];
+    icon.innerHTML = ic("gem");
+    title.textContent = `Pedido ${o.plan} · ${fmtMoney(o.amount)}`;
+    topic.innerHTML = `<span class="ost ${st[1]}">${st[0]}</span>${S.me.admin && o.user ? ` · ${esc(o.user.username)}` : " · Atendimento com a equipe"}`;
+    const open = o.status === "pending" || o.status === "review";
+    actions.innerHTML = (S.me.admin && open ? `${o.status === "pending" ? `<button class="btn sm" data-act="order-review" data-id="${o.id}">Em análise</button>` : ""}<button class="btn sm green" data-act="order-approve" data-id="${o.id}">Aprovar</button><button class="btn sm danger" data-act="order-reject" data-id="${o.id}">Recusar</button>` : "") + `<button class="icon-btn" data-act="premium" data-tip="Central de Pagamentos">${ic("gem")}</button>${search}`;
+  } else if (S.view === "chat" && c && c.dm && c.group) {
     icon.innerHTML = ic("users");
     title.textContent = groupTitle(c);
     topic.textContent = `${c.members.length} membros`;
@@ -439,6 +489,10 @@ function renderTop() {
     icon.innerHTML = ic("compass"); title.textContent = "Explorar"; topic.textContent = "Comunidades públicas"; actions.innerHTML = search;
   } else if (S.view === "friends") {
     icon.innerHTML = ic("users"); title.textContent = "Amigos"; topic.textContent = ""; actions.innerHTML = search;
+  } else if (S.view === "premium") {
+    icon.innerHTML = ic("gem"); title.textContent = "Central de Pagamentos"; topic.textContent = "Planos Plus, Pro e Max"; actions.innerHTML = search;
+  } else if (S.view === "admin") {
+    icon.innerHTML = ic("shield"); title.textContent = "Painel ADM"; topic.textContent = "Pagamentos, planos e histórico"; actions.innerHTML = search;
   } else {
     icon.innerHTML = ic("users"); title.textContent = "Início"; topic.textContent = ""; actions.innerHTML = search;
   }
@@ -489,13 +543,13 @@ function renderVoicePanel() {
 function renderTitle() {
   let m = 0, u = false;
   for (const s of S.servers.values()) { const r = serverUnread(s); m += r.mentions; u = u || r.unread; }
-  document.title = (m ? `(${m}) ` : u ? "• " : "") + "NEXORA";
+  document.title = (m ? `(${m}) ` : u ? "• " : "") + "Auryx Nexavória";
 }
 
 /* ------------------------------------------------------------------ */
 /* Navegação                                                           */
 /* ------------------------------------------------------------------ */
-const VIEWS = { chat: "#chatView", stage: "#stageView", home: "#homeView", discover: "#discoverView", friends: "#friendsView" };
+const VIEWS = { chat: "#chatView", stage: "#stageView", home: "#homeView", discover: "#discoverView", friends: "#friendsView", premium: "#premiumView", admin: "#adminView" };
 function setView(view) {
   if (S.view === "chat" && S.channelId) S.drafts[S.channelId] = $("#input").value;
   const changed = S.view !== view;
@@ -528,7 +582,7 @@ function goFriends(tab) {
   if (S.friendsTab === "add") setTimeout(() => $("#addFriendInput")?.focus(), 80);
 }
 function openDM(id) {
-  const d = S.dms.get(id);
+  const d = S.dms.get(id) || (isTicket(id) ? chan(id) : null);
   if (!d) return;
   if (S.view === "chat" && S.channelId) S.drafts[S.channelId] = $("#input").value;
   S.serverId = null;
@@ -546,6 +600,237 @@ async function startDM(userId) {
   if (!S.dms.has(r.dm.id)) S.dms.set(r.dm.id, r.dm);
   openDM(r.dm.id);
 }
+/* ------------------------------------------------------------------ */
+/* Central de Pagamentos: planos, Pix, comprovante e atendimento       */
+/* O plano só é liberado quando um ADM confere o Pix e aprova.         */
+/* ------------------------------------------------------------------ */
+const statusTag = s => { const st = ORDER_STATUS[s] || ["?", ""]; return `<span class="ost ${st[1]}">${st[0]}</span>`; };
+const fmtDate = ts => new Date(ts).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" });
+function onOrderUpdate(o) {
+  const prev = S.orders.get(o.id);
+  S.orders.set(o.id, o);
+  if (prev && prev.status !== o.status && o.uid === S.me.id) {
+    if (o.status === "approved") { toast(`Pagamento aprovado! Plano ${o.plan} liberado. 🎉`, "ok", 6000); confetti(); sfx("live"); }
+    if (o.status === "rejected") toast(`Seu pedido do plano ${o.plan} foi recusado: ${o.reason}`, "warn", 8000);
+    if (o.status === "review") toast(`Seu pedido do plano ${o.plan} está em análise.`, "info");
+  }
+  if (S.view === "premium") renderPremium();
+  if (S.view === "admin") renderAdmin(true);
+  if (S.view === "chat" && S.channelId === "t." + o.id) renderTop();
+  schedule("side");
+}
+async function loadPlans() {
+  const r = await emit("plans:get", {});
+  if (r.error) { toast(r.error, "error"); return false; }
+  S.plans = r.plans;
+  for (const o of r.orders) S.orders.set(o.id, o);
+  return true;
+}
+async function goPremium() {
+  setView("premium");
+  S.serverId = null; S.channelId = null;
+  $("#premiumView").innerHTML = `<div class="page"><div class="hero"><h1>Carregando planos…</h1></div></div>`;
+  renderAll(); updateMini();
+  if (LOCAL) { $("#premiumView").innerHTML = `<div class="page"><div class="empty">${ic("gem")}<p>Os planos Premium funcionam na versão online da Auryx Nexavória.</p></div></div>`; return; }
+  if (await loadPlans()) renderPremium();
+}
+function renderPremium() {
+  const root = $("#premiumView");
+  if (!root || !S.plans.length) return;
+  const mine = S.me.planInfo;
+  const myOrders = [...S.orders.values()].filter(o => o.uid === S.me.id).sort((a, b) => b.created - a.created);
+  const pending = myOrders.find(o => o.status === "pending" || o.status === "review");
+  root.innerHTML = `<div class="page premium">
+    <div class="hero prem-hero"><h1>${ic("gem", "lg")} Auryx Premium</h1><p>${mine ? `Seu plano <b>${esc({ plus: "Plus", pro: "Pro", max: "Max" }[mine.tier])}</b> está ativo até <b>${fmtDate(mine.until)}</b>. Obrigado pelo apoio! 💜` : "Apoie a Auryx Nexavória e desbloqueie selos, perfil turbinado e arquivos maiores."}</p></div>
+    ${pending ? `<div class="prem-alert">${ic("info")}<span>Você tem um pedido <b>${esc(pending.plan)}</b> ${statusTag(pending.status)}. A equipe vai conferir o Pix e responder no atendimento.</span><button class="btn sm" data-act="open-ticket" data-id="${pending.id}">Abrir atendimento</button></div>` : ""}
+    <div class="plans">${S.plans.map(p => {
+      const active = mine && mine.tier === p.tier;
+      return `<div class="plan plan-${p.tier}${p.tier === "pro" ? " featured" : ""}">${p.tier === "pro" ? `<span class="plan-flag">Mais escolhido</span>` : ""}
+        <h3>${esc(p.name)}</h3><div class="price"><b>${fmtMoney(p.price)}</b><small>/mês</small></div>
+        <ul>${p.benefits.map(b => `<li>${ic("check", "sm")}${esc(b)}</li>`).join("")}</ul>
+        <button class="btn ${p.tier === "pro" ? "primary" : ""} big" data-act="buy-plan" data-tier="${p.tier}">${active ? "Renovar por +30 dias" : `Assinar ${esc(p.name)}`}</button></div>`;
+    }).join("")}</div>
+    <div class="section-title">${ic("receipt", "sm")} Meus pedidos</div>
+    ${myOrders.length ? `<div class="orders">${myOrders.map(o => `<div class="order-row"><div class="or-main"><b>Plano ${esc(o.plan)}</b><small>${fmtMoney(o.amount)} · ${fmtDate(o.created)}${o.status === "rejected" && o.reason ? ` · Motivo: ${esc(o.reason)}` : ""}${o.decidedBy ? ` · por ${esc(o.decidedBy)}` : ""}</small></div>${statusTag(o.status)}<button class="btn sm" data-act="open-ticket" data-id="${o.id}">${ic("message", "sm")}Atendimento</button></div>`).join("")}</div>` : `<p style="color:var(--muted)">Nenhum pedido ainda.</p>`}
+    <div class="prem-how"><b>Como funciona</b><ol><li>Escolha o plano e pague pelo Pix (link do Nubank).</li><li>Volte aqui e envie o comprovante.</li><li>Um ADM confere se o valor caiu na conta e libera o plano — você acompanha tudo pelo atendimento.</li></ol></div>
+  </div>`;
+}
+function buyModal(tier) {
+  const p = S.plans.find(x => x.tier === tier);
+  if (!p) return;
+  let receipt = null, step = 1, sending = false;
+  modal({
+    title: `Assinar ${esc(p.name)}`, sub: `${fmtMoney(p.price)} por 30 dias`, cls: "wide",
+    body: `<div class="buy"></div>`,
+    onMount(m, close) {
+      const box = m.querySelector(".buy");
+      const draw = () => {
+        box.innerHTML = `<div class="steps-bar">${["Pagar", "Comprovante", "Pronto"].map((s, i) => `<span class="${i + 1 === step ? "on" : i + 1 < step ? "done" : ""}"><b>${i + 1 < step ? "✓" : i + 1}</b>${s}</span>`).join("")}</div>` +
+          (step === 1 ? `<div class="pay-box"><div class="pay-amount">${fmtMoney(p.price)}</div><p>Pague <b>exatamente esse valor</b> pelo Pix no link oficial de cobrança. Ele abre no seu navegador ou no app do banco.</p>
+              <a class="btn primary big" href="${esc(p.link)}" target="_blank" rel="noopener noreferrer" data-paylink>${ic("arrowRight", "sm")}Abrir cobrança Pix (Nubank)</a>
+              <small>Depois de pagar, volte aqui e clique em <b>Já paguei</b>.</small></div>
+              <div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" data-next>Já paguei →</button></div>`
+          : step === 2 ? `<p style="margin-top:0;color:var(--text-2)">Envie o comprovante do Pix (print ou PDF). Ele fica <b>privado</b>: só você e a equipe ADM conseguem ver.</p>
+              <label class="receipt-drop${receipt ? " has" : ""}">${receipt ? (receipt.preview ? `<img src="${receipt.preview}" alt="">` : ic("file", "lg")) + `<b>${esc(receipt.name)}</b><small>${fmtSize(receipt.size)} · clique para trocar</small>` : `${ic("receipt", "lg")}<b>Escolher comprovante</b><small>PNG, JPG, WEBP ou PDF · até 8 MB</small>`}<input type="file" accept="image/png,image/jpeg,image/webp,application/pdf" hidden></label>
+              <label class="field" style="margin-top:14px"><span>Observação (opcional)</span><textarea data-note maxlength="500" placeholder="Ex.: paguei pela conta do meu irmão, nome João Silva"></textarea></label>
+              <div class="modal-foot"><button class="btn ghost" data-back>← Voltar</button><button class="btn primary" data-send ${receipt && receipt.id ? "" : "disabled"}>${sending ? "Enviando…" : "Enviar pedido"}</button></div>`
+          : `<div class="pay-done">${ic("check", "lg")}<h3>Pedido enviado!</h3><p>Status: ${statusTag("pending")}</p><p>A equipe vai conferir se o Pix caiu na conta. Você recebe aviso quando o plano for liberado — e pode conversar com a equipe no atendimento.</p></div>
+              <div class="modal-foot"><button class="btn ghost" data-close>Fechar</button><button class="btn primary" data-ticket>Abrir atendimento</button></div>`);
+      };
+      draw();
+      m.addEventListener("click", e => {
+        if (e.target.closest("[data-next]")) { step = 2; draw(); }
+        if (e.target.closest("[data-back]")) { step = 1; draw(); }
+        if (e.target.closest("[data-ticket]") && box._order) { close(); openTicket(box._order.id); }
+      });
+      m.addEventListener("change", async e => {
+        if (!e.target.matches('input[type="file"]')) return;
+        const f = e.target.files[0];
+        if (!f) return;
+        if (f.size > 8 * 1024 * 1024) { toast("O comprovante passa de 8 MB.", "warn"); return; }
+        if (!/^(image\/(png|jpeg|webp)|application\/pdf)$/.test(f.type)) { toast("Envie uma imagem (PNG, JPG, WEBP) ou PDF.", "warn"); return; }
+        receipt = { name: f.name, size: f.size, preview: /^image\//.test(f.type) ? URL.createObjectURL(f) : "" };
+        draw();
+        try { const r = await uploadBlob(f, "receipt"); receipt.id = r.id; }
+        catch (err) { toast(err.message, "error"); receipt = null; }
+        draw();
+      });
+      m.addEventListener("click", async e => {
+        if (!e.target.closest("[data-send]") || sending || !receipt || !receipt.id) return;
+        sending = true; draw();
+        const r = await emit("order:create", { tier, receipt: receipt.id, note: (m.querySelector("[data-note]") || {}).value || "" });
+        sending = false;
+        if (r.error) { toast(r.error, "error"); draw(); return; }
+        S.orders.set(r.order.id, r.order);
+        box._order = r.order;
+        step = 3; draw();
+        if (S.view === "premium") renderPremium();
+      });
+    }
+  });
+}
+function openTicket(orderId) {
+  const o = S.orders.get(orderId);
+  if (!o) { emit("order:get", { id: orderId }).then(r => { if (r.order) { S.orders.set(r.order.id, r.order); openDM("t." + orderId); } else toast(r.error || "Pedido não encontrado.", "error"); }); return; }
+  openDM("t." + orderId);
+}
+
+/* --- painel ADM --- */
+async function goAdmin() {
+  if (!S.me || !S.me.admin) { toast("Apenas ADMs.", "warn"); return; }
+  setView("admin");
+  S.serverId = null; S.channelId = null;
+  renderAll(); updateMini();
+  renderAdmin();
+}
+async function renderAdmin(soft) {
+  const root = $("#adminView");
+  if (!root || !S.me.admin) return;
+  const tab = S.adminTab;
+  const tabs = [["orders", "Solicitações"], ["users", "Usuários e planos"], ["audit", "Histórico"]];
+  const head = `<div class="page admin"><div class="hero adm-hero"><h1>${ic("shield", "lg")} Painel ADM</h1><p>Confira no extrato do banco se o Pix caiu antes de aprovar. Toda decisão fica registrada com o seu nome.</p></div><div class="tabs-row">${tabs.map(([k, n]) => `<button class="tab${k === tab ? " on" : ""}" data-act="admin-tab" data-tab="${k}">${n}</button>`).join("")}</div><div class="adm-body"></div></div>`;
+  if (!soft || !root.querySelector(".adm-body")) root.innerHTML = head;
+  else root.querySelectorAll(".tabs-row .tab").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
+  const body = root.querySelector(".adm-body");
+  if (tab === "orders") {
+    const r = await emit("order:list", { status: S.adminFilter });
+    if (r.error) { body.innerHTML = `<p>${esc(r.error)}</p>`; return; }
+    for (const o of r.orders) S.orders.set(o.id, o);
+    const filters = [["open", "Abertas"], ["pending", "Pendentes"], ["review", "Em análise"], ["approved", "Aprovadas"], ["rejected", "Recusadas"], ["all", "Todas"]];
+    body.innerHTML = `<div class="chips" style="margin-bottom:14px">${filters.map(([k, n]) => `<button class="chip${S.adminFilter === k ? " on" : ""}" data-act="admin-filter" data-f="${k}">${n}</button>`).join("")}</div>` +
+      (r.orders.length ? r.orders.map(o => {
+        const open = o.status === "pending" || o.status === "review";
+        const rc = o.receipt;
+        const recUrl = rc ? fileHref(rc) : "";
+        return `<div class="adm-order"><div class="ao-user">${o.user ? avatar(o.user, 40) : ""}<div><b>${esc(o.user ? o.user.username : "?")}</b><small>${esc(o.userEmail || "sem e-mail")}</small></div></div>
+          <div class="ao-plan"><b>${esc(o.plan)}</b><small>${fmtMoney(o.amount)}</small></div>
+          <div class="ao-date"><small>${new Date(o.created).toLocaleString("pt-BR")}</small>${statusTag(o.status)}${o.decidedBy ? `<small>por <b>${esc(o.decidedBy)}</b>${o.reason ? ` — ${esc(o.reason)}` : ""}</small>` : ""}${o.note ? `<small class="ao-note">“${esc(o.note)}”</small>` : ""}</div>
+          <div class="ao-acts">${rc ? (/^image\//.test(rc.t) ? `<button class="btn sm" data-act="receipt-view" data-src="${esc(recUrl)}">${ic("eye", "sm")}Comprovante</button>` : `<a class="btn sm" href="${esc(recUrl)}" target="_blank" rel="noopener">${ic("file", "sm")}Comprovante (PDF)</a>`) : ""}<button class="btn sm" data-act="open-ticket" data-id="${o.id}">${ic("message", "sm")}Atendimento</button>${open && o.status === "pending" ? `<button class="btn sm" data-act="order-review" data-id="${o.id}">Em análise</button>` : ""}${open ? `<button class="btn sm green" data-act="order-approve" data-id="${o.id}">Aprovar</button><button class="btn sm danger" data-act="order-reject" data-id="${o.id}">Recusar</button>` : ""}</div></div>`;
+      }).join("") : `<div class="empty">${ic("receipt")}<p>Nenhuma solicitação aqui.</p></div>`);
+  } else if (tab === "users") {
+    body.innerHTML = `<form class="add-box" data-usearch style="margin-bottom:14px"><input placeholder="Buscar por nome ou e-mail (ou “premium”)" value="${esc(S.adminQ || "")}"><button class="btn primary">Buscar</button></form><div data-ulist></div>`;
+    const list = body.querySelector("[data-ulist]");
+    const r = await emit("admin:users", { q: S.adminQ || "" });
+    if (r.error) { list.innerHTML = esc(r.error); return; }
+    list.innerHTML = r.users.map(u => `<div class="adm-user">${avatar(u, 36)}<div class="who"><b>${esc(u.username)}${u.admin ? ` <span class="ost st-rev">ADM</span>` : ""}</b><small>${esc(u.email || "sem e-mail")}${u.email && !u.emailVerified ? " (não confirmado)" : ""}</small></div><div>${u.plan ? `<span class="ost st-ok">${esc({ plus: "Plus", pro: "Pro", max: "Max" }[u.plan])}</span><small style="display:block;color:var(--muted)">até ${fmtDate(u.until)}</small>` : `<small style="color:var(--muted)">sem plano</small>`}</div><div class="ao-acts"><button class="btn sm" data-act="admin-grant" data-uid="${u.id}" data-name="${esc(u.username)}">Dar plano</button>${u.plan ? `<button class="btn sm danger" data-act="admin-revoke" data-uid="${u.id}" data-name="${esc(u.username)}">Revogar</button>` : ""}</div></div>`).join("") || `<p style="color:var(--muted)">Ninguém encontrado.</p>`;
+  } else {
+    const r = await emit("admin:audit", {});
+    if (r.error) { body.innerHTML = esc(r.error); return; }
+    const NAMES = { "order:approve": "Aprovou pedido", "order:reject": "Recusou pedido", "order:review": "Pôs em análise", "plan:grant": "Deu plano", "plan:revoke": "Revogou plano" };
+    body.innerHTML = r.entries.length ? `<div class="audit">${r.entries.map(e => `<div class="au-row"><small>${new Date(e.at).toLocaleString("pt-BR")}</small><b>${esc(e.adminName)}</b><span>${esc(NAMES[e.action] || e.action)}</span><span>→ ${esc(e.targetName)}</span><small>${esc([e.details.tier, e.details.days ? e.details.days + " dias" : "", e.details.amount ? fmtMoney(e.details.amount) : "", e.details.reason].filter(Boolean).join(" · "))}</small></div>`).join("")}</div>` : `<div class="empty">${ic("shield")}<p>Nenhuma ação registrada ainda.</p></div>`;
+  }
+}
+function adminApprove(id) {
+  const o = S.orders.get(id);
+  if (!o) return;
+  modal({
+    title: "Aprovar pagamento", sub: `${esc(o.user ? o.user.username : "?")} · plano ${esc(o.plan)}`,
+    body: `<div class="pay-amount">${fmtMoney(o.amount)}</div><p style="color:var(--text-2)">Abra o extrato da conta Nubank e confira se <b>exatamente esse valor</b> entrou, na data do pedido. Só aprove se o dinheiro realmente caiu.</p>
+      <label class="radio-card"><span><b>Confirmo que conferi o extrato e o valor caiu na conta</b></span><input type="checkbox" data-ok></label>
+      <div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn green" data-go disabled>Aprovar e liberar plano</button></div>`,
+    onMount(m, close) {
+      const go = m.querySelector("[data-go]");
+      m.querySelector("[data-ok]").onchange = e => { go.disabled = !e.target.checked; e.target.closest(".radio-card").classList.toggle("on", e.target.checked); };
+      go.onclick = async () => {
+        go.classList.add("loading");
+        const r = await emit("order:approve", { id, confirm: true });
+        go.classList.remove("loading");
+        if (r.error) { toast(r.error, "error"); return; }
+        close(); toast("Pedido aprovado e plano liberado.", "ok");
+      };
+    }
+  });
+}
+function adminReject(id) {
+  const o = S.orders.get(id);
+  if (!o) return;
+  modal({
+    title: "Recusar pedido", sub: `${esc(o.user ? o.user.username : "?")} · plano ${esc(o.plan)} · ${fmtMoney(o.amount)}`,
+    body: `<label class="field"><span>Motivo (o usuário vai ver)</span><textarea data-r maxlength="400" placeholder="Ex.: o valor não apareceu no extrato / comprovante ilegível / valor diferente"></textarea></label>
+      <div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn danger" data-go>Recusar pedido</button></div>`,
+    onMount(m, close) {
+      m.querySelector("[data-go]").onclick = async () => {
+        const reason = m.querySelector("[data-r]").value.trim();
+        if (reason.length < 3) { toast("Escreva o motivo da recusa.", "warn"); return; }
+        const r = await emit("order:reject", { id, reason });
+        if (r.error) { toast(r.error, "error"); return; }
+        close(); toast("Pedido recusado. O usuário foi avisado.", "ok");
+      };
+    }
+  });
+}
+function adminGrant(uid, name) {
+  modal({
+    title: "Dar plano manualmente", sub: esc(name),
+    body: `<span class="label">Plano</span><div class="chips" style="margin:8px 0 14px">${["plus", "pro", "max"].map((t, i) => `<label class="chip${i === 0 ? " on" : ""}"><input type="radio" name="gt" value="${t}" ${i === 0 ? "checked" : ""} hidden>${{ plus: "Plus", pro: "Pro", max: "Max" }[t]}</label>`).join("")}</div>
+      <label class="field"><span>Dias</span><input type="number" data-days min="1" max="366" value="30"></label>
+      <p class="hint">Use para cortesias ou correções. Fica registrado no histórico com o seu nome.</p>
+      <div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" data-go>Dar plano</button></div>`,
+    onMount(m, close) {
+      m.addEventListener("change", e => { if (e.target.name === "gt") $$(".chip", m).forEach(c => c.classList.toggle("on", c.querySelector("input").checked)); });
+      m.querySelector("[data-go]").onclick = async () => {
+        const tier = m.querySelector('input[name="gt"]:checked').value, days = +m.querySelector("[data-days]").value;
+        const r = await emit("admin:grant", { userId: uid, tier, days });
+        if (r.error) { toast(r.error, "error"); return; }
+        close(); toast("Plano liberado.", "ok"); renderAdmin(true);
+      };
+    }
+  });
+}
+function adminRevoke(uid, name) {
+  modal({
+    title: "Revogar plano", sub: esc(name),
+    body: `<label class="field"><span>Motivo (o usuário vai ver)</span><textarea data-r maxlength="300" placeholder="Ex.: estorno do Pix / pagamento contestado"></textarea></label><div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn danger" data-go>Revogar</button></div>`,
+    onMount(m, close) {
+      m.querySelector("[data-go]").onclick = async () => {
+        const r = await emit("admin:revoke", { userId: uid, reason: m.querySelector("[data-r]").value.trim() });
+        if (r.error) { toast(r.error, "error"); return; }
+        close(); toast("Plano revogado.", "ok"); renderAdmin(true);
+      };
+    }
+  });
+}
+
 /* grupos de mensagem direta */
 function groupModal(groupId) {
   const g = groupId ? S.dms.get(groupId) : null;
@@ -612,7 +897,7 @@ function renderFriends() {
   const tabs = [["online", "Online"], ["all", "Todos"], ["pending", `Pendentes${inCount ? ` <b class="badge">${inCount}</b>` : ""}`], ["add", "Adicionar amigo"]];
   let body = "";
   if (tab === "add") {
-    body = `<div class="add-friend"><h2>Adicionar amigo</h2><p>Você pode adicionar amigos pelo nome de usuário do NEXORA.</p>
+    body = `<div class="add-friend"><h2>Adicionar amigo</h2><p>Você pode adicionar amigos pelo nome de usuário da Auryx Nexavória.</p>
       <form class="add-box" id="addFriendForm"><input id="addFriendInput" placeholder="Digite o nome de usuário" maxlength="24" autocomplete="off" spellcheck="false"><button class="btn primary">Enviar pedido</button></form></div>
       <div class="section-title">Sugestões dos seus servidores</div>` +
       ([...S.users.values()].filter(u => u.id !== S.me.id && !S.friends.has(u.id)).slice(0, 12).map(u => `<div class="friend-row">${avatar(u, 38, true, `data-act="profile" data-uid="${u.id}"`)}<div class="who"><b>${esc(u.username)}</b><small>${esc(u.about || STATUS[u.status])}</small></div><div class="acts"><button class="btn sm" data-act="add-friend" data-uid="${u.id}">${ic("userPlus", "sm")}Adicionar</button></div></div>`).join("") || `<p style="color:var(--muted)">Entre em servidores para ver sugestões.</p>`);
@@ -639,7 +924,7 @@ function openServer(id) {
   if (c) openChannel(c.id);
 }
 function openChannel(cid, join = true) {
-  if (isDm(cid)) { openDM(cid); return; }
+  if (isDm(cid) || isTicket(cid)) { openDM(cid); return; }
   const s = serverOf(cid), c = chan(cid);
   if (!s || !c) return;
   if (S.view === "chat" && S.channelId) S.drafts[S.channelId] = $("#input").value;
@@ -674,7 +959,7 @@ function findMsg(id, cid = S.channelId) { const b = S.msgs.get(cid); return b ? 
 
 function openText(c) {
   const input = $("#input");
-  input.placeholder = c.group ? `Mensagem para ${groupTitle(c)}` : c.dm ? `Mensagem para @${c.name}` : `Conversar em #${c.name}`;
+  input.placeholder = c.ticket ? "Escreva para a equipe…" : c.group ? `Mensagem para ${groupTitle(c)}` : c.dm ? `Mensagem para @${c.name}` : `Conversar em #${c.name}`;
   input.value = S.drafts[c.id] || "";
   autoGrow();
   S.newMarker = isUnread(c) && S.lastRead[c.id] ? { cid: c.id, ts: S.lastRead[c.id] } : null;
@@ -716,7 +1001,7 @@ async function loadHistory(cid, older = false) {
 function msgHTML(m, prev, isNew) {
   if (m.sys) {
     const u = user(m.a);
-    return `<div class="msg sys${isNew ? " new" : ""}" data-id="${m.id}">${ic("arrowRight")}<span><b data-act="profile" data-uid="${u.id}" style="color:${esc(u.color)}">${esc(u.username)}</b> ${m.sys === "gname" && m.t ? `mudou o nome do grupo para <b>${esc(m.t)}</b>.` : SYS[m.sys] || ""}<time title="${esc(fmtFull(m.ts))}">${fmtStamp(m.ts)}</time></span></div>`;
+    return `<div class="msg sys${isNew ? " new" : ""}" data-id="${m.id}">${ic("arrowRight")}<span><b data-act="profile" data-uid="${u.id}" style="color:${esc(u.color)}">${esc(u.username)}</b> ${m.sys === "gname" && m.t ? `mudou o nome do grupo para <b>${esc(m.t)}</b>.` : m.sys === "oreject" && m.t ? `recusou o pedido. Motivo: <b>${esc(m.t)}</b>` : m.sys === "oapprove" && m.t ? `aprovou o pagamento e liberou o plano <b>${esc(m.t)}</b>! 🎉` : SYS[m.sys] || ""}<time title="${esc(fmtFull(m.ts))}">${fmtStamp(m.ts)}</time></span></div>`;
   }
   const u = user(m.a), s = srv(), mine = S.me && m.a === S.me.id;
   const cont = prev && !prev.sys && prev.a === m.a && !m.re && m.ts - prev.ts < 420000 && sameDay(prev.ts, m.ts);
@@ -750,7 +1035,8 @@ function renderMessages(toBottom) {
   if (!c) return;
   const b = S.msgs.get(c.id), list = b ? b.list : [];
   let h = "";
-  if (b && !b.more && c.group) h += `<div class="chan-intro">${groupAvatar(c, 76)}<h2 style="margin-top:12px">${esc(groupTitle(c))}</h2><p>Bem-vindos ao começo do grupo. Só quem está aqui vê estas mensagens.</p></div>`;
+  if (b && !b.more && c.ticket) h += `<div class="chan-intro"><div class="big">${ic("gem")}</div><h2>Atendimento — pedido ${esc(c.order.plan)}</h2><p>Conversa privada entre ${S.me.admin && c.order.user ? `<b>${esc(c.order.user.username)}</b>` : "você"} e a equipe ADM. O plano só é liberado depois que a equipe confere que o Pix caiu na conta.</p></div>`;
+  else if (b && !b.more && c.group) h += `<div class="chan-intro">${groupAvatar(c, 76)}<h2 style="margin-top:12px">${esc(groupTitle(c))}</h2><p>Bem-vindos ao começo do grupo. Só quem está aqui vê estas mensagens.</p></div>`;
   else if (b && !b.more && c.dm) { const u = user(c.userId); h += `<div class="chan-intro">${avatar(u, 76)}<h2 style="margin-top:12px">${esc(u.username)}</h2><p>Este é o começo da sua conversa privada com <b>@${esc(u.username)}</b>. Só vocês dois veem estas mensagens.</p></div>`; }
   else if (b && !b.more) h += `<div class="chan-intro"><div class="big">${ic("hash")}</div><h2>Bem-vindo(a) a #${esc(c.name)}!</h2><p>Este é o começo do canal #${esc(c.name)}.${c.topic ? " " + esc(c.topic) : ""}</p></div>`;
   else if (b && b.more) h += `<div class="skeleton"><i style="width:40px;height:40px;border-radius:50%;flex:none"></i><div style="flex:1;display:grid;gap:8px"><i style="width:120px;height:12px"></i><i style="width:60%;height:12px"></i></div></div>`;
@@ -814,11 +1100,12 @@ function filesHTML(m) {
   }).join("")}</div>`;
 }
 function addFiles(list) {
-  if (LOCAL) { toast("Enviar arquivos funciona na versão online do NEXORA.", "warn"); return; }
+  if (LOCAL) { toast("Enviar arquivos funciona na versão online da Auryx Nexavória.", "warn"); return; }
   if (S.view !== "chat" || !S.channelId) return;
   for (const f of [...list]) {
     if (S.uploads.filter(u => u.cid === S.channelId).length >= 10) { toast("No máximo 10 arquivos por mensagem.", "warn"); break; }
-    if (f.size > 8 * 1024 * 1024) { toast(`"${f.name}" passa de 8 MB.`, "warn"); continue; }
+    const maxMb = [8, 15, 25, 50][myRank()];
+    if (f.size > maxMb * 1024 * 1024) { toast(`"${f.name}" passa de ${maxMb} MB.${myRank() < 3 ? " Os planos Premium aumentam esse limite." : ""}`, "warn"); continue; }
     const up = { key: Math.random().toString(36).slice(2), file: f, name: f.name || "imagem.png", size: f.size, type: f.type || "application/octet-stream", progress: 0, cid: S.channelId };
     if (/^image\//.test(up.type)) up.preview = URL.createObjectURL(f);
     S.uploads.push(up);
@@ -1356,7 +1643,7 @@ function localSocket(token) {
         return;
       }
       case "friend:request": case "friend:accept": case "friend:remove": case "dm:open":
-        fail("Amigos e mensagens privadas funcionam na versão online do NEXORA.");
+        fail("Amigos e mensagens privadas funcionam na versão online da Auryx Nexavória.");
         return;
       default: return { ok: true };
     }
@@ -1383,6 +1670,7 @@ function connect() {
   S.socket = sock;
   sock.on("connect_error", err => {
     if (err && err.message === "auth") { store.del("token"); S.token = null; sock.disconnect(); showAuth("Sua sessão expirou. Entre novamente."); return; }
+    if (err && err.message === "verify") { sock.disconnect(); showAuth(); setAuthMode("verify", "Confirme seu e-mail para entrar. Digite o código que enviamos (ou peça outro)."); return; }
     if (S.ready) $("#connBar").classList.remove("hidden");
   });
   sock.on("connect", () => $("#connBar").classList.add("hidden"));
@@ -1395,6 +1683,15 @@ function connect() {
     u.status = status;
     schedule("members", "side", "home");
   });
+  sock.on("me:update", ({ me }) => {
+    S.me = { ...S.me, ...me };
+    S.users.set(me.id, { ...S.users.get(me.id), ...me });
+    schedule("user", "members", "side", "rail", "top", "home");
+    if (S.view === "premium") renderPremium();
+  });
+  sock.on("order:update", ({ order }) => onOrderUpdate(order));
+  sock.on("order:new", ({ order }) => { if (S.me && S.me.admin) { sfx("mention"); toast(`Novo pedido: ${order.user ? order.user.username : "?"} — plano ${order.plan}`, "info", 5000); } });
+  sock.on("plan:revoked", ({ reason }) => toast(`Seu plano foi removido pela equipe. Motivo: ${reason}`, "warn", 8000));
   sock.on("friend:update", ({ userId, state, user: u }) => {
     if (u) S.users.set(u.id, u);
     const prev = S.friends.get(userId);
@@ -1528,6 +1825,12 @@ function onReady(d) {
   const first = !S.ready;
   S.ready = true;
   showApp();
+  if (!LOCAL) {
+    // cookie HttpOnly para abrir comprovantes privados (sessões antigas não tinham)
+    authApi("account/cookie", {}, true).catch(() => {});
+    loadPlans().then(() => schedule("side", "rail"));
+    if (S.me.admin) emit("order:list", { status: "open" }).then(r => { for (const o of r.orders || []) S.orders.set(o.id, o); schedule("side", "rail"); });
+  }
   if (S.channelId && chan(S.channelId) && (isDm(S.channelId) || S.servers.has(S.serverId))) openChannel(S.channelId, false);
   else if (!first && S.view === "friends") goFriends();
   else if (first) {
@@ -1541,9 +1844,10 @@ function onReady(d) {
 }
 
 function onMsg({ channelId, serverId, m, nonce }) {
-  const dm = isDm(channelId) ? S.dms.get(channelId) : null;
-  const s = dm ? { id: null, name: "Mensagem privada" } : S.servers.get(serverId);
+  const dm = isDm(channelId) ? S.dms.get(channelId) : isTicket(channelId) ? chan(channelId) : null;
+  const s = dm ? { id: null, name: dm.ticket ? "Atendimento" : "Mensagem privada" } : S.servers.get(serverId);
   const c = dm ? chan(channelId) : s && s.channels.find(x => x.id === channelId);
+  if (dm && dm.ticket && dm.order) dm.order.last = { id: m.id, ts: m.ts, a: m.a };
   if (!c) return;
   c.last = { id: m.id, ts: m.ts, a: m.a };
   removeTyping(channelId, m.a);
@@ -2071,7 +2375,7 @@ function stopCam(silent) {
 /* ------------------------------------------------------------------ */
 /* Controle remoto e co-op pela tela                                   */
 /* O vídeo vai pelo WebRTC; mouse/teclado/controle vão por um canal de */
-/* dados direto entre os dois PCs. Quem transmite precisa do NEXORA    */
+/* dados direto entre os dois PCs. Quem transmite precisa da Auryx Nexavória    */
 /* Agente aberto e aceitar o pedido — nada acontece sem permissão.     */
 /* ------------------------------------------------------------------ */
 const AG = { ws: null };
@@ -2091,17 +2395,17 @@ async function agentConnect(code) {
 function agentConnectRaw(code) {
   return new Promise((res, rej) => {
     if (agentOk()) return res();
-    if (!code) return rej(new Error("Abra o NEXORA Agente e digite o código em Configurações › Controle remoto."));
+    if (!code) return rej(new Error("Abra o Agente Auryx e digite o código em Configurações › Controle remoto."));
     let ws;
     try { ws = new WebSocket(`ws://127.0.0.1:47800/?t=${encodeURIComponent(code)}`); }
-    catch { return rej(new Error("O navegador bloqueou a conexão com o NEXORA Agente.")); }
-    const t = setTimeout(() => { try { ws.close(); } catch {} rej(new Error("NEXORA Agente não respondeu. Ele está aberto?")); }, 4000);
+    catch { return rej(new Error("O navegador bloqueou a conexão com o Agente Auryx.")); }
+    const t = setTimeout(() => { try { ws.close(); } catch {} rej(new Error("Agente Auryx não respondeu. Ele está aberto?")); }, 4000);
     ws.onopen = () => { clearTimeout(t); AG.ws = ws; res(); renderCtrlBar(); };
-    ws.onerror = () => { clearTimeout(t); rej(new Error("NEXORA Agente não encontrado ou código errado.")); };
+    ws.onerror = () => { clearTimeout(t); rej(new Error("Agente Auryx não encontrado ou código errado.")); };
     ws.onclose = () => {
       if (AG.ws !== ws) return;
       AG.ws = null;
-      if (V.granted.size) { for (const sock of [...V.granted.keys()]) endGrant(sock); toast("O NEXORA Agente foi fechado — controle encerrado.", "warn"); }
+      if (V.granted.size) { for (const sock of [...V.granted.keys()]) endGrant(sock); toast("O Agente Auryx foi fechado — controle encerrado.", "warn"); }
     };
   });
 }
@@ -2150,7 +2454,7 @@ function askControl(p) {
     body: `<div class="invite-card" style="--c:${esc(u.color)}">${avatar(u, 48)}<div><b>${esc(u.username)}</b><small>está assistindo sua transmissão</small></div></div>
       <label class="radio-card on">${ic("gamepad", "lg")}<span><b>Co-op (jogar junto)</b><small>Só teclado e controle — ideal para co-op local. Mouse bloqueado.</small></span><input type="radio" name="cm" value="coop" checked></label>
       <label class="radio-card">${ic("pointer", "lg")}<span><b>Controle total</b><small>Mouse e teclado, como AnyDesk.${surface && surface !== "monitor" ? " <b style='color:var(--yellow)'>Transmita a tela inteira para o mouse cair no lugar certo.</b>" : ""}</small></span><input type="radio" name="cm" value="full"></label>
-      <div class="hint" style="margin:10px 0 0">${DESKTOP || agentOk() ? "✅ Controle remoto pronto." : "⚠️ O NEXORA Agente precisa estar aberto neste PC (Configurações › Controle remoto) — ou use o app de PC, que já vem com ele."} Você pode encerrar a qualquer momento.</div>
+      <div class="hint" style="margin:10px 0 0">${DESKTOP || agentOk() ? "✅ Controle remoto pronto." : "⚠️ O Agente Auryx precisa estar aberto neste PC (Configurações › Controle remoto) — ou use o app de PC, que já vem com ele."} Você pode encerrar a qualquer momento.</div>
       <div class="modal-foot"><button class="btn ghost" data-no>Recusar</button><button class="btn primary" data-yes>Permitir</button></div>`,
     onMount(m, close) {
       m.addEventListener("change", e => { if (e.target.name === "cm") { mode = e.target.value; $$(".radio-card", m).forEach(r => r.classList.toggle("on", r.querySelector("input").checked)); } });
@@ -3013,7 +3317,7 @@ function profilePop(uid, anchor) {
   const steam = steamId ? `<div class="sec"><span class="label">Steam</span><div class="gl"><a href="https://steamcommunity.com/profiles/${steamId}" target="_blank" rel="noopener">${ic("steam", "xs")} Perfil Steam</a>${mine ? "" : `<a href="steam://friends/message/${steamId}">Conversar na Steam</a>`}</div></div>` : "";
   const acts = mine ? `<button class="btn sm" data-edit-profile>Editar perfil</button>`
     : `<button class="btn sm primary" data-dm>${ic("message", "sm")}Mensagem</button>${f === "friend" ? "" : f === "out" ? `<button class="btn sm" disabled>Pedido enviado</button>` : f === "in" ? `<button class="btn sm green" data-accept>Aceitar amizade</button>` : `<button class="btn sm" data-addf>${ic("userPlus", "sm")}Adicionar</button>`}${S.view === "chat" && !isDm(S.channelId) ? `<button class="btn sm ghost" data-mention>@</button>` : ""}`;
-  popover(anchor, `<div class="pb" style="${bannerStyle(u)}"></div><div class="pc">${avatar(u, 76, true)}${badges(u)}<h3>${nameHTML(u)}${u.pron ? `<small class="pron">${esc(u.pron)}</small>` : ""}</h3><div class="status-line"><i class="dot st-${esc(u.status)}"></i>${STATUS[u.status] || ""}${f === "friend" ? " · Amigo" : ""}</div>${u.cs ? `<div class="cs-bubble">${csText(u)}</div>` : ""}${game}${u.about ? `<div class="sec"><span class="label">Sobre mim</span>${esc(u.about)}</div>` : ""}${steam}<div class="sec"><span class="label">No NEXORA desde</span>${u.created ? new Date(u.created).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</div>${v ? `<div class="sec"><span class="label">Em chamada</span><a data-go-voice="${v.channelId}" style="cursor:pointer">${esc(chan(v.channelId)?.name || "Sala de voz")}</a>${v.screen ? ' <b class="live-tag">AO VIVO</b>' : ""}</div>` : ""}<div class="sec" style="display:flex;gap:8px;flex-wrap:wrap">${acts}</div></div>`, "profile-pop" + (u.pfx ? " pfx-" + u.pfx : ""), (el, close) => {
+  popover(anchor, `<div class="pb" style="${bannerStyle(u)}"></div><div class="pc">${avatar(u, 76, true)}${badges(u)}<h3>${nameHTML(u)}${u.pron ? `<small class="pron">${esc(u.pron)}</small>` : ""}</h3><div class="status-line"><i class="dot st-${esc(u.status)}"></i>${STATUS[u.status] || ""}${f === "friend" ? " · Amigo" : ""}</div>${u.cs ? `<div class="cs-bubble">${csText(u)}</div>` : ""}${game}${u.about ? `<div class="sec"><span class="label">Sobre mim</span>${esc(u.about)}</div>` : ""}${steam}<div class="sec"><span class="label">No Auryx Nexavória desde</span>${u.created ? new Date(u.created).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</div>${v ? `<div class="sec"><span class="label">Em chamada</span><a data-go-voice="${v.channelId}" style="cursor:pointer">${esc(chan(v.channelId)?.name || "Sala de voz")}</a>${v.screen ? ' <b class="live-tag">AO VIVO</b>' : ""}</div>` : ""}<div class="sec" style="display:flex;gap:8px;flex-wrap:wrap">${acts}</div></div>`, "profile-pop" + (u.pfx ? " pfx-" + u.pfx : ""), (el, close) => {
     el.addEventListener("click", e => {
       if (e.target.closest("[data-mention]")) { close(); insertAtCaret(`@${u.username} `); }
       if (e.target.closest("[data-edit-profile]")) { close(); userSettings("account"); }
@@ -3190,7 +3494,7 @@ async function inviteModal(sid = S.serverId) {
     body: `<div class="invite-card" style="--c:${esc(s.color)}">${serverIcon(s)}<div><b>${esc(s.name)}</b><small><span><i class="dot st-online"></i> ${online} online</span><span><i class="dot st-offline"></i> ${s.members.length} membros</span></small></div></div>
       <span class="label">Link de convite</span>
       <div class="invite-box" style="margin-top:8px"><input readonly value="${esc(link)}"><button class="btn primary sm" type="button" data-copy>Copiar</button></div>
-      <div class="hint" style="margin:10px 0 0">Código: <span class="kbd">${esc(r.code)}</span> · não expira · funciona na sua rede e na internet, se o NEXORA estiver acessível.</div>
+      <div class="hint" style="margin:10px 0 0">Código: <span class="kbd">${esc(r.code)}</span> · não expira · funciona na sua rede e na internet, se a Auryx Nexavória estiver acessível.</div>
       ${navigator.share ? `<button class="btn ghost" style="margin-top:12px" type="button" data-share>${ic("link", "sm")}Compartilhar…</button>` : ""}`,
     onMount(m) {
       const b = m.querySelector("[data-copy]"), inp = m.querySelector(".invite-box input");
@@ -3201,7 +3505,7 @@ async function inviteModal(sid = S.serverId) {
       };
       inp.addEventListener("focus", () => inp.select());
       const sh = m.querySelector("[data-share]");
-      if (sh) sh.onclick = () => navigator.share({ title: `Entre no ${s.name} no NEXORA`, url: link }).catch(() => {});
+      if (sh) sh.onclick = () => navigator.share({ title: `Entre no ${s.name} na Auryx Nexavória`, url: link }).catch(() => {});
     }
   });
 }
@@ -3390,8 +3694,9 @@ function userSettings(initial) {
     { label: "Configurações do usuário" },
     { id: "account", name: "Minha conta", render: renderAccount, mount: mountAccount },
     { id: "turbo", name: "⚡ Perfil Turbo", render: () => `<div id="turboRoot"></div>`, mount: mountTurbo },
+    { id: "plans", name: "💎 Planos e pagamentos", action: close => { close(); goPremium(); } },
     { id: "voice", name: "Voz e vídeo", render: renderVoiceSettings, mount: mountVoiceSettings },
-    { id: "stream", name: "Transmissão", render: () => `<p style="color:var(--muted);margin-top:-8px">Padrão usado ao entrar ao vivo. Você pode mudar durante a transmissão.</p><span class="label">Qualidade padrão</span><div class="qgrid" style="margin-top:8px">${Object.entries(QUALITY).map(([k, v]) => `<button type="button" class="qopt${k === S.settings.shareQuality ? " on" : ""}" data-q="${k}">${v.tag ? `<span class="tag">${v.tag}</span>` : ""}<b>${v.label}</b><small>${v.sub}</small></button>`).join("")}</div>${toggleRow("shareAudio", "Transmitir áudio por padrão", "Inclui o som da aba ou do sistema", S.settings.shareAudio)}<div class="hint" style="margin-top:16px">Como o NEXORA economiza recursos: a tela só é codificada para quem está assistindo, a taxa de bits se divide entre os espectadores, o codec é escolhido pelo modo (VP9 para texto nítido, H.264 com aceleração por hardware para movimento) e o áudio usa Opus com supressão de silêncio.</div>`, mount: p => { p.addEventListener("click", e => { const b = e.target.closest("[data-q]"); if (b) { S.settings.shareQuality = b.dataset.q; saveSettings(); $$("[data-q]", p).forEach(x => x.classList.toggle("on", x === b)); } }); bindToggles(p); } },
+    { id: "stream", name: "Transmissão", render: () => `<p style="color:var(--muted);margin-top:-8px">Padrão usado ao entrar ao vivo. Você pode mudar durante a transmissão.</p><span class="label">Qualidade padrão</span><div class="qgrid" style="margin-top:8px">${Object.entries(QUALITY).map(([k, v]) => `<button type="button" class="qopt${k === S.settings.shareQuality ? " on" : ""}" data-q="${k}">${v.tag ? `<span class="tag">${v.tag}</span>` : ""}<b>${v.label}</b><small>${v.sub}</small></button>`).join("")}</div>${toggleRow("shareAudio", "Transmitir áudio por padrão", "Inclui o som da aba ou do sistema", S.settings.shareAudio)}<div class="hint" style="margin-top:16px">Como a Auryx Nexavória economiza recursos: a tela só é codificada para quem está assistindo, a taxa de bits se divide entre os espectadores, o codec é escolhido pelo modo (VP9 para texto nítido, H.264 com aceleração por hardware para movimento) e o áudio usa Opus com supressão de silêncio.</div>`, mount: p => { p.addEventListener("click", e => { const b = e.target.closest("[data-q]"); if (b) { S.settings.shareQuality = b.dataset.q; saveSettings(); $$("[data-q]", p).forEach(x => x.classList.toggle("on", x === b)); } }); bindToggles(p); } },
     { id: "app", name: "Baixar o app", render: renderAppDl, mount: mountAppDl },
     { id: "games", name: "Jogos e Steam", render: renderGames, mount: mountGames },
     { id: "remote", name: "Controle remoto", render: renderRemote, mount: mountRemote },
@@ -3414,21 +3719,24 @@ function mountTurbo(p) {
     const u = { ...me, avatar: d.avatar, banner: d.banner, theme: d.useTheme ? d.theme : null, pron: d.pron, cs: d.cs.t || d.cs.e ? d.cs : null, fx: d.fx, pfx: d.pfx, status: me.statusPref === "invisible" ? "offline" : me.statusPref };
     return `<div class="popover profile-pop turbo-preview${d.pfx ? " pfx-" + d.pfx : ""}"><div class="pb" style="${bannerStyle(u)}"></div><div class="pc">${avatar(u, 76, true)}${badges(u)}<h3>${nameHTML(u)}${u.pron ? `<small class="pron">${esc(u.pron)}</small>` : ""}</h3><div class="status-line"><i class="dot st-${esc(u.status)}"></i>${STATUS[u.status] || ""}</div>${u.cs ? `<div class="cs-bubble">${csText(u)}</div>` : ""}${u.about ? `<div class="sec"><span class="label">Sobre mim</span>${esc(u.about)}</div>` : ""}</div></div>`;
   };
+  const R = myRank(), PN = ["", "Plus", "Pro", "Max"];
+  // seção bloqueada: mostra o cadeado e o plano necessário (o servidor também confere)
+  const sec = (need, html) => R >= need ? `<div class="tsec">${html}</div>` : `<div class="tsec locked"><div class="lock-tag" data-act="premium">${ic("gem", "xs")} Plano ${PN[need]}</div>${html}</div>`;
   const draw = () => {
-    root.innerHTML = `<p style="color:var(--muted);margin-top:-8px">Deixe seu perfil com a sua cara. Tudo grátis. ✨</p>
+    root.innerHTML = `<p style="color:var(--muted);margin-top:-8px">${R ? `Seu plano <b>${PN[R]}</b> está ativo. ✨` : `Personalize seu perfil com os planos <b>Premium</b>. <a data-act="premium" style="cursor:pointer">Ver planos →</a>`}</p>
       <div class="turbo">
         <div class="turbo-form">
-          <span class="label">Avatar animado</span>
+          ${sec(2, `<span class="label">Avatar animado</span>
           <div class="row-btns"><button class="btn sm" data-up="avatar">${ic("image", "sm")}Enviar imagem ou GIF</button>${d.avatar ? `<button class="btn sm ghost" data-clear="avatar">Remover</button>` : ""}</div>
           <span class="label">Banner</span>
-          <div class="row-btns"><button class="btn sm" data-up="banner">${ic("image", "sm")}Enviar banner</button>${d.banner ? `<button class="btn sm ghost" data-clear="banner">Remover</button>` : ""}</div>
-          <div class="toggle-row"><span><b>Cores do perfil</b><small>Degradê usado no banner e no efeito do nome</small></span><label class="switch"><input type="checkbox" data-k="useTheme" ${d.useTheme ? "checked" : ""}><i></i></label></div>
-          <div class="row-btns" ${d.useTheme ? "" : 'style="opacity:.4;pointer-events:none"'}><label class="color-in">Cor 1<input type="color" data-k="t0" value="${esc(d.theme[0])}"></label><label class="color-in">Cor 2<input type="color" data-k="t1" value="${esc(d.theme[1])}"></label></div>
-          <span class="label">Efeito no nome</span>
-          <div class="chips">${FX.map(([k, n]) => `<button class="chip${d.fx === k ? " on" : ""}" data-fx="${k}">${k ? `<span class="nm fx-${k}" style="--n1:${esc(d.theme[0])};--n2:${esc(d.theme[1])}">${n}</span>` : n}</button>`).join("")}</div>
-          <span class="label">Efeito do perfil</span>
-          <div class="chips">${PFX.map(([k, n]) => `<button class="chip${d.pfx === k ? " on" : ""}" data-pfx="${k}">${n}</button>`).join("")}</div>
-          <label class="field" style="margin-top:14px"><span>Status personalizado</span><div class="cs-in"><button type="button" class="btn sm" data-cs-emoji>${d.cs.e ? esc(d.cs.e) : "😀"}</button><input data-k="cst" maxlength="60" placeholder="O que está rolando?" value="${esc(d.cs.t)}"></div></label>
+          <div class="row-btns"><button class="btn sm" data-up="banner">${ic("image", "sm")}Enviar banner</button>${d.banner ? `<button class="btn sm ghost" data-clear="banner">Remover</button>` : ""}</div>`)}
+          ${sec(1, `<div class="toggle-row"><span><b>Cores do perfil</b><small>Degradê usado no banner e no efeito do nome</small></span><label class="switch"><input type="checkbox" data-k="useTheme" ${d.useTheme ? "checked" : ""}><i></i></label></div>
+          <div class="row-btns" ${d.useTheme ? "" : 'style="opacity:.4;pointer-events:none"'}><label class="color-in">Cor 1<input type="color" data-k="t0" value="${esc(d.theme[0])}"></label><label class="color-in">Cor 2<input type="color" data-k="t1" value="${esc(d.theme[1])}"></label></div>`)}
+          ${sec(2, `<span class="label">Efeito no nome</span>
+          <div class="chips">${FX.map(([k, n]) => `<button class="chip${d.fx === k ? " on" : ""}" data-fx="${k}">${k ? `<span class="nm fx-${k}" style="--n1:${esc(d.theme[0])};--n2:${esc(d.theme[1])}">${n}</span>` : n}</button>`).join("")}</div>`)}
+          ${sec(3, `<span class="label">Efeito do perfil</span>
+          <div class="chips">${PFX.map(([k, n]) => `<button class="chip${d.pfx === k ? " on" : ""}" data-pfx="${k}">${n}</button>`).join("")}</div>`)}
+          ${sec(1, `<label class="field" style="margin-top:14px"><span>Status personalizado</span><div class="cs-in"><button type="button" class="btn sm" data-cs-emoji>${d.cs.e ? esc(d.cs.e) : "😀"}</button><input data-k="cst" maxlength="60" placeholder="O que está rolando?" value="${esc(d.cs.t)}"></div></label>`)}
           <label class="field"><span>Pronomes</span><input data-k="pron" maxlength="24" placeholder="ex.: ele/dele, ela/dela" value="${esc(d.pron)}"></label>
           <button class="btn primary" data-save>Salvar Perfil Turbo</button>
         </div>
@@ -3467,7 +3775,12 @@ function mountTurbo(p) {
       return;
     }
     if (t.closest("[data-save]")) {
-      const r = await emit("profile:update", { avatar: d.avatar, banner: d.banner, theme: d.useTheme ? d.theme : null, pron: d.pron, cs: d.cs, fx: d.fx, pfx: d.pfx });
+      // só envia o que o plano libera (o resto fica guardado como está)
+      const data = { pron: d.pron };
+      if (R >= 1) Object.assign(data, { theme: d.useTheme ? d.theme : null, cs: d.cs });
+      if (R >= 2) Object.assign(data, { avatar: d.avatar, banner: d.banner, fx: d.fx });
+      if (R >= 3) data.pfx = d.pfx;
+      const r = await emit("profile:update", data);
       if (r.error) toast(r.error, "error"); else { toast("Perfil Turbo salvo! ⚡", "ok"); confetti(); }
     }
   });
@@ -3496,18 +3809,18 @@ async function installApp() {
     installPrompt.prompt();
     const r = await installPrompt.userChoice.catch(() => null);
     installPrompt = null;
-    if (r && r.outcome === "accepted") toast("NEXORA instalado! 🎉", "ok");
+    if (r && r.outcome === "accepted") toast("Auryx Nexavória instalado! 🎉", "ok");
     return true;
   }
   return false;
 }
 function renderAppDl() {
   const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent), android = /Android/i.test(navigator.userAgent);
-  const pwaState = DESKTOP ? "Você já está usando o app de PC. 😎" : isStandalone() ? "✅ O NEXORA já está instalado neste aparelho." : installPrompt ? "" : ios ? "No iPhone/iPad: toque em <b>Compartilhar</b> ⬆️ e depois em <b>Adicionar à Tela de Início</b>." : android ? "No Android: toque no menu ⋮ do Chrome e em <b>Instalar app</b>." : "No Chrome ou Edge: clique no ícone de instalar ⊕ na barra de endereço (ou menu ⋮ › <b>Instalar NEXORA</b>).";
-  return `<p style="color:var(--muted);margin-top:-8px">Use o NEXORA como um app de verdade: janela própria, ícone na área de trabalho e notificações.</p>
+  const pwaState = DESKTOP ? "Você já está usando o app de PC. 😎" : isStandalone() ? "✅ A Auryx Nexavória já está instalado neste aparelho." : installPrompt ? "" : ios ? "No iPhone/iPad: toque em <b>Compartilhar</b> ⬆️ e depois em <b>Adicionar à Tela de Início</b>." : android ? "No Android: toque no menu ⋮ do Chrome e em <b>Instalar app</b>." : "No Chrome ou Edge: clique no ícone de instalar ⊕ na barra de endereço (ou menu ⋮ › <b>Instalar Auryx Nexavória</b>).";
+  return `<p style="color:var(--muted);margin-top:-8px">Use a Auryx Nexavória como um app de verdade: janela própria, ícone na área de trabalho e notificações.</p>
     <div class="steps">
-      <div class="step"><b>${ic("monitor", "sm")}</b><div><b>App para Windows</b><small>Programa completo: seletor de tela próprio, fica na bandeja e já vem com o controle remoto embutido (não precisa do NEXORA Agente).</small>${DESKTOP ? `<small style="color:var(--green)">✅ Instalado — você está nele agora.</small>` : `<a class="btn primary sm" href="${DESKTOP_URL}" target="_blank" rel="noopener">${ic("arrowDown", "sm")}Baixar NEXORA-Setup.exe</a><small>Se o Windows avisar "O Windows protegeu o computador", clique em <b>Mais informações › Executar assim mesmo</b>.</small>`}</div></div>
-      <div class="step"><b>${ic("users", "sm")}</b><div><b>Instalar pelo navegador (PC e celular)</b><small>Leve e sem baixar nada: vira um app com ícone, direto do site.</small>${installPrompt && !DESKTOP ? `<button class="btn primary sm" data-install>${ic("plus", "sm")}Instalar NEXORA</button>` : ""}${pwaState ? `<small>${pwaState}</small>` : ""}</div></div>
+      <div class="step"><b>${ic("monitor", "sm")}</b><div><b>App para Windows</b><small>Programa completo: seletor de tela próprio, fica na bandeja e já vem com o controle remoto embutido (não precisa do Agente Auryx).</small>${DESKTOP ? `<small style="color:var(--green)">✅ Instalado — você está nele agora.</small>` : `<a class="btn primary sm" href="${DESKTOP_URL}" target="_blank" rel="noopener">${ic("arrowDown", "sm")}Baixar Auryx-Nexavoria-Setup.exe</a><small>Se o Windows avisar "O Windows protegeu o computador", clique em <b>Mais informações › Executar assim mesmo</b>.</small>`}</div></div>
+      <div class="step"><b>${ic("users", "sm")}</b><div><b>Instalar pelo navegador (PC e celular)</b><small>Leve e sem baixar nada: vira um app com ícone, direto do site.</small>${installPrompt && !DESKTOP ? `<button class="btn primary sm" data-install>${ic("plus", "sm")}Instalar Auryx Nexavória</button>` : ""}${pwaState ? `<small>${pwaState}</small>` : ""}</div></div>
     </div>`;
 }
 function mountAppDl(p, rerender) {
@@ -3517,11 +3830,11 @@ function mountAppDl(p, rerender) {
 function renderRemote() {
   const local = LOCAL || location.protocol === "file:";
   if (DESKTOP) return `<p style="color:var(--muted);margin-top:-8px">Deixe um amigo controlar seu PC (como AnyDesk) ou jogar com você em co-op local pela transmissão.</p>
-    <div class="steps"><div class="step"><b>✓</b><div><b>Já está pronto!</b><small>O app de PC tem o controle remoto embutido. Quando alguém clicar em ${ic("gamepad", "xs")} <b>Pedir controle</b> na sua transmissão, é só escolher <b>Co-op</b> ou <b>Controle total</b>.</small><small>Para jogos que rodam como administrador, abra o NEXORA como administrador também.</small></div></div></div>`;
+    <div class="steps"><div class="step"><b>✓</b><div><b>Já está pronto!</b><small>O app de PC tem o controle remoto embutido. Quando alguém clicar em ${ic("gamepad", "xs")} <b>Pedir controle</b> na sua transmissão, é só escolher <b>Co-op</b> ou <b>Controle total</b>.</small><small>Para jogos que rodam como administrador, abra a Auryx Nexavória como administrador também.</small></div></div></div>`;
   return `<p style="color:var(--muted);margin-top:-8px">Deixe um amigo controlar seu PC (como AnyDesk) ou jogar com você em co-op local pela transmissão — como o Remote Play Together da Steam.</p>
     <div class="steps">
-      <div class="step"><b>1</b><div><b>Baixe o NEXORA Agente</b><small>Um programinha do Windows que move o mouse e o teclado quando você permite. Não precisa instalar.</small>${local ? `<small style="color:var(--yellow)">Disponível na versão online do NEXORA.</small>` : `<a class="btn sm" href="/agente/NEXORA-Agente.zip" download>${ic("arrowDown", "sm")}Baixar NEXORA-Agente.zip</a>`}</div></div>
-      <div class="step"><b>2</b><div><b>Abra o agente</b><small>Descompacte e dê dois cliques em <span class="kbd">NEXORA-Agente.bat</span>. Ele mostra um código de 6 números.</small></div></div>
+      <div class="step"><b>1</b><div><b>Baixe o Agente Auryx</b><small>Um programinha do Windows que move o mouse e o teclado quando você permite. Não precisa instalar.</small>${local ? `<small style="color:var(--yellow)">Disponível na versão online da Auryx Nexavória.</small>` : `<a class="btn sm" href="/agente/Auryx-Agente.zip" download>${ic("arrowDown", "sm")}Baixar Auryx-Agente.zip</a>`}</div></div>
+      <div class="step"><b>2</b><div><b>Abra o agente</b><small>Descompacte e dê dois cliques em <span class="kbd">Auryx-Agente.bat</span>. Ele mostra um código de 6 números.</small></div></div>
       <div class="step"><b>3</b><div><b>Conecte aqui</b><div class="invite-box" style="margin-top:8px"><input id="agCode" inputmode="numeric" maxlength="6" placeholder="Código de 6 números" value="${esc(S.settings.agentCode || "")}"><button class="btn primary sm" data-ag>Conectar</button></div><small data-ag-status style="margin-top:6px;display:block">${agentOk() ? "✅ Agente conectado" : "Agente desconectado"}</small></div></div>
       <div class="step"><b>4</b><div><b>Transmita a tela e aceite</b><small>Quando alguém clicar em ${ic("gamepad", "xs")} <b>Pedir controle</b> na sua transmissão, você escolhe: <b>Co-op</b> (só teclado/controle) ou <b>Controle total</b> (mouse e teclado). Fechar a janela do agente corta tudo na hora.</small></div></div>
     </div>
@@ -3535,7 +3848,7 @@ function mountRemote(p, rerender) {
     if (code.length !== 6) { toast("O código tem 6 números.", "warn"); return; }
     S.settings.agentCode = code; saveSettings();
     if (AG.ws) { try { AG.ws.close(); } catch {} AG.ws = null; }
-    try { await agentConnect(code); toast("NEXORA Agente conectado!", "ok"); rerender(); }
+    try { await agentConnect(code); toast("Agente Auryx conectado!", "ok"); rerender(); }
     catch (e) { toast(e.message, "error", 6000); }
   };
 }
@@ -3550,7 +3863,8 @@ function bindToggles(p, extra) {
 }
 function renderAccount() {
   const me = S.me;
-  return `<div class="profile-card" style="--c:${esc(me.color)}"><div class="pb"></div><div class="pc"><span data-pick-avatar data-tip="Trocar avatar">${avatar({ ...me, status: me.statusPref === "invisible" ? "offline" : me.statusPref }, 92, true)}</span><div class="info"><b>${esc(me.username)}</b><small>No NEXORA desde ${new Date(me.created).toLocaleDateString("pt-BR")}</small></div><button class="btn sm" data-pick-avatar>Alterar avatar</button></div></div>
+  return `<div class="profile-card" style="--c:${esc(me.color)}"><div class="pb"></div><div class="pc"><span data-pick-avatar data-tip="Trocar avatar">${avatar({ ...me, status: me.statusPref === "invisible" ? "offline" : me.statusPref }, 92, true)}</span><div class="info"><b>${esc(me.username)}</b><small>No Auryx Nexavória desde ${new Date(me.created).toLocaleDateString("pt-BR")}</small></div><button class="btn sm" data-pick-avatar>Alterar avatar</button></div></div>
+    ${LOCAL ? "" : `<div class="email-box"><span>${ic("bell", "sm")}<b>E-mail</b>${me.email ? `<small>${esc(me.email)} ${me.emailVerified ? `<span class="ost st-ok">confirmado</span>` : `<span class="ost st-pend">não confirmado</span>`}</small>` : `<small>Nenhum e-mail — adicione para poder recuperar a senha.</small>`}</span><button class="btn sm" data-email>${me.email ? "Trocar e-mail" : "Adicionar e-mail"}</button></div>`}
     <span class="label">Cor do perfil</span>
     <div class="swatches" style="margin:8px 0 18px">${COLORS.map(c => `<button type="button" class="swatch${c === me.color ? " on" : ""}" style="--c:${c}" data-color="${c}"></button>`).join("")}</div>
     <span class="label">Status</span>
@@ -3558,9 +3872,42 @@ function renderAccount() {
     <label class="field"><span>Sobre mim</span><textarea id="about" maxlength="190" placeholder="Conte algo sobre você">${esc(me.about || "")}</textarea></label>
     <button class="btn primary" data-save-about>Salvar</button>`;
 }
+function emailModal(done) {
+  let step = 1;
+  modal({
+    title: "E-mail da conta", sub: "Usado para confirmar sua conta e recuperar a senha.",
+    body: `<div data-step1><label class="field"><span>Novo e-mail</span><input data-em type="email" maxlength="200" autocomplete="email"></label><label class="field"><span>Sua senha atual</span><input data-pw type="password" autocomplete="current-password"></label></div>
+      <div data-step2 class="hidden"><p data-msg style="color:var(--text-2)"></p><label class="field"><span>Código de 6 números</span><input data-code class="code-in" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></label></div>
+      <div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" data-go>Enviar código</button></div>`,
+    onMount(m, close) {
+      const go = m.querySelector("[data-go]");
+      go.onclick = async () => {
+        go.classList.add("loading");
+        try {
+          if (step === 1) {
+            const r = await emit("account:email", { email: m.querySelector("[data-em]").value.trim(), password: m.querySelector("[data-pw]").value });
+            if (r.error) throw new Error(r.error);
+            step = 2;
+            m.querySelector("[data-step1]").classList.add("hidden");
+            m.querySelector("[data-step2]").classList.remove("hidden");
+            m.querySelector("[data-msg]").textContent = `Enviamos um código para ${r.email}. Confira o spam também.`;
+            go.textContent = "Confirmar";
+            m.querySelector("[data-code]").focus();
+          } else {
+            await authApi("account/verify", { code: m.querySelector("[data-code]").value.replace(/\D/g, "") }, true);
+            close(); toast("E-mail confirmado! ✅", "ok");
+            setTimeout(done, 300);
+          }
+        } catch (err) { toast(err.message, "error"); }
+        finally { go.classList.remove("loading"); }
+      };
+    }
+  });
+}
 function mountAccount(p, rerender) {
   const upd = async data => { const r = await emit("profile:update", data); if (r.error) toast(r.error, "error"); else setTimeout(rerender, 80); };
   p.addEventListener("click", e => {
+    if (e.target.closest("[data-email]")) { emailModal(rerender); return; }
     const av = e.target.closest("[data-pick-avatar]");
     if (av) iconMenu(av, v => upd({ avatar: v }));
     const col = e.target.closest("[data-color]");
@@ -3580,7 +3927,7 @@ function renderVoiceSettings() {
     <button class="btn sm" data-test>${ic("mic", "sm")}Testar microfone</button> <button class="btn sm" data-listen>${ic("headphones", "sm")}Ouvir a mim mesmo</button>
     <span class="label" style="display:block;margin-top:22px">Supressão de ruído</span>
     <div style="margin:8px 0 6px">
-      ${[["ai", "IA do NEXORA (recomendado)", "RNNoise: tira ventilador, teclado, cachorro, trânsito — deixa só a sua voz"], ["browser", "Padrão do navegador", "Mais leve, remove só ruído constante"], ["off", "Desligada", "Som cru do microfone (bom para música)"]].map(([k, t, d]) => `<label class="radio-card${nsMode() === k ? " on" : ""}"><span><b>${t}</b><small>${d}</small></span><input type="radio" name="nsm" value="${k}" ${nsMode() === k ? "checked" : ""}></label>`).join("")}
+      ${[["ai", "IA da Auryx Nexavória (recomendado)", "RNNoise: tira ventilador, teclado, cachorro, trânsito — deixa só a sua voz"], ["browser", "Padrão do navegador", "Mais leve, remove só ruído constante"], ["off", "Desligada", "Som cru do microfone (bom para música)"]].map(([k, t, d]) => `<label class="radio-card${nsMode() === k ? " on" : ""}"><span><b>${t}</b><small>${d}</small></span><input type="radio" name="nsm" value="${k}" ${nsMode() === k ? "checked" : ""}></label>`).join("")}
     </div>
     <div>
       ${toggleRow("nsGate", "Portão inteligente", "Com a IA ligada: silencia seu microfone quando você não está falando", st.nsGate !== false)}
@@ -3833,6 +4180,18 @@ const ACTIONS = {
   home: goHome,
   friends: () => goFriends(),
   "get-app": () => userSettings("app"),
+  premium: () => goPremium(),
+  admin: () => goAdmin(),
+  "buy-plan": a => buyModal(a.dataset.tier),
+  "open-ticket": a => openTicket(a.dataset.id),
+  "admin-tab": a => { S.adminTab = a.dataset.tab; renderAdmin(true); },
+  "admin-filter": a => { S.adminFilter = a.dataset.f; renderAdmin(true); },
+  "receipt-view": a => { const lb = document.createElement("div"); lb.className = "lightbox"; lb.innerHTML = `<img src="${esc(a.dataset.src)}" alt="Comprovante">`; lb.onclick = () => lb.remove(); document.body.append(lb); },
+  "order-review": async a => { const r = await emit("order:review", { id: a.dataset.id }); if (r.error) toast(r.error, "error"); },
+  "order-approve": a => adminApprove(a.dataset.id),
+  "order-reject": a => adminReject(a.dataset.id),
+  "admin-grant": a => adminGrant(a.dataset.uid, a.dataset.name),
+  "admin-revoke": a => adminRevoke(a.dataset.uid, a.dataset.name),
   attach: () => $("#fileInput").click(),
   "new-group": () => groupModal(),
   "act-menu": a => actMenu(a),
@@ -3920,6 +4279,13 @@ const ACTIONS = {
 
 function wire() {
   wireControlInput();
+  document.addEventListener("submit", e => {
+    const f = e.target.closest("[data-usearch]");
+    if (!f) return;
+    e.preventDefault();
+    S.adminQ = f.querySelector("input").value.trim();
+    renderAdmin(true);
+  });
   document.addEventListener("click", e => {
     const sp = e.target.closest(".spoiler");
     if (sp) { sp.classList.toggle("show"); return; }
@@ -4065,15 +4431,57 @@ function wire() {
 /* ------------------------------------------------------------------ */
 /* Autenticação e inicialização                                        */
 /* ------------------------------------------------------------------ */
-let authMode = "login";
-function setAuthMode(m) {
+let authMode = "login", authEmail = "";
+const AUTH_MODES = {
+  login: { f: ["user", "pass"], btn: "Entrar", sub: "Que bom te ver de novo!", links: ["forgot"] },
+  register: { f: ["user", "email", "pass"], btn: "Criar conta", sub: "Crie sua conta em segundos.", links: [], hint: "Senha com 8+ caracteres, usando letras e números." },
+  verify: { f: ["code"], btn: "Confirmar e-mail", sub: "Confirme seu e-mail", links: ["resend", "back"] },
+  forgot: { f: ["email"], btn: "Enviar código", sub: "Recuperar a senha", links: ["back"], hint: "Vamos mandar um código para o e-mail da sua conta." },
+  reset: { f: ["email", "code", "newpass"], btn: "Salvar nova senha", sub: "Criar uma nova senha", links: ["resend-reset", "back"] }
+};
+function setAuthMode(m, hint) {
   authMode = m;
+  const md = AUTH_MODES[m];
+  const tabs = m === "login" || m === "register";
+  $(".seg").classList.toggle("hidden", !tabs);
   $$(".seg button").forEach(b => b.classList.toggle("on", b.dataset.mode === m));
   $(".seg").classList.toggle("right", m === "register");
-  $("#authSubmit span").textContent = m === "login" ? "Entrar" : "Criar conta";
-  $("#authSub").textContent = m === "login" ? "Que bom te ver de novo!" : "Crie sua conta em segundos.";
+  const fields = LOCAL ? md.f.filter(f => f !== "email") : md.f;
+  $$("#authForm [data-f]").forEach(el => el.classList.toggle("hidden", !fields.includes(el.dataset.f)));
+  $("#userLabel").textContent = m === "register" ? "Nome de usuário" : LOCAL ? "Usuário" : "Usuário ou e-mail";
+  $("#authSubmit span").textContent = md.btn;
+  $("#authSub").textContent = md.sub;
   $("#password").autocomplete = m === "login" ? "current-password" : "new-password";
+  $("#authHint").textContent = hint || md.hint || "";
+  $$(".auth-links [data-auth]").forEach(a => {
+    const k = a.dataset.auth;
+    a.classList.toggle("hidden", LOCAL || !(md.links.includes(k) || (k === "resend" && md.links.includes("resend-reset"))));
+  });
   $("#authError").textContent = "";
+  if (m === "reset" || m === "forgot") $("#email").value = authEmail || $("#email").value;
+  setTimeout(() => { const first = $(`#authForm [data-f="${fields[0]}"] input`); if (first) first.focus(); }, 30);
+}
+async function authApi(path, body, withToken) {
+  const headers = { "content-type": "application/json" };
+  if (withToken && S.token) headers.authorization = "Bearer " + S.token;
+  let r;
+  try { r = await fetch("/api/" + path, { method: "POST", headers, body: JSON.stringify(body || {}) }); }
+  catch { throw new Error("Não foi possível falar com o servidor."); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "Algo deu errado. Tente de novo.");
+  return j;
+}
+async function authLink(k) {
+  const err = $("#authError");
+  err.textContent = "";
+  try {
+    if (k === "forgot") { authEmail = ($("#username").value.includes("@") && $("#username").value.trim()) || ""; setAuthMode("forgot"); }
+    else if (k === "back") { if (authMode === "verify") { store.del("token"); S.token = null; } setAuthMode("login"); }
+    else if (k === "resend") {
+      if (authMode === "reset") { await authApi("account/forgot", { email: $("#email").value.trim() }); toast("Se o e-mail tiver conta, enviamos um novo código.", "ok"); }
+      else { const j = await authApi("account/resend", {}, true); toast(`Novo código enviado para ${j.email}.`, "ok"); }
+    }
+  } catch (x) { err.textContent = x.message; }
 }
 function hideBoot() {
   const b = $("#boot");
@@ -4097,27 +4505,41 @@ function showApp() {
 async function doAuth(e) {
   e.preventDefault();
   const u = $("#username").value.trim(), p = $("#password").value, err = $("#authError"), btn = $("#authSubmit");
+  const email = $("#email").value.trim(), code = $("#code").value.replace(/\D/g, ""), np = $("#newPassword").value;
   err.textContent = "";
-  if (u.length < 3) { err.textContent = "O usuário precisa de pelo menos 3 caracteres."; return; }
-  if (p.length < 8) { err.textContent = "A senha precisa de pelo menos 8 caracteres."; return; }
+  const startApp = token => { S.token = token; store.set("token", token); $("#password").value = ""; $("#newPassword").value = ""; $("#code").value = ""; connect(); };
+  if ((authMode === "login" || authMode === "register") && u.length < 3) { err.textContent = "Digite seu usuário."; return; }
+  if ((authMode === "login" || authMode === "register") && p.length < 8) { err.textContent = "A senha precisa de pelo menos 8 caracteres."; return; }
+  if (!LOCAL && authMode === "register" && !/^\S+@\S+\.\S+$/.test(email)) { err.textContent = "Digite um e-mail válido."; return; }
+  if ((authMode === "verify" || authMode === "reset") && code.length !== 6) { err.textContent = "O código tem 6 números."; return; }
   btn.classList.add("loading");
   try {
-    if (LOCAL) {
-      S.token = await localAuth(authMode, u, p);
-      store.set("token", S.token);
-      $("#password").value = "";
-      connect();
-      return;
+    if (LOCAL) { S.token = await localAuth(authMode, u, p); store.set("token", S.token); $("#password").value = ""; connect(); return; }
+    if (authMode === "login" || authMode === "register") {
+      const j = await authApi(authMode, authMode === "login" ? { username: u, password: p } : { username: u, email, password: p });
+      if (j.verify) {
+        S.token = j.token; store.set("token", j.token); $("#password").value = "";
+        setAuthMode("verify", `Enviamos um código para ${j.email}. Confira também a caixa de spam.`);
+        if (j.mailError) err.textContent = j.mailError;
+        return;
+      }
+      startApp(j.token);
+    } else if (authMode === "verify") {
+      await authApi("account/verify", { code }, true);
+      toast("E-mail confirmado! 🎉", "ok");
+      startApp(S.token);
+    } else if (authMode === "forgot") {
+      authEmail = email;
+      await authApi("account/forgot", { email });
+      setAuthMode("reset", "Se existir uma conta com esse e-mail, o código chegou lá. Confira o spam também.");
+    } else if (authMode === "reset") {
+      if (np.length < 8 || !/[A-Za-z]/.test(np) || !/\d/.test(np)) { err.textContent = "A nova senha precisa de 8+ caracteres, com letras e números."; return; }
+      const j = await authApi("account/reset", { email, code, password: np });
+      toast("Senha trocada! Você saiu dos outros aparelhos por segurança.", "ok", 5000);
+      startApp(j.token);
     }
-    const r = await fetch("/api/" + (authMode === "login" ? "login" : "register"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: u, password: p }) });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || "Falha ao entrar.");
-    S.token = j.token;
-    store.set("token", j.token);
-    $("#password").value = "";
-    connect();
   } catch (x) {
-    err.textContent = x instanceof TypeError ? "Não foi possível falar com o servidor." : x.message;
+    err.textContent = x.message;
   } finally { btn.classList.remove("loading"); }
 }
 async function logout() {
@@ -4129,8 +4551,8 @@ async function logout() {
 
 function boot() {
   applySettings();
-  $$("[data-logo]").forEach(e => (e.innerHTML = LOGO));
-  $(".boot-logo").innerHTML = LOGO;
+  $$("[data-logo]").forEach(e => (e.innerHTML = LOGO()));
+  $(".boot-logo").innerHTML = LOGO();
   $$("[data-icon]").forEach(e => (e.innerHTML = ic(e.dataset.icon)));
   const m = location.pathname.match(/^\/(?:convite|invite)\/([A-Za-z0-9]{4,16})/);
   let saved = null;
@@ -4151,6 +4573,8 @@ function boot() {
   if (DESKTOP) document.documentElement.classList.add("desktop-app");
   $$(".seg button").forEach(b => (b.onclick = () => setAuthMode(b.dataset.mode)));
   $("#authForm").addEventListener("submit", doAuth);
+  $("#authForm").addEventListener("click", e => { const a = e.target.closest("[data-auth]"); if (a) { e.preventDefault(); authLink(a.dataset.auth); } });
+  setAuthMode("login");
   wire();
   if (S.token) connect(); else showAuth();
 }

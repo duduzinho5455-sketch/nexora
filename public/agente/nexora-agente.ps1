@@ -1,6 +1,6 @@
-# NEXORA Agente
-# Deixa um amigo controlar este PC (mouse e teclado) pelo NEXORA - somente
-# enquanto esta janela estiver aberta e somente depois que VOCE aceitar no NEXORA.
+# Agente Auryx
+# Deixa um amigo controlar este PC (mouse e teclado) pelo Auryx Nexavoria - somente
+# enquanto esta janela estiver aberta e somente depois que VOCE aceitar no Auryx Nexavoria.
 # Fechar esta janela corta o controle na hora.
 param([int]$Porta = 47800, [string]$Codigo = "", [switch]$Oculto)
 
@@ -54,15 +54,15 @@ try { $listener.Start() } catch {
   exit 1
 }
 
-$Host.UI.RawUI.WindowTitle = "NEXORA Agente - codigo $codigo"
+$Host.UI.RawUI.WindowTitle = "Agente Auryx - codigo $codigo"
 Write-Host ""
 Write-Host "  =========================================" -ForegroundColor Magenta
-Write-Host "            NEXORA Agente ativo" -ForegroundColor Magenta
+Write-Host "            Agente Auryx ativo" -ForegroundColor Magenta
 Write-Host "  =========================================" -ForegroundColor Magenta
 Write-Host ""
 Write-Host "  Seu codigo:  $codigo" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  1. No NEXORA, abra Configuracoes > Controle remoto"
+Write-Host "  1. No Auryx Nexavoria, abra Configuracoes > Controle remoto"
 Write-Host "  2. Digite o codigo acima e clique em Conectar"
 Write-Host "  3. Quando alguem pedir controle, voce escolhe se aceita"
 Write-Host ""
@@ -72,7 +72,7 @@ Write-Host ""
 while ($listener.IsListening) {
   $ctx = $listener.GetContext()
   if (-not $ctx.Request.IsWebSocketRequest) {
-    $b = [Text.Encoding]::UTF8.GetBytes("NEXORA Agente ativo")
+    $b = [Text.Encoding]::UTF8.GetBytes("Agente Auryx ativo")
     $ctx.Response.OutputStream.Write($b, 0, $b.Length)
     $ctx.Response.Close()
     continue
@@ -85,7 +85,7 @@ while ($listener.IsListening) {
   }
   try { $ws = $ctx.AcceptWebSocketAsync([NullString]::Value).GetAwaiter().GetResult().WebSocket }
   catch { Write-Host ("  Falha ao conectar: " + $_.Exception.Message) -ForegroundColor Red; try { $ctx.Response.Close() } catch { }; continue }
-  Write-Host ("  Conectado ao NEXORA (" + $ctx.Request.Headers["Origin"] + ")") -ForegroundColor Green
+  Write-Host ("  Conectado ao Auryx Nexavoria (" + $ctx.Request.Headers["Origin"] + ")") -ForegroundColor Green
   $buf = New-Object byte[] 8192
   $seg = New-Object System.ArraySegment[byte] -ArgumentList (,$buf)
   $teclas = @{}
@@ -118,5 +118,5 @@ while ($listener.IsListening) {
     foreach ($b in @($botoes.Keys)) { [NxInput]::Button([int]$b, $false) }
     try { $ws.Dispose() } catch { }
   }
-  Write-Host "  Desconectado do NEXORA." -ForegroundColor Yellow
+  Write-Host "  Desconectado do Auryx Nexavoria." -ForegroundColor Yellow
 }

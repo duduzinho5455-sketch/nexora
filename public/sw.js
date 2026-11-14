@@ -1,7 +1,7 @@
-/* NEXORA — service worker
+/* Auryx Nexavória — service worker
    Guarda só a "casca" do app (HTML, CSS, JS, ícones) para abrir rápido.
    Mensagens, login e voz sempre vão direto para o servidor. */
-const CACHE = "nexora-v3";
+const CACHE = "auryx-v4";
 const SHELL = ["/", "/style.css", "/app.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", e => {

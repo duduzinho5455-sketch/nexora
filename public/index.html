@@ -5,24 +5,24 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0b0c14">
 <meta name="color-scheme" content="dark light">
-<meta name="description" content="NEXORA — sua comunidade, sua conexão.">
-<title>NEXORA</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%238b5cf6'/%3E%3Cstop offset='1' stop-color='%2322d3ee'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='48' height='48' rx='14' fill='%2311131f'/%3E%3Cpath d='M15 34V14l18 20V14' fill='none' stroke='url(%23g)' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<meta name="description" content="Auryx Nexavória — sua comunidade, sua conexão.">
+<title>Auryx Nexavória</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%238b5cf6'/%3E%3Cstop offset='1' stop-color='%2322d3ee'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='48' height='48' rx='14' fill='%2311131f'/%3E%3Cpath d='M12 36 24 12l12 24M17 28h14' fill='none' stroke='url(%23g)' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="NEXORA">
+<meta name="apple-mobile-web-app-title" content="Auryx Nexavória">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 
 <div id="boot" class="boot"><div class="boot-logo"></div><div class="boot-bar"><i></i></div></div>
 
-<section id="auth" class="auth hidden" aria-label="Entrar no NEXORA">
+<section id="auth" class="auth hidden" aria-label="Entrar na Auryx Nexavória">
   <div class="auth-bg" aria-hidden="true"><i></i><i></i><i></i><div class="auth-grid"></div></div>
   <div class="auth-card">
-    <div class="brand"><span class="logo" data-logo></span><h1>NEXORA</h1></div>
+    <div class="brand"><span class="logo" data-logo></span><h1>Auryx Nexavória</h1></div>
     <p class="auth-sub" id="authSub">Que bom te ver de novo!</p>
     <div class="seg" role="tablist">
       <button type="button" class="on" data-mode="login" role="tab">Entrar</button>
@@ -30,17 +30,22 @@
       <span class="seg-ind"></span>
     </div>
     <form id="authForm" novalidate>
-      <label class="field"><span>Usuário</span><input id="username" autocomplete="username" minlength="3" maxlength="24" required spellcheck="false"></label>
-      <label class="field"><span>Senha</span><input id="password" type="password" autocomplete="current-password" minlength="8" maxlength="128" required></label>
+      <label class="field" data-f="user"><span id="userLabel">Usuário ou e-mail</span><input id="username" autocomplete="username" maxlength="200" spellcheck="false"></label>
+      <label class="field" data-f="email"><span>E-mail</span><input id="email" type="email" autocomplete="email" maxlength="200" spellcheck="false"></label>
+      <label class="field" data-f="pass"><span>Senha</span><input id="password" type="password" autocomplete="current-password" maxlength="128"></label>
+      <label class="field" data-f="code"><span>Código de 6 números</span><input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" class="code-in"></label>
+      <label class="field" data-f="newpass"><span>Nova senha</span><input id="newPassword" type="password" autocomplete="new-password" maxlength="128"></label>
+      <small class="auth-hint" id="authHint"></small>
       <div class="auth-err" id="authError" role="alert"></div>
       <button class="btn primary big" id="authSubmit"><span>Entrar</span></button>
+      <div class="auth-links"><a data-auth="forgot" role="button" tabindex="0">Esqueci a senha</a><a data-auth="resend" role="button" tabindex="0">Reenviar código</a><a data-auth="back" role="button" tabindex="0">Voltar para o login</a></div>
     </form>
     <p class="auth-note hidden" id="authInvite">Você recebeu um convite — entre ou crie sua conta para aceitar.</p>
   </div>
 </section>
 
 <div id="app" class="app hidden">
-  <div class="conn-bar hidden" id="connBar">Reconectando ao NEXORA…</div>
+  <div class="conn-bar hidden" id="connBar">Reconectando à Auryx Nexavória…</div>
 
   <nav class="rail" id="rail" aria-label="Servidores">
     <div class="rail-item home" data-act="home" data-tip="Início" role="button" tabindex="0"><span class="pill"></span><div class="srv-icon logo-icon" data-logo></div></div>
@@ -48,6 +53,8 @@
     <div class="rail-list" id="serverList"></div>
     <div class="rail-item tool" data-act="add-server" data-tip="Adicionar um servidor" role="button" tabindex="0"><span class="pill"></span><div class="srv-icon tool-icon" data-icon="plus"></div></div>
     <div class="rail-item tool" data-act="discover" data-tip="Explorar comunidades" role="button" tabindex="0"><span class="pill"></span><div class="srv-icon tool-icon" data-icon="compass"></div></div>
+    <div class="rail-item tool premium" data-act="premium" data-tip="Premium e pagamentos" role="button" tabindex="0"><span class="pill"></span><div class="srv-icon tool-icon" data-icon="gem"></div></div>
+    <div class="rail-item tool admin hidden" data-act="admin" data-tip="Painel ADM" role="button" tabindex="0"><span class="pill"></span><div class="srv-icon tool-icon" data-icon="shield"></div></div>
   </nav>
 
   <aside class="side" id="side">
@@ -89,6 +96,8 @@
     <section id="discoverView" class="view discover-view hidden"></section>
     <section id="homeView" class="view home-view hidden"></section>
     <section id="friendsView" class="view home-view hidden"></section>
+    <section id="premiumView" class="view home-view hidden"></section>
+    <section id="adminView" class="view home-view hidden"></section>
   </main>
 
   <aside class="members" id="members" aria-label="Membros"></aside>

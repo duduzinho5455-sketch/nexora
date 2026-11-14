@@ -1,7 +1,7 @@
 /**
- * NEXORA para Windows (Electron)
- * Abre o NEXORA numa janela própria, com seletor de tela, ícone na bandeja
- * e o NEXORA Agente embutido (controle remoto sem baixar nada à parte).
+ * Auryx Nexavória para Windows (Electron)
+ * Abre a Auryx Nexavória numa janela própria, com seletor de tela, ícone na bandeja
+ * e o Agente Auryx embutido (controle remoto sem baixar nada à parte).
  */
 "use strict";
 const { app, BrowserWindow, shell, session, desktopCapturer, ipcMain, Menu, Tray, nativeImage } = require("electron");
@@ -10,7 +10,7 @@ const fs = require("node:fs");
 const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
 
-const APP_URL = (process.env.NEXORA_URL || "https://nexora-ujw6.onrender.com").replace(/\/+$/, "");
+const APP_URL = (process.env.AURYX_URL || process.env.NEXORA_URL || "https://nexora-ujw6.onrender.com").replace(/\/+$/, "");
 const ORIGIN = new URL(APP_URL).origin;
 const ICON = path.join(__dirname, "build", "icon.png");
 
@@ -24,7 +24,7 @@ let agent = null, agentCode = null;
 function createWindow() {
   win = new BrowserWindow({
     width: 1300, height: 820, minWidth: 940, minHeight: 560,
-    backgroundColor: "#08090f", title: "NEXORA", icon: ICON, show: false, autoHideMenuBar: true,
+    backgroundColor: "#08090f", title: "Auryx Nexavória", icon: ICON, show: false, autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, sandbox: true, spellcheck: true, backgroundThrottling: false }
   });
   Menu.setApplicationMenu(null);
@@ -60,12 +60,12 @@ function showWindow() {
 /* ---------- bandeja ---------- */
 function createTray() {
   tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: 16, height: 16 }));
-  tray.setToolTip("NEXORA");
+  tray.setToolTip("Auryx Nexavória");
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Abrir NEXORA", click: showWindow },
+    { label: "Abrir Auryx Nexavória", click: showWindow },
     { label: "Recarregar", click: () => win && win.webContents.reload() },
     { type: "separator" },
-    { label: "Sair do NEXORA", click: () => { quitting = true; app.quit(); } }
+    { label: "Sair da Auryx Nexavória", click: () => { quitting = true; app.quit(); } }
   ]));
   tray.on("click", showWindow);
 }
@@ -121,7 +121,7 @@ function pickSource(sources) {
   });
 }
 
-/* ---------- NEXORA Agente embutido ---------- */
+/* ---------- Agente Auryx embutido ---------- */
 function agentScript() {
   const packed = path.join(process.resourcesPath || "", "agente", "nexora-agente.ps1");
   if (app.isPackaged && fs.existsSync(packed)) return packed;

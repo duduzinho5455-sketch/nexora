@@ -1,5 +1,5 @@
 /**
- * NEXORA — servidor
+ * Auryx Nexavória — servidor
  * HTTP estático (com gzip + ETag em memória), API de conta, Socket.IO para
  * chat/servidores/convites e sinalização WebRTC para voz, câmera e tela.
  * Requer Node.js 18+. Única dependência: socket.io
@@ -72,7 +72,9 @@ async function loadDb() {
   }
   db.files = db.files || {};
   db.dms = db.dms || {};
-  for (const u of Object.values(db.users)) byName.set(u.username.toLowerCase(), u.id);
+  db.orders = db.orders || {};
+  db.audit = db.audit || [];
+  for (const u of Object.values(db.users)) { byName.set(u.username.toLowerCase(), u.id); if (u.email) byEmail.set(u.email, u.id); }
   for (const s of Object.values(db.servers)) for (const c of s.channels) chanIndex.set(c.id, s.id);
   const now = Date.now();
   for (const [k, v] of Object.entries(db.sessions)) if (!db.users[v.userId] || now - v.created > SESSION_TTL) delete db.sessions[k];
@@ -181,13 +183,35 @@ function gameOf(u) {
   if (u.steamGame) return u.steamGame;
   return u.game ? { name: u.game } : null;
 }
+/* ------------------------------------------------------------------ */
+/* Planos Premium (pagos por Pix, liberados só por um ADM)             */
+/* ------------------------------------------------------------------ */
+const PLANS = {
+  plus: { tier: "plus", name: "Plus", price: 599, rank: 1, link: "https://nubank.com.br/cobrar/577jqn/6af86b8d-a317-400e-85ce-bfb41001dfa5",
+    benefits: ["Selo Plus no perfil", "Cores do perfil em degradê", "Status personalizado com emoji", "Arquivos de até 15 MB"] },
+  pro: { tier: "pro", name: "Pro", price: 1499, rank: 2, link: "https://nubank.com.br/cobrar/577jqn/6af86c01-b569-4fcc-8170-bc699f49f89f",
+    benefits: ["Tudo do Plus", "Selo Pro", "Avatar animado (GIF) e imagem enviada", "Banner no perfil", "Efeito no nome (degradê, brilho, arco-íris)", "Arquivos de até 25 MB"] },
+  max: { tier: "max", name: "Max", price: 3499, rank: 3, link: "https://nubank.com.br/cobrar/577jqn/6af86c1d-40ed-4da3-82cc-221f2402949a",
+    benefits: ["Tudo do Pro", "Selo Max exclusivo", "Efeitos animados no perfil (aurora, neon, fogo, estrelas)", "Arquivos de até 50 MB", "Prioridade no atendimento"] }
+};
+const PLAN_DAYS = 30;
+const planOf = u => { const p = u && u.plan; return p && PLANS[p.tier] && p.until > Date.now() ? p.tier : ""; };
+const rankOf = u => (PLANS[planOf(u)] || { rank: 0 }).rank;
+const maxFileOf = u => [8, 15, 25, 50][rankOf(u)] * 1024 * 1024;
+const NEED = { theme: 1, cs: 1, avatarFile: 2, banner: 2, fx: 2, pfx: 3 };   // nível mínimo de cada benefício
+const RANK_NAME = ["", "Plus", "Pro", "Max"];
+
 function pubUser(u) {
   const off = presence(u) === "offline";
+  const r = rankOf(u);
+  const av = u.avatar || "";
   return {
-    id: u.id, username: u.username, color: u.color, avatar: u.avatar || "", about: u.about || "", status: presence(u), created: u.created,
-    steam: u.steam || "", game: off ? null : gameOf(u),
-    // Perfil Turbo
-    banner: u.banner || "", theme: u.theme || null, pron: u.pron || "", cs: off ? null : u.cs || null, fx: u.fx || "", pfx: u.pfx || ""
+    id: u.id, username: u.username, color: u.color, avatar: av.startsWith("/f/") && r < NEED.avatarFile ? "" : av,
+    about: u.about || "", status: presence(u), created: u.created,
+    steam: u.steam || "", game: off ? null : gameOf(u), plan: planOf(u),
+    // Perfil Turbo — só aparece o que o plano atual libera (se o plano vencer, some sem apagar nada)
+    banner: r >= NEED.banner ? u.banner || "" : "", theme: r >= NEED.theme ? u.theme || null : null, pron: u.pron || "",
+    cs: off || r < NEED.cs ? null : u.cs || null, fx: r >= NEED.fx ? u.fx || "" : "", pfx: r >= NEED.pfx ? u.pfx || "" : ""
   };
 }
 /* amigos e mensagens privadas */
@@ -273,11 +297,12 @@ function readJson(req) {
   });
 }
 const attempts = new Map();
+const AUTH_LIMIT = Number(process.env.AUTH_RATE_LIMIT) || 15;   // tentativas por minuto por IP
 function limited(ip) {
   const now = Date.now();
   let a = attempts.get(ip);
   if (!a || a.reset < now) { a = { n: 0, reset: now + 60000 }; attempts.set(ip, a); }
-  return ++a.n > 15;
+  return ++a.n > AUTH_LIMIT;
 }
 setInterval(() => { const now = Date.now(); for (const [k, v] of attempts) if (v.reset < now) attempts.delete(k); }, 60000).unref();
 
@@ -292,49 +317,201 @@ function clientIp(req) {
   return req.socket.remoteAddress || "?";
 }
 
+/* ------------------------------------------------------------------ */
+/* Contas: e-mail, verificação por código, recuperação de senha, ADM   */
+/* ------------------------------------------------------------------ */
+const APP_NAME = "Auryx Nexavória";
+const RESEND_KEY = process.env.RESEND_API_KEY || "";
+const MAIL_FROM = process.env.MAIL_FROM || `${APP_NAME} <onboarding@resend.dev>`;
+const MAIL_ON = !!RESEND_KEY;
+// ADMs: nomes de usuário na variável ADMIN_USERS (ex.: "laura,pedro"). Só vale para contas que já existem.
+const ADMIN_SET = new Set((process.env.ADMIN_USERS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean));
+const isAdmin = u => !!(u && ADMIN_SET.has(String(u.username).toLowerCase()));
+const EMAIL_RE = /^[^\s@<>()"',;:]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}$/;
+const byEmail = new Map();
+const maskEmail = e => { const [a, d] = String(e || "").split("@"); return a && d ? `${a.slice(0, 2)}${"•".repeat(Math.max(1, a.length - 2))}@${d}` : ""; };
+const hashCode = (code, salt) => crypto.createHash("sha256").update(salt + ":" + code).digest("hex");
+const newCode = () => String(crypto.randomInt(0, 1000000)).padStart(6, "0");
+class HttpError extends Error { constructor(code, msg) { super(msg); this.status = code; } }
+
+async function sendMail(to, subject, title, line, code) {
+  if (!MAIL_ON) throw new HttpError(503, "O envio de e-mails ainda não foi configurado no servidor (falta RESEND_API_KEY).");
+  const html = `<div style="font-family:Segoe UI,Arial,sans-serif;background:#0b0c14;padding:32px;color:#e8eaf4"><div style="max-width:440px;margin:auto;background:#131624;border-radius:16px;padding:28px;border:1px solid #232842"><h1 style="margin:0 0 4px;font-size:22px;color:#a78bfa">${APP_NAME}</h1><h2 style="margin:0 0 16px;font-size:18px;color:#fff">${title}</h2><p style="color:#b4b9d0">${line}</p><div style="font-size:34px;letter-spacing:10px;font-weight:800;text-align:center;background:#0b0c14;border-radius:12px;padding:16px;margin:18px 0;color:#fff">${code}</div><p style="color:#858ba8;font-size:13px">O código vale por 15 minutos. Se não foi você, ignore este e-mail.</p></div></div>`;
+  const r = await fetch(process.env.RESEND_API_URL || "https://api.resend.com/emails", {
+    method: "POST",
+    headers: { authorization: `Bearer ${RESEND_KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({ from: MAIL_FROM, to: [to], subject, html, text: `${title}\n\n${line}\n\nCódigo: ${code}\n\nVale por 15 minutos.` })
+  }).catch(() => null);
+  if (!r || !r.ok) {
+    const t = r ? await r.text().catch(() => "") : "sem resposta";
+    console.error("Resend:", r && r.status, String(t).slice(0, 300));
+    throw new HttpError(502, "Não foi possível enviar o e-mail agora. Confira o endereço ou tente de novo em alguns minutos.");
+  }
+}
+async function sendCode(user, kind, email) {
+  const code = newCode();
+  user[kind] = { h: hashCode(code, user.id), exp: Date.now() + 15 * 60e3, tries: 0, email: email || user.email, sent: Date.now() };
+  save();
+  if (kind === "vc") await sendMail(email || user.email, `Seu código: ${code}`, "Confirme seu e-mail", "Use este código para confirmar seu e-mail:", code);
+  else await sendMail(user.email, `Recuperar senha: ${code}`, "Recuperar sua senha", "Use este código para criar uma nova senha:", code);
+}
+function checkCode(user, kind, code) {
+  const c = user[kind];
+  if (!c || c.exp < Date.now()) throw new HttpError(400, "Código expirado. Peça um novo.");
+  if (c.tries >= 5) throw new HttpError(429, "Muitas tentativas erradas. Peça um novo código.");
+  c.tries++;
+  const ok = crypto.timingSafeEqual(Buffer.from(hashCode(String(code || "").replace(/\D/g, ""), user.id)), Buffer.from(c.h));
+  save();
+  if (!ok) throw new HttpError(400, `Código incorreto. Restam ${5 - c.tries} tentativa(s).`);
+  return c;
+}
+const needsVerify = u => MAIL_ON && !!u.needVerify && !u.emailVerified;
+const secureReq = req => req.headers["x-forwarded-proto"] === "https" || !!process.env.RENDER;
+function newSession(req, res, user) {
+  const token = crypto.randomBytes(32).toString("base64url");
+  db.sessions[tokenKey(token)] = { userId: user.id, created: Date.now() };
+  setSessionCookie(req, res, token);
+  save();
+  return token;
+}
+// Cookie só para abrir arquivos privados (comprovantes) — HttpOnly, o JavaScript não lê.
+function setSessionCookie(req, res, token) {
+  res.setHeader("set-cookie", `ax_s=${token}; Path=/f/; HttpOnly; SameSite=Lax; Max-Age=${60 * 24 * 3600}${secureReq(req) ? "; Secure" : ""}`);
+}
+function userFromBearer(req) {
+  const t = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const sess = t && t.length < 100 ? db.sessions[tokenKey(t)] : null;
+  return sess ? { user: db.users[sess.userId], token: t } : null;
+}
+function userFromCookie(req) {
+  const m = /(?:^|;\s*)ax_s=([A-Za-z0-9_-]{20,100})/.exec(String(req.headers.cookie || ""));
+  const sess = m ? db.sessions[tokenKey(m[1])] : null;
+  return sess ? db.users[sess.userId] : null;
+}
+const meView = u => ({ ...pubUser(u), statusPref: u.status || "online", email: maskEmail(u.email), emailVerified: !!u.emailVerified, admin: isAdmin(u), planInfo: u.plan && planOf(u) ? { tier: u.plan.tier, until: u.plan.until } : null });
+const failKey = new Map();   // tentativas erradas por conta: bloqueio de 15 min após 8 erros
+
 async function handleAuth(req, res, kind) {
   if (limited(clientIp(req))) return sendJson(res, 429, { error: "Muitas tentativas. Aguarde um minuto." });
   let body;
   try { body = await readJson(req); } catch { return sendJson(res, 400, { error: "Requisição inválida." }); }
-  const username = str(body.username, 24);
-  const password = typeof body.password === "string" ? body.password : "";
-  if (!/^[\p{L}\p{N}_.-]{3,24}$/u.test(username)) return sendJson(res, 400, { error: "O usuário deve ter de 3 a 24 caracteres (letras, números, _ . -)." });
-  if (password.length < 8 || password.length > 128) return sendJson(res, 400, { error: "A senha precisa ter pelo menos 8 caracteres." });
-  const key = username.toLowerCase();
-  let user;
-  if (kind === "register") {
-    if (byName.has(key)) return sendJson(res, 409, { error: "Esse nome de usuário já está em uso." });
-    const salt = crypto.randomBytes(16).toString("hex");
-    const hash = (await scrypt(password, salt)).toString("hex");
-    if (byName.has(key)) return sendJson(res, 409, { error: "Esse nome de usuário já está em uso." });
-    user = { id: newId(), username, color: pick(COLORS), avatar: "", about: "", status: "online", salt, hash, created: Date.now() };
-    db.users[user.id] = user;
-    byName.set(key, user.id);
-  } else {
-    const id = byName.get(key);
-    user = id ? db.users[id] : null;
-    const hash = await scrypt(password, user ? user.salt : "nexora-sal-falso");
-    if (!user || !crypto.timingSafeEqual(hash, Buffer.from(user.hash, "hex"))) {
-      return sendJson(res, 401, { error: "Usuário ou senha incorretos." });
+  try {
+    const password = typeof body.password === "string" ? body.password : "";
+    if (kind === "register") {
+      const username = str(body.username, 24);
+      const email = str(body.email, 200).toLowerCase();
+      if (!/^[\p{L}\p{N}_.-]{3,24}$/u.test(username)) throw new HttpError(400, "O usuário deve ter de 3 a 24 caracteres (letras, números, _ . -).");
+      if (!EMAIL_RE.test(email)) throw new HttpError(400, "Digite um e-mail válido.");
+      if (password.length < 8 || password.length > 128) throw new HttpError(400, "A senha precisa ter pelo menos 8 caracteres.");
+      if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) throw new HttpError(400, "Use letras e números na senha.");
+      const key = username.toLowerCase();
+      if (byName.has(key) || ADMIN_SET.has(key)) throw new HttpError(409, "Esse nome de usuário já está em uso.");
+      if (byEmail.has(email)) throw new HttpError(409, "Já existe uma conta com esse e-mail. Use “Esqueci a senha” se precisar.");
+      const salt = crypto.randomBytes(16).toString("hex");
+      const hash = (await scrypt(password, salt)).toString("hex");
+      if (byName.has(key) || byEmail.has(email)) throw new HttpError(409, "Esse usuário ou e-mail já está em uso.");
+      const user = { id: newId(), username, email, emailVerified: false, needVerify: true, color: pick(COLORS), avatar: "", about: "", status: "online", salt, hash, created: Date.now() };
+      db.users[user.id] = user;
+      byName.set(key, user.id);
+      byEmail.set(email, user.id);
+      let mailError = "";
+      if (MAIL_ON) { try { await sendCode(user, "vc", email); } catch (e) { mailError = e.message; } }
+      const token = newSession(req, res, user);
+      return sendJson(res, 200, { token, verify: needsVerify(user), email: maskEmail(email), mailError });
     }
+    // login: aceita nome de usuário ou e-mail
+    const login = str(body.username, 200).toLowerCase();
+    const id = login.includes("@") ? byEmail.get(login) : byName.get(login);
+    const user = id ? db.users[id] : null;
+    const f = user && failKey.get(user.id);
+    if (f && f.until > Date.now()) throw new HttpError(429, `Conta bloqueada por segurança após muitas tentativas. Tente em ${Math.ceil((f.until - Date.now()) / 60000)} min ou recupere a senha.`);
+    const hash = await scrypt(password, user ? user.salt : "auryx-sal-falso");
+    if (!user || !crypto.timingSafeEqual(hash, Buffer.from(user.hash, "hex"))) {
+      if (user) { const g = failKey.get(user.id) || { n: 0, until: 0 }; g.n++; if (g.n >= 8) { g.until = Date.now() + 15 * 60e3; g.n = 0; } failKey.set(user.id, g); }
+      throw new HttpError(401, "Usuário ou senha incorretos.");
+    }
+    failKey.delete(user.id);
+    const token = newSession(req, res, user);
+    sendJson(res, 200, { token, verify: needsVerify(user), email: maskEmail(user.email) });
+  } catch (e) {
+    if (e instanceof HttpError) return sendJson(res, e.status, { error: e.message });
+    throw e;
   }
-  const token = crypto.randomBytes(32).toString("base64url");
-  db.sessions[tokenKey(token)] = { userId: user.id, created: Date.now() };
-  save();
-  sendJson(res, 200, { token });
+}
+
+async function handleAccountApi(req, res, route) {
+  let body = {};
+  try { body = await readJson(req); } catch { return sendJson(res, 400, { error: "Requisição inválida." }); }
+  try {
+    if (route === "verify" || route === "resend" || route === "cookie") {
+      const a = userFromBearer(req);
+      if (!a || !a.user) throw new HttpError(401, "Entre novamente.");
+      const user = a.user;
+      if (route === "cookie") { setSessionCookie(req, res, a.token); return sendJson(res, 200, { ok: true }); }
+      if (route === "resend") {
+        if (limited("resend:" + user.id)) throw new HttpError(429, "Aguarde um pouco antes de pedir outro código.");
+        if (user.vc && Date.now() - user.vc.sent < 45e3) throw new HttpError(429, "Espere alguns segundos para pedir de novo.");
+        const email = (user.vc && user.vc.email) || user.email;
+        if (!email) throw new HttpError(400, "Sua conta não tem e-mail.");
+        await sendCode(user, "vc", email);
+        return sendJson(res, 200, { ok: true, email: maskEmail(email) });
+      }
+      const c = checkCode(user, "vc", body.code);
+      const email = c.email || user.email;
+      const other = byEmail.get(email);
+      if (other && other !== user.id) throw new HttpError(409, "Esse e-mail já está em uso em outra conta.");
+      if (user.email && user.email !== email) byEmail.delete(user.email);
+      user.email = email; user.emailVerified = true; delete user.vc;
+      byEmail.set(email, user.id);
+      save();
+      io.to("u:" + user.id).emit("me:update", { me: meView(user) });
+      return sendJson(res, 200, { ok: true });
+    }
+    if (limited(clientIp(req))) throw new HttpError(429, "Muitas tentativas. Aguarde um minuto.");
+    const email = str(body.email, 200).toLowerCase();
+    if (route === "forgot") {
+      if (!EMAIL_RE.test(email)) throw new HttpError(400, "Digite um e-mail válido.");
+      if (!MAIL_ON) throw new HttpError(503, "A recuperação por e-mail ainda não foi configurada no servidor (falta RESEND_API_KEY).");
+      const user = db.users[byEmail.get(email)];
+      // resposta igual existindo ou não a conta (não revela quem tem cadastro)
+      if (user && (!user.rc || Date.now() - user.rc.sent > 45e3)) await sendCode(user, "rc");
+      return sendJson(res, 200, { ok: true });
+    }
+    if (route === "reset") {
+      const user = db.users[byEmail.get(email)];
+      if (!user) throw new HttpError(400, "Código incorreto ou expirado.");
+      const password = typeof body.password === "string" ? body.password : "";
+      if (password.length < 8 || password.length > 128 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) throw new HttpError(400, "A nova senha precisa ter 8+ caracteres, com letras e números.");
+      checkCode(user, "rc", body.code);
+      delete user.rc;
+      user.salt = crypto.randomBytes(16).toString("hex");
+      user.hash = (await scrypt(password, user.salt)).toString("hex");
+      user.emailVerified = true;          // recebeu o código no e-mail: o e-mail é dele
+      failKey.delete(user.id);
+      for (const [k, v] of Object.entries(db.sessions)) if (v.userId === user.id) delete db.sessions[k];   // sai de todos os aparelhos
+      io.in("u:" + user.id).disconnectSockets(true);
+      const token = newSession(req, res, user);
+      return sendJson(res, 200, { token });
+    }
+    throw new HttpError(404, "Rota inexistente.");
+  } catch (e) {
+    if (e instanceof HttpError) return sendJson(res, e.status, { error: e.message });
+    throw e;
+  }
 }
 
 /* ---------- envio e download de arquivos ---------- */
 const uploadQuota = new Map(); // userId -> { bytes, n, reset }
 const INLINE_TYPES = /^(image\/(png|jpeg|gif|webp|avif)|video\/(mp4|webm|ogg)|audio\/(mpeg|ogg|wav|webm|mp4|aac|x-m4a))$/;
 async function handleUpload(req, res) {
-  const auth = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-  const sess = auth && auth.length < 100 ? db.sessions[tokenKey(auth)] : null;
-  const user = sess && db.users[sess.userId];
+  const a = userFromBearer(req);
+  const user = a && a.user;
   if (!user) return sendJson(res, 401, { error: "Entre novamente para enviar arquivos." });
+  const priv = req.headers["x-private"] === "receipt";       // comprovante: só o dono e os ADMs veem
+  const limit = priv ? 8 * 1024 * 1024 : maxFileOf(user);
   const size = Number(req.headers["content-length"] || 0);
   if (!size) return sendJson(res, 400, { error: "Arquivo vazio." });
-  if (size > MAX_FILE) return sendJson(res, 413, { error: "Arquivo muito grande (máximo 8 MB)." });
+  if (size > limit) return sendJson(res, 413, { error: `Arquivo muito grande (máximo ${limit / 1048576} MB${priv ? "" : rankOf(user) < 3 ? " — os planos Premium aumentam o limite" : ""}).` });
   const now = Date.now();
   let q = uploadQuota.get(user.id);
   if (!q || q.reset < now) { q = { bytes: 0, n: 0, reset: now + 3600e3 }; uploadQuota.set(user.id, q); }
@@ -348,17 +525,28 @@ async function handleUpload(req, res) {
   let got = 0;
   try {
     await new Promise((resolve, reject) => {
-      req.on("data", c => { got += c.length; if (got > MAX_FILE) { reject(new Error("grande")); req.destroy(); } else chunks.push(c); });
+      req.on("data", c => { got += c.length; if (got > limit) { reject(new Error("grande")); req.destroy(); } else chunks.push(c); });
       req.on("end", resolve);
       req.on("error", reject);
     });
-  } catch { return sendJson(res, 413, { error: "Arquivo muito grande (máximo 8 MB)." }); }
+  } catch { return sendJson(res, 413, { error: `Arquivo muito grande (máximo ${limit / 1048576} MB).` }); }
   const buf = Buffer.concat(chunks);
   if (!buf.length) return sendJson(res, 400, { error: "Arquivo vazio." });
+  if (priv) {
+    // comprovante: confere o tipo pelo conteúdo real do arquivo, não só pelo nome
+    const sig = buf.subarray(0, 12);
+    const real = sig[0] === 0x89 && sig.toString("latin1", 1, 4) === "PNG" ? "image/png"
+      : sig[0] === 0xff && sig[1] === 0xd8 ? "image/jpeg"
+      : sig.toString("latin1", 0, 4) === "RIFF" && sig.toString("latin1", 8, 12) === "WEBP" ? "image/webp"
+      : sig.toString("latin1", 0, 5) === "%PDF-" ? "application/pdf" : "";
+    if (!real) return sendJson(res, 415, { error: "Envie o comprovante como imagem (PNG, JPG, WEBP) ou PDF." });
+    type = real;
+  }
   const id = crypto.randomBytes(15).toString("base64url");
   await putFileData(id, buf);
   q.n++; q.bytes += buf.length;
   db.files[id] = { o: user.id, n: name, t: type, s: buf.length, c: now };
+  if (priv) db.files[id].p = 1;
   save();
   sendJson(res, 200, { id, name, type, size: buf.length, url: fileUrl(id, name) });
 }
@@ -366,9 +554,14 @@ async function serveFile(req, res, rawPath) {
   const m = rawPath.match(/^\/f\/([A-Za-z0-9_-]{12,40})(\/|$)/);
   const meta = m && db.files[m[1]];
   if (!meta) { res.writeHead(404, { "content-type": "text/plain; charset=utf-8" }); res.end("Arquivo não encontrado"); return; }
+  if (meta.p) {
+    // arquivo privado (comprovante): só o dono ou um ADM, conferido pela sessão
+    const viewer = userFromCookie(req);
+    if (!viewer || (viewer.id !== meta.o && !isAdmin(viewer))) { res.writeHead(403, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" }); res.end("Sem permissão para ver este arquivo."); return; }
+  }
   const etag = `"${m[1]}"`;
   const headers = {
-    "cache-control": "public, max-age=31536000, immutable", etag,
+    "cache-control": meta.p ? "private, no-store" : "public, max-age=31536000, immutable", etag,
     "x-content-type-options": "nosniff", "content-security-policy": "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'",
     "cross-origin-resource-policy": "same-origin"
   };
@@ -403,6 +596,8 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && pathname === "/api/register") return await handleAuth(req, res, "register");
     if (req.method === "POST" && pathname === "/api/login") return await handleAuth(req, res, "login");
     if (req.method === "POST" && pathname === "/api/upload") return await handleUpload(req, res);
+    const acct = /^\/api\/account\/(verify|resend|cookie|forgot|reset)$/.exec(pathname);
+    if (req.method === "POST" && acct) return await handleAccountApi(req, res, acct[1]);
     if (pathname.startsWith("/f/") && (req.method === "GET" || req.method === "HEAD")) return await serveFile(req, res, u.pathname);
     if (pathname.startsWith("/api/")) return sendJson(res, 404, { error: "Rota inexistente." });
     if (req.method !== "GET" && req.method !== "HEAD") { res.writeHead(405); res.end(); return; }
@@ -428,6 +623,7 @@ io.use((socket, next) => {
   const sess = typeof t === "string" && t.length < 100 ? db.sessions[tokenKey(t)] : null;
   const user = sess && db.users[sess.userId];
   if (!user) return next(new Error("auth"));
+  if (needsVerify(user)) return next(new Error("verify"));
   socket.data.uid = user.id;
   socket.data.tk = tokenKey(t);
   next();
@@ -555,6 +751,7 @@ io.on("connection", socket => {
   if (!sockets) online.set(uid, (sockets = new Set()));
   sockets.add(socket.id);
   socket.join("u:" + uid);
+  if (isAdmin(me())) socket.join("admins");
   const mine = userServers(uid);
   for (const s of mine) socket.join("s:" + s.id);
   if (firstSocket) emitToPeers(uid, "presence", { userId: uid, status: presence(me()) });
@@ -569,7 +766,7 @@ io.on("connection", socket => {
     for (const d of dms) for (const id of d.members) addU(id);
     const ids = new Set(mine.map(s => s.id));
     socket.emit("ready", {
-      me: { ...pubUser(me()), statusPref: me().status || "online" },
+      me: meView(me()),
       servers: mine.map(serverView),
       users: [...users.values()],
       friends: Object.fromEntries(Object.entries(friends).filter(([id]) => db.users[id])),
@@ -612,6 +809,12 @@ io.on("connection", socket => {
   };
   // Canal de texto de servidor ou conversa privada ("d.…")
   const getTarget = channelId => {
+    if (typeof channelId === "string" && channelId.startsWith("t.")) {
+      // atendimento de pagamento: só o dono do pedido e os ADMs
+      const o = db.orders[channelId.slice(2)];
+      if (!o || (o.uid !== uid && !isAdmin(me()))) fail("Atendimento não encontrado.");
+      return { s: null, c: { id: channelId }, rooms: ["u:" + o.uid, "admins"], dm: null, order: o };
+    }
     if (typeof channelId === "string" && (channelId.startsWith("d.") || channelId.startsWith("g."))) {
       const d = db.dms && db.dms[channelId];
       if (!d || !d.members.includes(uid)) fail("Conversa não encontrada.");
@@ -713,6 +916,11 @@ io.on("connection", socket => {
 
   socket.on("typing", data => {
     if (!data || typeof data.channelId !== "string" || !typing()) return;
+    if (data.channelId.startsWith("t.")) {
+      const o = db.orders[data.channelId.slice(2)];
+      if (o && (o.uid === uid || isAdmin(me()))) socket.to(["u:" + o.uid, "admins"]).emit("typing", { channelId: data.channelId, userId: uid });
+      return;
+    }
     if (data.channelId.startsWith("d.") || data.channelId.startsWith("g.")) {
       const d = db.dms && db.dms[data.channelId];
       if (d && d.members.includes(uid)) for (const id of d.members) if (id !== uid) io.to("u:" + id).emit("typing", { channelId: d.id, userId: uid });
@@ -887,12 +1095,16 @@ io.on("connection", socket => {
   /* ---------- Perfil ---------- */
   on("profile:update", async ({ color, avatar, about, status, steam, game, banner, theme, pron, cs, fx, pfx }) => {
     const u = me();
-    if (banner !== undefined) u.banner = isColor(banner) ? banner : cleanPic(banner).startsWith("/f/") ? cleanPic(banner) : "";
-    if (theme !== undefined) u.theme = Array.isArray(theme) && theme.length === 2 && theme.every(isColor) ? theme : null;
+    // benefícios Premium: o servidor confere o plano (limpar é sempre permitido)
+    const r = rankOf(u);
+    const need = (k, val) => { if (val && r < NEED[k]) fail(`Esse recurso faz parte do plano ${RANK_NAME[NEED[k]]}. Veja em Configurações › Planos.`); };
+    if (banner !== undefined) { const b = isColor(banner) ? banner : cleanPic(banner).startsWith("/f/") ? cleanPic(banner) : ""; need("banner", b); u.banner = b; }
+    if (theme !== undefined) { const t = Array.isArray(theme) && theme.length === 2 && theme.every(isColor) ? theme : null; need("theme", t); u.theme = t; }
     if (pron !== undefined) u.pron = str(pron, 24);
-    if (cs !== undefined) { const t = str(cs && cs.t, 60), e = str(cs && cs.e, 16); u.cs = t || e ? { t, e } : null; }
-    if (fx !== undefined) u.fx = ["", "grad", "glow", "rainbow"].includes(fx) ? fx : "";
-    if (pfx !== undefined) u.pfx = ["", "aurora", "stars", "fire", "neon"].includes(pfx) ? pfx : "";
+    if (cs !== undefined) { const t = str(cs && cs.t, 60), e = str(cs && cs.e, 16); need("cs", t || e); u.cs = t || e ? { t, e } : null; }
+    if (fx !== undefined) { const v = ["", "grad", "glow", "rainbow"].includes(fx) ? fx : ""; need("fx", v); u.fx = v; }
+    if (pfx !== undefined) { const v = ["", "aurora", "stars", "fire", "neon"].includes(pfx) ? pfx : ""; need("pfx", v); u.pfx = v; }
+    if (avatar !== undefined && typeof avatar === "string" && avatar.startsWith("/f/")) need("avatarFile", true);
     if (steam !== undefined) {
       const sid = await resolveSteam(steam);
       if (sid !== (u.steam || "")) { u.steam = sid; u.steamGame = null; }
@@ -906,6 +1118,184 @@ io.on("connection", socket => {
     emitToPeers(uid, "user:update", { user: pubUser(u) });
     io.to("u:" + uid).emit("user:update", { user: pubUser(u), statusPref: u.status });
     if (steam) pollSteam();
+  });
+
+  /* ---------- planos, pedidos Pix e atendimento ---------- */
+  const requireAdmin = () => { const u = me(); if (!isAdmin(u)) fail("Apenas ADMs podem fazer isso."); return u; };
+  const ticketMsg = (o, authorId, kind, text, files) => {
+    const cid = "t." + o.id;
+    const list = db.messages[cid] || (db.messages[cid] = []);
+    const m = { id: msgId(), a: authorId, t: text || "", ts: Date.now() };
+    if (kind) m.sys = kind;
+    if (files) m.f = files;
+    list.push(m);
+    if (list.length > HISTORY_KEEP) list.splice(0, list.length - HISTORY_KEEP);
+    io.to(["u:" + o.uid, "admins"]).emit("msg", { channelId: cid, serverId: null, m });
+  };
+  const orderView = (o, full) => {
+    const u = db.users[o.uid], f = db.files[o.receipt];
+    const v = { id: o.id, uid: o.uid, tier: o.tier, plan: PLANS[o.tier].name, amount: o.amount, status: o.status, created: o.created, updated: o.updated, reason: o.reason || "", note: o.note || "", decidedBy: o.by ? (db.users[o.by] || {}).username || "?" : "", decidedAt: o.decided || 0 };
+    v.user = u ? pubUser(u) : null;
+    v.receipt = f ? { id: o.receipt, n: f.n, t: f.t, s: f.s } : null;
+    if (full && u) v.userEmail = u.email || "";
+    const list = db.messages["t." + o.id];
+    v.last = list && list.length ? { id: list[list.length - 1].id, ts: list[list.length - 1].ts, a: list[list.length - 1].a } : null;
+    return v;
+  };
+  const pushOrder = o => {
+    io.to("u:" + o.uid).emit("order:update", { order: orderView(o, false) });
+    io.to("admins").emit("order:update", { order: orderView(o, true) });
+  };
+  const audit = (action, target, details) => {
+    db.audit.push({ at: Date.now(), admin: uid, action, target, details });
+    if (db.audit.length > 3000) db.audit.splice(0, db.audit.length - 3000);
+  };
+  const grantPlan = (u, tier, days, orderId) => {
+    const now = Date.now(), cur = u.plan && planOf(u) === tier ? u.plan.until : now;
+    u.plan = { tier, since: u.plan && planOf(u) === tier ? u.plan.since : now, until: Math.max(cur, now) + days * 86400e3, order: orderId || "", by: uid };
+    save();
+    emitToPeers(u.id, "user:update", { user: pubUser(u) });
+    io.to("u:" + u.id).emit("me:update", { me: meView(u) });
+  };
+
+  on("plans:get", () => {
+    const u = me();
+    return {
+      plans: Object.values(PLANS).map(p => ({ tier: p.tier, name: p.name, price: p.price, link: p.link, benefits: p.benefits, rank: p.rank })),
+      mine: planOf(u) ? { tier: u.plan.tier, until: u.plan.until } : null,
+      orders: Object.values(db.orders).filter(o => o.uid === uid).sort((a, b) => b.created - a.created).map(o => orderView(o, false)),
+      admin: isAdmin(u)
+    };
+  });
+
+  on("order:create", ({ tier, receipt, note }) => {
+    const u = me();
+    const p = PLANS[tier];
+    if (!p) fail("Plano inválido.");
+    const f = typeof receipt === "string" ? db.files[receipt] : null;
+    if (!f || f.o !== uid || !f.p) fail("Envie o comprovante do pagamento antes de continuar.");
+    if (f.u) fail("Esse comprovante já foi usado em outro pedido.");
+    const open = Object.values(db.orders).filter(o => o.uid === uid && (o.status === "pending" || o.status === "review"));
+    if (open.length >= 3) fail("Você já tem pedidos em análise. Aguarde a resposta da equipe.");
+    f.u = 1;
+    const o = { id: newId(), uid, tier, amount: p.price, status: "pending", receipt, note: str(note, 500), created: Date.now(), updated: Date.now() };
+    db.orders[o.id] = o;
+    ticketMsg(o, uid, "", `Pedido do plano ${p.name} (R$ ${(p.price / 100).toFixed(2).replace(".", ",")}). Segue o comprovante do Pix.${o.note ? "\n\n" + o.note : ""}`, [{ id: receipt, n: f.n, t: f.t, s: f.s }]);
+    ticketMsg(o, uid, "ocreate", "");
+    save();
+    pushOrder(o);
+    io.to("admins").emit("order:new", { order: orderView(o, true) });
+    return { order: orderView(o, false) };
+  });
+
+  on("order:list", ({ status }) => {
+    requireAdmin();
+    return {
+      orders: Object.values(db.orders).filter(o => !status || status === "all" || o.status === status || (status === "open" && (o.status === "pending" || o.status === "review")))
+        .sort((a, b) => b.created - a.created).slice(0, 300).map(o => orderView(o, true))
+    };
+  });
+
+  on("order:get", ({ id }) => {
+    const o = typeof id === "string" ? db.orders[id] : null;
+    if (!o || (o.uid !== uid && !isAdmin(me()))) fail("Pedido não encontrado.");
+    return { order: orderView(o, isAdmin(me())) };
+  });
+
+  on("order:review", ({ id }) => {
+    requireAdmin();
+    const o = db.orders[id];
+    if (!o) fail("Pedido não encontrado.");
+    if (o.status !== "pending") fail("Esse pedido não está pendente.");
+    o.status = "review"; o.updated = Date.now();
+    audit("order:review", o.uid, { order: o.id });
+    ticketMsg(o, uid, "oreview", "");
+    save(); pushOrder(o);
+  });
+
+  on("order:approve", ({ id, confirm }) => {
+    requireAdmin();
+    const o = db.orders[id];
+    if (!o) fail("Pedido não encontrado.");
+    if (o.status !== "pending" && o.status !== "review") fail("Esse pedido já foi decidido.");
+    if (confirm !== true) fail("Confirme que o valor caiu na conta antes de aprovar.");
+    const u = db.users[o.uid];
+    if (!u) fail("O usuário não existe mais.");
+    o.status = "approved"; o.by = uid; o.decided = o.updated = Date.now();
+    grantPlan(u, o.tier, PLAN_DAYS, o.id);
+    audit("order:approve", o.uid, { order: o.id, tier: o.tier, amount: o.amount });
+    ticketMsg(o, uid, "oapprove", PLANS[o.tier].name);
+    save(); pushOrder(o);
+  });
+
+  on("order:reject", ({ id, reason }) => {
+    requireAdmin();
+    const o = db.orders[id];
+    if (!o) fail("Pedido não encontrado.");
+    if (o.status !== "pending" && o.status !== "review") fail("Esse pedido já foi decidido.");
+    reason = str(reason, 400);
+    if (reason.length < 3) fail("Escreva o motivo da recusa.");
+    o.status = "rejected"; o.reason = reason; o.by = uid; o.decided = o.updated = Date.now();
+    audit("order:reject", o.uid, { order: o.id, tier: o.tier, reason });
+    ticketMsg(o, uid, "oreject", reason);
+    save(); pushOrder(o);
+  });
+
+  /* ---------- painel ADM: planos dos usuários e histórico ---------- */
+  on("admin:users", ({ q }) => {
+    requireAdmin();
+    const s = str(q, 60).toLowerCase();
+    const list = Object.values(db.users).filter(u => !s || u.username.toLowerCase().includes(s) || (u.email || "").includes(s) || (s === "premium" && planOf(u)));
+    return {
+      users: list.sort((a, b) => rankOf(b) - rankOf(a) || a.username.localeCompare(b.username)).slice(0, 100)
+        .map(u => ({ id: u.id, username: u.username, color: u.color, avatar: pubUser(u).avatar, email: u.email || "", emailVerified: !!u.emailVerified, plan: planOf(u), until: planOf(u) ? u.plan.until : 0, created: u.created, admin: isAdmin(u) }))
+    };
+  });
+  on("admin:grant", ({ userId, tier, days }) => {
+    requireAdmin();
+    const u = db.users[userId];
+    if (!u) fail("Usuário não encontrado.");
+    if (!PLANS[tier]) fail("Plano inválido.");
+    days = Math.round(+days);
+    if (!(days >= 1 && days <= 366)) fail("Escolha de 1 a 366 dias.");
+    grantPlan(u, tier, days, "");
+    audit("plan:grant", u.id, { tier, days });
+    save();
+  });
+  on("admin:revoke", ({ userId, reason }) => {
+    requireAdmin();
+    const u = db.users[userId];
+    if (!u) fail("Usuário não encontrado.");
+    reason = str(reason, 300);
+    if (reason.length < 3) fail("Escreva o motivo.");
+    const old = planOf(u);
+    if (!old) fail("Esse usuário não tem plano ativo.");
+    u.plan = null;
+    save();
+    audit("plan:revoke", u.id, { tier: old, reason });
+    emitToPeers(u.id, "user:update", { user: pubUser(u) });
+    io.to("u:" + u.id).emit("me:update", { me: meView(u) });
+    io.to("u:" + u.id).emit("plan:revoked", { reason });
+  });
+  on("admin:audit", () => {
+    requireAdmin();
+    const name = id => (db.users[id] || {}).username || "?";
+    return { entries: db.audit.slice(-300).reverse().map(e => ({ ...e, adminName: name(e.admin), targetName: name(e.target) })) };
+  });
+
+  /* ---------- e-mail da conta ---------- */
+  on("account:email", async ({ email, password }) => {
+    const u = me();
+    email = str(email, 200).toLowerCase();
+    if (!EMAIL_RE.test(email)) fail("Digite um e-mail válido.");
+    const other = byEmail.get(email);
+    if (other && other !== uid) fail("Esse e-mail já está em uso em outra conta.");
+    const hash = await scrypt(typeof password === "string" ? password : "", u.salt);
+    if (!crypto.timingSafeEqual(hash, Buffer.from(u.hash, "hex"))) fail("Senha incorreta.");
+    if (!MAIL_ON) fail("O envio de e-mails ainda não foi configurado no servidor.");
+    if (u.vc && Date.now() - u.vc.sent < 45e3) fail("Espere alguns segundos para pedir outro código.");
+    try { await sendCode(u, "vc", email); } catch (e) { fail(e.message); }
+    return { email: maskEmail(email) };
   });
 
   /* ---------- Amigos ---------- */
@@ -1111,7 +1501,10 @@ server.keepAliveTimeout = 65000;   // maior que o do balanceador do Render, evit
 server.headersTimeout = 66000;
 loadDb().then(() => {
   server.listen(PORT, HOST, () => {
-    console.log(`\n  NEXORA rodando em http://localhost:${PORT}`);
+    console.log(`\n  ${APP_NAME} rodando em http://localhost:${PORT}`);
+    const admins = [...ADMIN_SET].map(n => (byName.has(n) ? n : n + " (essa conta não existe ainda)"));
+    console.log(`  ADMs: ${admins.length ? admins.join(", ") : "nenhum — configure ADMIN_USERS"}`);
+    console.log(`  E-mail: ${MAIL_ON ? "Resend configurado" : "desligado — configure RESEND_API_KEY"}`);
     if (process.env.RENDER_EXTERNAL_URL) console.log(`  Endereço público: ${process.env.RENDER_EXTERNAL_URL}\n`);
     else console.log(`  Na rede local, use o IP deste computador na porta ${PORT}.\n`);
   });

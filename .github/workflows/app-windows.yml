@@ -44,10 +44,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: app-v1.0.${{ github.run_number }}
-          name: NEXORA para Windows 1.0.${{ github.run_number }}
+          name: Auryx Nexavória para Windows 1.0.${{ github.run_number }}
           body: |
-            Baixe **NEXORA-Setup.exe**, abra e pronto — o atalho aparece na área de trabalho.
+            Baixe **Auryx-Nexavoria-Setup.exe**, abra e pronto — o atalho aparece na área de trabalho.
             Se o Windows mostrar "O Windows protegeu o computador", clique em **Mais informações › Executar assim mesmo**
             (acontece porque o app ainda não tem assinatura digital paga).
-          files: desktop/dist/NEXORA-Setup.exe
+          files: desktop/dist/Auryx-Nexavoria-Setup.exe
           make_latest: true
