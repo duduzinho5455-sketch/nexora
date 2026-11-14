@@ -762,7 +762,7 @@ async function renderAdmin(soft) {
   const root = $("#adminView");
   if (!root || !S.me.admin) return;
   const tab = S.adminTab;
-  const tabs = [["orders", "Solicitações"], ["users", "Usuários e planos"], ["servers", "Servidores"], ["games", "Jogos"], ["audit", "Histórico"]];
+  const tabs = [["orders", "Solicitações"], ["users", "Usuários e planos"], ["servers", "Servidores"], ["games", "Jogos"], ["backup", "Backups"], ["audit", "Histórico"]];
   const head = `<div class="page admin"><div class="hero adm-hero"><h1>${ic("shield", "lg")} Painel ADM</h1><p>Confira no extrato do banco se o Pix caiu antes de aprovar. Toda decisão fica registrada com o seu nome.</p><button class="btn adm-announce" data-act="admin-broadcast">📢 Aviso geral</button></div><div class="tabs-row">${tabs.map(([k, n]) => `<button class="tab${k === tab ? " on" : ""}" data-act="admin-tab" data-tab="${k}">${n}</button>`).join("")}</div><div class="adm-body"></div></div>`;
   if (!soft || !root.querySelector(".adm-body")) root.innerHTML = head;
   else root.querySelectorAll(".tabs-row .tab").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
@@ -803,10 +803,17 @@ async function renderAdmin(soft) {
     body.innerHTML = `<div class="adm-games-head"><p>Os jogos aparecem para todo mundo na aba <b>Jogos</b>. Só endereços <b>https://</b> são aceitos.</p><button class="btn primary" data-act="admin-game-edit">${ic("plus", "sm")}Adicionar jogo</button></div>` +
       (S.games.length ? S.games.map(g => `<div class="adm-user adm-game"><div class="ag-thumb">${gameCover(g)}</div><div class="who"><b>${esc(g.name)}</b><small>${esc(g.category || "sem categoria")} · ${esc(hostOf(g.url))}${g.embed ? "" : " · abre em nova aba"}</small></div><div>${gameTag(g)}</div><div class="ao-acts"><button class="btn sm" data-act="admin-game-edit" data-id="${g.id}">${ic("edit", "sm")}Editar</button><button class="btn sm danger" data-act="admin-game-del" data-id="${g.id}">${ic("trash", "sm")}Remover</button></div></div>`).join("")
         : `<div class="empty">${ic("gamepad")}<p>Nenhum jogo no catálogo.</p></div>`);
+  } else if (tab === "backup") {
+    const r = await emit("admin:backups", {});
+    if (r.error) { body.innerHTML = esc(r.error); return; }
+    const mail = r.mail ? (r.mail.ok ? `<span class="ost st-ok">enviado</span> em ${new Date(r.mail.at).toLocaleString("pt-BR")}` : `<span class="ost st-bad">não enviado</span> — ${esc(r.mail.error || "")}`) : "ainda não enviado";
+    body.innerHTML = `<div class="adm-games-head"><p>Uma cópia completa (contas, servidores, mensagens e pedidos) é feita <b>todo dia</b> automaticamente. Ficam guardadas as <b>${r.keep} últimas</b>. Baixe e guarde no seu PC de vez em quando — se o banco do Render sumir, é com ela que tudo volta. <small style="display:block;margin-top:6px;color:var(--muted)">Cópia por e-mail para o dono: ${mail}. Imagens e vídeos enviados não entram no backup.</small></p><button class="btn primary" data-act="admin-backup-now" ${r.running ? "disabled" : ""}>${ic("download", "sm")}Fazer backup agora</button></div>` +
+      (r.list.length ? r.list.map(b => `<div class="adm-user"><span class="ag-ico">${ic("receipt")}</span><div class="who"><b>${new Date(b.at).toLocaleString("pt-BR")}</b><small>${b.reason === "manual" ? "Feito na mão" : "Automático"} · ${fmtSize(b.size)}</small></div><div class="ao-acts"><button class="btn sm" data-act="admin-backup-dl" data-id="${esc(b.id)}">${ic("download", "sm")}Baixar</button></div></div>`).join("")
+        : `<div class="empty">${ic("receipt")}<p>Nenhum backup ainda. O primeiro é feito alguns minutos depois que o servidor liga — ou clique em <b>Fazer backup agora</b>.</p></div>`);
   } else {
     const r = await emit("admin:audit", {});
     if (r.error) { body.innerHTML = esc(r.error); return; }
-    const NAMES = { "order:approve": "Aprovou pedido", "order:reject": "Recusou pedido", "order:review": "Pôs em análise", "plan:grant": "Deu plano", "plan:revoke": "Revogou plano", "game:save": "Salvou jogo", "game:delete": "Removeu jogo", "server:block": "Bloqueou servidor de", "server:unblock": "Desbloqueou servidor de", "server:delete": "Excluiu servidor de", "user:ban": "Suspendeu", "user:unban": "Reativou", "broadcast": "Enviou aviso geral" };
+    const NAMES = { "order:approve": "Aprovou pedido", "order:reject": "Recusou pedido", "order:review": "Pôs em análise", "plan:grant": "Deu plano", "plan:revoke": "Revogou plano", "game:save": "Salvou jogo", "game:delete": "Removeu jogo", "server:block": "Bloqueou servidor de", "server:unblock": "Desbloqueou servidor de", "server:delete": "Excluiu servidor de", "user:ban": "Suspendeu", "user:unban": "Reativou", "broadcast": "Enviou aviso geral", "backup:now": "Fez backup do banco", "user:setpass": "Trocou a senha de" };
     body.innerHTML = r.entries.length ? `<div class="audit">${r.entries.map(e => `<div class="au-row"><small>${new Date(e.at).toLocaleString("pt-BR")}</small><b>${esc(e.adminName)}</b><span>${esc(NAMES[e.action] || e.action)}</span><span>→ ${esc(e.targetName === "?" && e.details.game ? e.details.game : e.targetName)}</span><small>${esc([e.details.tier, e.details.days ? e.details.days + " dias" : "", e.details.amount ? fmtMoney(e.details.amount) : "", e.details.server ? "“" + e.details.server + "”" : "", e.details.reason].filter(Boolean).join(" · "))}</small></div>`).join("")}</div>` : `<div class="empty">${ic("shield")}<p>Nenhuma ação registrada ainda.</p></div>`;
   }
 }
@@ -2290,6 +2297,7 @@ function connect() {
   sock.on("act:sum", ({ channelId, type }) => { if (type) S.acts.set(channelId, type); else S.acts.delete(channelId); schedule("side"); });
   sock.on("act:ev", ev => { if (V.actEl && V.actEl._onEv) V.actEl._onEv(ev); });
   sock.on("call:fx", onCallFx);
+  sock.on("session:ended", () => { toast("Sua conta foi desconectada deste aparelho.", "warn", 6000); setTimeout(() => { teardownVoice(true); store.del("token"); location.reload(); }, 1500); });
   sock.on("voice:kicked", ({ reason } = {}) => { teardownVoice(); if (reason) toast(reason, "warn", 5000); renderAll(); });
 }
 
@@ -4548,14 +4556,16 @@ async function inviteModal(sid = S.serverId) {
   if (!s) return;
   const r = await emit("invite:create", { serverId: sid });
   if (r.error) { toast(r.error, "error"); return; }
-  const link = LOCAL ? r.code : `${location.origin}/convite/${r.code}`;
+  let link = LOCAL ? r.code : `${location.origin}/convite/${r.code}`;
+  const invHint = x => `Código: <span class="kbd">${esc(x.code)}</span> · ${x.exp ? "vale até " + new Date(x.exp).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "não expira"} · ${x.max ? `até ${x.max} ${x.max === 1 ? "pessoa" : "pessoas"} (${x.uses || 0} usado${(x.uses || 0) === 1 ? "" : "s"})` : "sem limite de pessoas"}`;
   const online = s.members.filter(id => user(id).status !== "offline").length;
   modal({
     title: `Convidar amigos para ${esc(s.name)}`, sub: "Quem abrir o link entra direto no servidor.",
     body: `<div class="invite-card" style="--c:${esc(s.color)}">${serverIcon(s)}<div><b>${esc(s.name)}</b><small><span><i class="dot st-online"></i> ${online} online</span><span><i class="dot st-offline"></i> ${s.members.length} membros</span></small></div></div>
       <span class="label">Link de convite</span>
       <div class="invite-box" style="margin-top:8px"><input readonly value="${esc(link)}"><button class="btn primary sm" type="button" data-copy>Copiar</button></div>
-      <div class="hint" style="margin:10px 0 0">Código: <span class="kbd">${esc(r.code)}</span> · não expira · funciona na sua rede e na internet, se a Auryx Nexavória estiver acessível.</div>
+      <div class="hint" style="margin:10px 0 0" data-invhint>${invHint(r)}</div>
+      <div class="inv-opts"><label class="field"><span>Expira em</span><select data-hours><option value="0">Nunca</option><option value="1">1 hora</option><option value="6">6 horas</option><option value="24">1 dia</option><option value="168">7 dias</option></select></label><label class="field"><span>Máximo de pessoas</span><select data-uses><option value="0">Sem limite</option><option value="1">1</option><option value="5">5</option><option value="10">10</option><option value="25">25</option><option value="100">100</option></select></label><button class="btn sm" type="button" data-newinv>Gerar link</button></div>
       ${navigator.share ? `<button class="btn ghost" style="margin-top:12px" type="button" data-share>${ic("link", "sm")}Compartilhar…</button>` : ""}`,
     onMount(m) {
       const b = m.querySelector("[data-copy]"), inp = m.querySelector(".invite-box input");
@@ -4565,6 +4575,14 @@ async function inviteModal(sid = S.serverId) {
         setTimeout(() => { b.textContent = "Copiar"; b.classList.remove("green"); }, 1800);
       };
       inp.addEventListener("focus", () => inp.select());
+      m.querySelector("[data-newinv]").onclick = async () => {
+        const nr = await emit("invite:create", { serverId: sid, hours: +m.querySelector("[data-hours]").value, maxUses: +m.querySelector("[data-uses]").value });
+        if (nr.error) { toast(nr.error, "error"); return; }
+        link = LOCAL ? nr.code : `${location.origin}/convite/${nr.code}`;
+        inp.value = link;
+        m.querySelector("[data-invhint]").innerHTML = invHint(nr);
+        toast("Link novo gerado.", "ok");
+      };
       const sh = m.querySelector("[data-share]");
       if (sh) sh.onclick = () => navigator.share({ title: `Entre no ${s.name} na Auryx Nexavória`, url: link }).catch(() => {});
     }
@@ -4754,6 +4772,7 @@ function userSettings(initial) {
   settingsShell([
     { label: "Configurações do usuário" },
     { id: "account", name: "Minha conta", render: renderAccount, mount: mountAccount },
+    ...(LOCAL ? [] : [{ id: "security", name: "🔒 Segurança", render: () => `<div id="secRoot"><p style="color:var(--muted)">Carregando…</p></div>`, mount: p => { mountSecurity(p); } }]),
     { id: "turbo", name: "⚡ Perfil Turbo", render: () => `<div id="turboRoot"></div>`, mount: mountTurbo },
     { id: "plans", name: "💎 Planos e pagamentos", action: close => { close(); goPremium(); } },
     { id: "voice", name: "Voz e vídeo", render: renderVoiceSettings, mount: mountVoiceSettings },
@@ -4966,6 +4985,40 @@ function emailModal(done) {
       };
     }
   });
+}
+/* --- Segurança: trocar senha e aparelhos conectados --- */
+async function mountSecurity(p) {
+  const root = p.querySelector("#secRoot");
+  const draw = async () => {
+    const r = await emit("account:sessions", {});
+    if (r.error) { root.innerHTML = esc(r.error); return; }
+    const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 2 ? "agora" : m < 60 ? `há ${m} min` : m < 1440 ? `há ${Math.round(m / 60)} h` : `há ${Math.round(m / 1440)} dias`; };
+    root.innerHTML = `<span class="label">Senha</span>
+      <form class="sec-pass" data-pass><label class="field"><span>Senha atual</span><input type="password" data-cur autocomplete="current-password" maxlength="128"></label><label class="field"><span>Nova senha</span><input type="password" data-new autocomplete="new-password" maxlength="128" placeholder="8+ caracteres, letras e números"></label><button class="btn primary">Trocar senha</button></form>
+      <small style="color:var(--muted);display:block;margin:-4px 0 22px">Ao trocar, os outros aparelhos saem da conta. Esqueceu a senha? Saia e use "Esqueci a senha".</small>
+      <span class="label">Aparelhos conectados (${r.list.length})</span>
+      <div class="sec-list">${r.list.map(x => `<div class="sec-dev${x.current ? " cur" : ""}"><span class="sec-ico">${ic(/Android|iPhone/.test(x.dev) ? "phone" : "monitor")}</span><div class="who"><b>${esc(x.dev)}${x.current ? ` <span class="ost st-ok">este aparelho</span>` : x.online ? ` <span class="ost st-rev">online</span>` : ""}</b><small>Entrou em ${new Date(x.created).toLocaleDateString("pt-BR")} · ativo ${ago(x.last)}</small></div>${x.current ? "" : `<button class="btn sm danger" data-end="${esc(x.id)}">Desconectar</button>`}</div>`).join("")}</div>
+      ${r.list.length > 1 ? `<button class="btn danger" style="margin-top:12px" data-endall>Desconectar todos os outros</button>` : ""}
+      <small style="color:var(--muted);display:block;margin-top:10px">Não reconhece algum aparelho? Desconecte e troque a senha.</small>`;
+  };
+  root.addEventListener("submit", async e => {
+    e.preventDefault();
+    const cur = root.querySelector("[data-cur]").value, nx = root.querySelector("[data-new]").value;
+    const r = await emit("account:password", { current: cur, next: nx });
+    if (r.error) { toast(r.error, "error"); return; }
+    toast(`Senha trocada!${r.ended ? ` ${r.ended} outro${r.ended > 1 ? "s aparelhos saíram" : " aparelho saiu"} da conta.` : ""}`, "ok", 5000);
+    draw();
+  });
+  root.addEventListener("click", async e => {
+    const b = e.target.closest("[data-end]"), all = e.target.closest("[data-endall]");
+    if (!b && !all) return;
+    if (all && !confirm("Desconectar todos os outros aparelhos?")) return;
+    const r = await emit("account:session:end", all ? { others: true } : { id: b.dataset.end });
+    if (r.error) { toast(r.error, "error"); return; }
+    toast(r.ended ? "Aparelho desconectado." : "Esse aparelho já tinha saído.", "ok");
+    draw();
+  });
+  draw();
 }
 function mountAccount(p, rerender) {
   const upd = async data => { const r = await emit("profile:update", data); if (r.error) toast(r.error, "error"); else setTimeout(rerender, 80); };
@@ -5266,6 +5319,18 @@ const ACTIONS = {
   "admin-srv-unblock": a => admRun("admin:server:unblock", { serverId: a.dataset.id }, "Servidor desbloqueado e de volta para os membros."),
   "admin-srv-del": a => adminSrvDelete(a.dataset.id, a.dataset.name),
   "admin-pass": a => adminSetPass(a.dataset.uid, a.dataset.name),
+  "admin-backup-now": async a => { a.disabled = true; const r = await emit("admin:backup:now", {}); if (r.error) { toast(r.error, "error"); a.disabled = false; return; } toast(`Backup feito (${fmtSize(r.backup.size)}).`, "ok"); renderAdmin(true); },
+  "admin-backup-dl": async a => {
+    a.disabled = true;
+    try {
+      const res = await fetch("/api/admin/backup/" + encodeURIComponent(a.dataset.id), { headers: { authorization: "Bearer " + S.token } });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Não deu para baixar.");
+      const url = URL.createObjectURL(await res.blob()), link = document.createElement("a");
+      link.href = url; link.download = a.dataset.id + ".json.gz"; document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast(e.message, "error"); }
+    a.disabled = false;
+  },
   "admin-ban": a => adminBan(a.dataset.uid, a.dataset.name),
   "admin-unban": a => admRun("admin:unban", { userId: a.dataset.uid }, `Conta de ${a.dataset.name} reativada.`),
   "admin-broadcast": () => adminBroadcast(),

@@ -284,7 +284,11 @@ async function serveStatic(req, res, pathname) {
   }
   const headers = {
     "content-type": entry.type, "cache-control": "no-cache", etag: entry.etag,
-    "x-content-type-options": "nosniff", "referrer-policy": "strict-origin-when-cross-origin", vary: "accept-encoding"
+    "x-content-type-options": "nosniff", "referrer-policy": "strict-origin-when-cross-origin", vary: "accept-encoding",
+    // ninguém pode embutir a Auryx num site falso (proteção contra clickjacking)
+    "x-frame-options": "SAMEORIGIN", "content-security-policy": "frame-ancestors 'self'; base-uri 'self'; object-src 'none'",
+    "cross-origin-opener-policy": "same-origin-allow-popups",
+    ...(process.env.RENDER || process.env.NODE_ENV === "production" ? { "strict-transport-security": "max-age=15552000" } : {})
   };
   if (req.headers["if-none-match"] === entry.etag) { res.writeHead(304, headers); res.end(); return; }
   const gzip = entry.gz && /\bgzip\b/.test(req.headers["accept-encoding"] || "");
@@ -382,9 +386,27 @@ function checkCode(user, kind, code) {
 }
 const needsVerify = u => MAIL_ON && !!u.needVerify && !u.emailVerified;
 const secureReq = req => req.headers["x-forwarded-proto"] === "https" || !!process.env.RENDER;
+// "Windows · App da Auryx", "Android · Chrome"... (só para a pessoa reconhecer o aparelho)
+function deviceOf(ua) {
+  ua = String(ua || "");
+  const os = /Android/i.test(ua) ? "Android" : /iPhone|iPad|iOS/i.test(ua) ? "iPhone/iPad" : /Windows/i.test(ua) ? "Windows" : /Mac OS/i.test(ua) ? "Mac" : /Linux/i.test(ua) ? "Linux" : "Aparelho";
+  const app = /Electron\//.test(ua) ? "App de PC" : /; wv\)|AuryxAndroid/i.test(ua) ? "App Android" : /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Navegador";
+  return os + " · " + app;
+}
+const sessId = key => key.slice(0, 12);
+function endSessions(userId, keep, only) {
+  let n = 0;
+  for (const [k, v] of Object.entries(db.sessions)) {
+    if (v.userId !== userId || k === keep || (only && sessId(k) !== only)) continue;
+    delete db.sessions[k]; n++;
+    for (const sk of io.sockets.sockets.values()) if (sk.data.tk === k) { sk.emit("session:ended", {}); setTimeout(() => sk.disconnect(true), 150); }
+  }
+  if (n) save();
+  return n;
+}
 function newSession(req, res, user) {
   const token = crypto.randomBytes(32).toString("base64url");
-  db.sessions[tokenKey(token)] = { userId: user.id, created: Date.now() };
+  db.sessions[tokenKey(token)] = { userId: user.id, created: Date.now(), last: Date.now(), dev: deviceOf(req.headers["user-agent"]) };
   setSessionCookie(req, res, token);
   save();
   return token;
@@ -516,6 +538,91 @@ async function handleAccountApi(req, res, route) {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Backup automático: uma cópia completa (compactada) por dia, guardando */
+/* as 7 últimas. Fica numa tabela própria do banco (ou na pasta         */
+/* data/backups) e também é enviada por e-mail ao dono, quando possível. */
+/* Os ADMs baixam qualquer cópia pelo Painel ADM.                       */
+/* ------------------------------------------------------------------ */
+const BACKUP_KEEP = 7, BACKUP_EVERY = 24 * 3600e3;
+const BACKUP_DIR = path.join(DATA_DIR, "backups");
+const backupState = { last: 0, running: false, lastMail: null };
+async function backupInit() {
+  if (pg) await pg.query("CREATE TABLE IF NOT EXISTS nexora_backups (id TEXT PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), size INT NOT NULL, reason TEXT NOT NULL DEFAULT '', data BYTEA NOT NULL)");
+  else fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  const list = await backupList();
+  backupState.last = list.length ? list[0].at : 0;
+}
+async function backupList() {
+  if (pg) {
+    const r = await pg.query("SELECT id, created_at, size, reason FROM nexora_backups ORDER BY created_at DESC");
+    return r.rows.map(x => ({ id: x.id, at: new Date(x.created_at).getTime(), size: x.size, reason: x.reason }));
+  }
+  let names = [];
+  try { names = fs.readdirSync(BACKUP_DIR).filter(n => /^nexora-[\w.-]+\.json\.gz$/.test(n)); } catch {}
+  return names.map(n => { const st = fs.statSync(path.join(BACKUP_DIR, n)); const m = n.match(/^nexora-(\d+)-(\w+)/); return { id: n.replace(/\.json\.gz$/, ""), at: m ? +m[1] : st.mtimeMs, size: st.size, reason: m ? m[2] : "" }; })
+    .sort((a, b) => b.at - a.at);
+}
+async function backupGet(id) {
+  if (typeof id !== "string" || !/^nexora-\d+-\w+$/.test(id)) return null;
+  if (pg) { const r = await pg.query("SELECT data FROM nexora_backups WHERE id = $1", [id]); return r.rows[0] ? r.rows[0].data : null; }
+  try { return fs.readFileSync(path.join(BACKUP_DIR, id + ".json.gz")); } catch { return null; }
+}
+async function backupNow(reason) {
+  if (backupState.running) throw new Error("Já tem um backup sendo feito. Espere terminar.");
+  backupState.running = true;
+  try {
+    const at = Date.now(), id = `nexora-${at}-${reason === "manual" ? "manual" : "auto"}`;
+    const gz = zlib.gzipSync(Buffer.from(JSON.stringify({ app: "auryx-nexavoria", version: 1, at, db })), { level: 9 });
+    if (pg) {
+      await pg.query("INSERT INTO nexora_backups (id, size, reason, data) VALUES ($1, $2, $3, $4)", [id, gz.length, reason, gz]);
+      await pg.query("DELETE FROM nexora_backups WHERE id NOT IN (SELECT id FROM nexora_backups ORDER BY created_at DESC LIMIT $1)", [BACKUP_KEEP]);
+    } else {
+      fs.mkdirSync(BACKUP_DIR, { recursive: true });
+      fs.writeFileSync(path.join(BACKUP_DIR, id + ".json.gz"), gz);
+      const old = (await backupList()).slice(BACKUP_KEEP);
+      for (const b of old) try { fs.unlinkSync(path.join(BACKUP_DIR, b.id + ".json.gz")); } catch {}
+    }
+    backupState.last = at;
+    console.log(`  Backup ${id}: ${(gz.length / 1024).toFixed(0)} KB`);
+    backupMail(id, gz).catch(e => { backupState.lastMail = { at: Date.now(), ok: false, error: String(e.message || e).slice(0, 200) }; });
+    return { id, at, size: gz.length, reason };
+  } finally { backupState.running = false; }
+}
+// cópia fora do Render: vai por e-mail para o dono (se o e-mail estiver confirmado e o envio configurado)
+async function backupMail(id, gz) {
+  if (!MAIL_ON) { backupState.lastMail = { at: Date.now(), ok: false, error: "E-mail não configurado no servidor." }; return; }
+  const owner = db.users[byName.get(OWNER)];
+  if (!owner || !owner.email || !owner.emailVerified) { backupState.lastMail = { at: Date.now(), ok: false, error: "A conta do dono não tem e-mail confirmado." }; return; }
+  if (gz.length > 20 * 1024 * 1024) { backupState.lastMail = { at: Date.now(), ok: false, error: "Backup grande demais para e-mail (baixe pelo painel)." }; return; }
+  const day = new Date().toLocaleDateString("pt-BR");
+  const r = await fetch(process.env.RESEND_API_URL || "https://api.resend.com/emails", {
+    method: "POST",
+    headers: { authorization: `Bearer ${RESEND_KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      from: MAIL_FROM, to: [owner.email], subject: `Backup da ${APP_NAME} — ${day}`,
+      text: `Backup automático da ${APP_NAME} (${day}). Guarde este arquivo: ele tem contas, servidores e mensagens. Os arquivos enviados (imagens, vídeos) ficam fora do backup.`,
+      attachments: [{ filename: id + ".json.gz", content: gz.toString("base64") }]
+    })
+  });
+  backupState.lastMail = r.ok ? { at: Date.now(), ok: true } : { at: Date.now(), ok: false, error: `Envio recusado (${r.status}).` };
+}
+function backupSchedule() {
+  const tick = () => {
+    if (Date.now() - backupState.last >= BACKUP_EVERY && !backupState.running) backupNow("auto").catch(e => console.error("Backup falhou:", e.message));
+  };
+  setTimeout(tick, 2 * 60e3);                // logo depois de ligar (se o último tiver mais de 1 dia)
+  setInterval(tick, 30 * 60e3).unref();
+}
+async function serveBackup(req, res, id) {
+  const a = userFromBearer(req);
+  if (!a || !a.user || !isAdmin(a.user)) return sendJson(res, 403, { error: "Apenas ADMs." });
+  const buf = await backupGet(id);
+  if (!buf) return sendJson(res, 404, { error: "Backup não encontrado." });
+  res.writeHead(200, { "content-type": "application/gzip", "content-length": buf.length, "content-disposition": `attachment; filename="${id}.json.gz"`, "cache-control": "no-store" });
+  res.end(buf);
+}
+
 /* ---------- envio e download de arquivos ---------- */
 const uploadQuota = new Map(); // userId -> { bytes, n, reset }
 const INLINE_TYPES = /^(image\/(png|jpeg|gif|webp|avif)|video\/(mp4|webm|ogg)|audio\/(mpeg|ogg|wav|webm|mp4|aac|x-m4a))$/;
@@ -615,6 +722,8 @@ const server = http.createServer(async (req, res) => {
     const acct = /^\/api\/account\/(verify|resend|cookie|forgot|reset)$/.exec(pathname);
     if (req.method === "POST" && acct) return await handleAccountApi(req, res, acct[1]);
     if (pathname.startsWith("/f/") && (req.method === "GET" || req.method === "HEAD")) return await serveFile(req, res, u.pathname);
+    const bk = req.method === "GET" && pathname.match(/^\/api\/admin\/backup\/(nexora-\d+-\w+)$/);
+    if (bk) return await serveBackup(req, res, bk[1]);
     if (pathname.startsWith("/api/")) return sendJson(res, 404, { error: "Rota inexistente." });
     if (req.method !== "GET" && req.method !== "HEAD") { res.writeHead(405); res.end(); return; }
     await serveStatic(req, res, pathname);
@@ -646,6 +755,7 @@ io.use((socket, next) => {
   if (needsVerify(user)) return next(new Error("verify"));
   socket.data.uid = user.id;
   socket.data.tk = tokenKey(t);
+  if (sess) { sess.last = Date.now(); if (!sess.dev) sess.dev = deviceOf(socket.handshake.headers["user-agent"]); }
   next();
 });
 
@@ -775,6 +885,7 @@ function systemMsg(s, userId, kind) {
   if (list.length > HISTORY_KEEP) list.splice(0, list.length - HISTORY_KEEP);
   io.to("s:" + s.id).emit("msg", { channelId: ch.id, serverId: s.id, m });
 }
+const inviteOk = inv => !!inv && !(inv.exp && inv.exp < Date.now()) && !(inv.max && (inv.uses || 0) >= inv.max);
 function addMember(s, userId) {
   if (s.members.includes(userId)) return false;
   if (s.members.length >= MAX_MEMBERS) fail("Este servidor está lotado.");
@@ -1000,7 +1111,7 @@ io.on("connection", socket => {
 
   // Limitadores simples por conexão
   const mk = (n, ms) => { const b = { t: 0, n: 0 }; return (cost = 1) => { const now = Date.now(); if (now - b.t > ms) { b.t = now; b.n = 0; } b.n += cost; return b.n <= n; }; };
-  const general = mk(60, 5000), chat = mk(6, 4000), signals = mk(400, 5000), typing = mk(3, 6000);
+  const general = mk(60, 5000), chat = mk(6, 4000), signals = mk(400, 5000), typing = mk(3, 6000), passLimit = mk(5, 60000);
 
   const on = (ev, fn) => socket.on(ev, async (data, ack) => {
     if (typeof ack !== "function") ack = () => {};
@@ -1224,21 +1335,32 @@ io.on("connection", socket => {
   });
 
   /* ---------- Convites e descoberta ---------- */
-  on("invite:create", ({ serverId }) => {
+  // Convite: sem opções = o link permanente de sempre; com validade/limite = um link novo só para isso
+  const INV_HOURS = [0, 1, 6, 24, 168], INV_USES = [0, 1, 5, 10, 25, 100];
+  on("invite:create", ({ serverId, hours, maxUses }) => {
     const s = getServer(serverId);
-    let code = Object.keys(db.invites).find(k => db.invites[k].serverId === s.id && db.invites[k].by === uid);
+    hours = INV_HOURS.includes(+hours) ? +hours : 0;
+    maxUses = INV_USES.includes(+maxUses) ? +maxUses : 0;
+    let code = !hours && !maxUses ? Object.keys(db.invites).find(k => { const v = db.invites[k]; return v.serverId === s.id && v.by === uid && !v.exp && !v.max; }) : null;
     if (!code) {
+      const mine = Object.entries(db.invites).filter(([, v]) => v.by === uid && v.serverId === s.id);
+      if (mine.length >= 25) {   // limpa os vencidos/esgotados antes de criar mais
+        for (const [k, v] of mine) if (!inviteOk(v)) delete db.invites[k];
+        if (Object.values(db.invites).filter(v => v.by === uid && v.serverId === s.id).length >= 25) fail("Você já tem convites demais neste servidor.");
+      }
       do code = randomCode(8); while (db.invites[code]);
-      db.invites[code] = { serverId: s.id, by: uid, created: Date.now(), uses: 0 };
+      db.invites[code] = { serverId: s.id, by: uid, created: Date.now(), uses: 0, ...(hours ? { exp: Date.now() + hours * 3600e3 } : {}), ...(maxUses ? { max: maxUses } : {}) };
       save();
     }
-    return { code };
+    const v = db.invites[code];
+    return { code, exp: v.exp || 0, max: v.max || 0, uses: v.uses || 0 };
   });
 
   on("invite:info", ({ code }) => {
     const inv = db.invites[parseCode(code)];
     const s = inv && db.servers[inv.serverId];
     if (!s || s.blocked) fail("Convite inválido ou expirado.");
+    if (!inviteOk(inv) && !s.members.includes(uid)) fail(inv.max && inv.uses >= inv.max ? "Esse convite já atingiu o limite de usos." : "Esse convite expirou.");
     const inviter = db.users[inv.by];
     return {
       server: { ...serverMeta(s), members: s.members.length, online: onlineCount(s) },
@@ -1252,6 +1374,7 @@ io.on("connection", socket => {
     const inv = db.invites[key];
     const s = inv && db.servers[inv.serverId];
     if (!s || s.blocked) fail("Convite inválido ou expirado.");
+    if (!s.members.includes(uid) && !inviteOk(inv)) fail(inv.max && inv.uses >= inv.max ? "Esse convite já atingiu o limite de usos." : "Esse convite expirou.");
     if (addMember(s, uid)) { inv.uses++; save(); }
     return { serverId: s.id };
   });
@@ -1625,6 +1748,18 @@ io.on("connection", socket => {
     audit("user:unban", u.id, {});
     save();
   });
+  on("admin:backups", async () => {
+    requireAdmin();
+    const list = await backupList();
+    return { list, running: backupState.running, mail: backupState.lastMail, every: BACKUP_EVERY, keep: BACKUP_KEEP };
+  });
+  on("admin:backup:now", async () => {
+    requireAdmin();
+    const b = await backupNow("manual");
+    audit("backup:now", "", { size: b.size });
+    save();
+    return { backup: b };
+  });
   on("admin:broadcast", ({ text }) => {
     requireAdmin();
     text = str(text, 500);
@@ -1786,6 +1921,31 @@ io.on("connection", socket => {
     return { dm: dmView(db.dms[id], uid), user: pubUser(other) };
   });
 
+  /* --- segurança da conta: aparelhos conectados e troca de senha --- */
+  on("account:sessions", () => {
+    const list = Object.entries(db.sessions).filter(([, v]) => v.userId === uid)
+      .map(([k, v]) => ({ id: sessId(k), dev: v.dev || "Aparelho", created: v.created, last: v.last || v.created, current: k === socket.data.tk, online: [...io.sockets.sockets.values()].some(sk => sk.data.tk === k) }))
+      .sort((a, b) => b.current - a.current || b.last - a.last);
+    return { list };
+  });
+  on("account:session:end", ({ id, others }) => {
+    const n = others ? endSessions(uid, socket.data.tk) : (typeof id === "string" && id !== sessId(socket.data.tk) ? endSessions(uid, socket.data.tk, id) : 0);
+    return { ended: n };
+  });
+  on("account:password", async ({ current, next }) => {
+    const u = me();
+    if (!passLimit()) fail("Muitas tentativas. Espere um minuto.");
+    const ok = crypto.timingSafeEqual(await scrypt(typeof current === "string" ? current : "", u.salt), Buffer.from(u.hash, "hex"));
+    if (!ok) fail("A senha atual está errada.");
+    next = typeof next === "string" ? next : "";
+    if (next.length < 8 || next.length > 128 || !/[A-Za-z]/.test(next) || !/\d/.test(next)) fail("A nova senha precisa ter 8+ caracteres, com letras e números.");
+    if (next === current) fail("A nova senha é igual à atual.");
+    u.salt = crypto.randomBytes(16).toString("hex");
+    u.hash = (await scrypt(next, u.salt)).toString("hex");
+    const ended = endSessions(uid, socket.data.tk);        // sai dos outros aparelhos
+    save();
+    return { ok: true, ended };
+  });
   on("logout", () => {
     delete db.sessions[socket.data.tk];
     save();
@@ -1945,7 +2105,8 @@ io.on("connection", socket => {
 
 server.keepAliveTimeout = 65000;   // maior que o do balanceador do Render, evita erros 502
 server.headersTimeout = 66000;
-loadDb().then(() => {
+loadDb().then(async () => {
+  try { await backupInit(); backupSchedule(); } catch (e) { console.error("Backup indisponível:", e.message); }
   server.listen(PORT, HOST, () => {
     console.log(`\n  ${APP_NAME} rodando em http://localhost:${PORT}`);
     const admins = [...ADMIN_SET].map(n => (byName.has(n) ? n : n + " (essa conta não existe ainda)"));
