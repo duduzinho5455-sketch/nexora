@@ -3,3 +3,11 @@ desktop/dist/
 desktop/agente/
 data/
 *.html.bak
+
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.p12
+*.jks
+*.keystore

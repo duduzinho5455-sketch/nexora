@@ -1,0 +1,74 @@
+name: App Android (APK)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - ".github/workflows/app-android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Ícone do app
+        run: |
+          for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do mkdir -p app/src/main/res/mipmap-$d; done
+          cp ../public/icons/icon-192.png app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+          cp ../public/icons/icon-192.png app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+          cp ../public/icons/icon-192.png app/src/main/res/mipmap-xhdpi/ic_launcher.png
+          cp ../public/icons/icon-192.png app/src/main/res/mipmap-hdpi/ic_launcher.png
+          cp ../public/icons/icon-192.png app/src/main/res/mipmap-mdpi/ic_launcher.png
+
+      - name: Chave de assinatura
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KS" ]; then echo "::error::Falta o secret ANDROID_KEYSTORE_B64"; exit 1; fi
+          echo "$KS" | base64 -d > "$RUNNER_TEMP/auryx.p12"
+          echo "ANDROID_KEYSTORE=$RUNNER_TEMP/auryx.p12" >> "$GITHUB_ENV"
+
+      - name: Montar o APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          APP_VERSION_CODE: ${{ github.run_number }}
+          APP_VERSION_NAME: 1.0.${{ github.run_number }}
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Conferir assinatura
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/release/app-release.apk | head -3
+          cp app/build/outputs/apk/release/app-release.apk ../Auryx-Nexavoria.apk
+
+      - name: Publicar o APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android
+          name: Auryx Nexavória para Android
+          make_latest: false
+          body: |
+            Baixe **Auryx-Nexavoria.apk** no celular e abra para instalar.
+            Se o Android pedir, permita "instalar apps desconhecidos" para o navegador.
+            Versão 1.0.${{ github.run_number }} — transmite a tela, mantém a chamada com a tela bloqueada e avisa de mensagens.
+          files: Auryx-Nexavoria.apk

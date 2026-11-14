@@ -1,0 +1,47 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Assinatura: a chave fica nos "Secrets" do GitHub, nunca no código.
+def ks = System.getenv("ANDROID_KEYSTORE")
+
+android {
+    namespace 'com.auryx.nexavoria'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.auryx.nexavoria'
+        minSdk 24
+        targetSdk 35
+        versionCode Integer.parseInt(System.getenv("APP_VERSION_CODE") ?: "1")
+        versionName System.getenv("APP_VERSION_NAME") ?: "1.0.0"
+    }
+
+    signingConfigs {
+        release {
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+                storeType "pkcs12"
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (ks) signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core:1.13.1'
+}

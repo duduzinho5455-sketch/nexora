@@ -73,6 +73,7 @@ async function loadDb() {
   db.files = db.files || {};
   db.dms = db.dms || {};
   db.orders = db.orders || {};
+  setupPush();
   db.audit = db.audit || [];
   for (const u of Object.values(db.users)) { byName.set(u.username.toLowerCase(), u.id); if (u.email) byEmail.set(u.email, u.id); }
   for (const s of Object.values(db.servers)) for (const c of s.channels) chanIndex.set(c.id, s.id);
@@ -639,6 +640,34 @@ function emitToPeers(uid, ev, data) {
   for (const d of dmsOf(uid)) for (const id of d.members) rooms.add("u:" + id);
   io.to([...rooms]).emit(ev, data);
 }
+/* ------------------------------------------------------------------ */
+/* Notificações push (Web Push): chegam mesmo com o app/site fechado   */
+/* ------------------------------------------------------------------ */
+let webpush = null;
+try { webpush = require("web-push"); } catch { console.warn("  Aviso: pacote web-push não instalado — notificações push desligadas."); }
+function setupPush() {
+  if (!webpush) return;
+  if (!db.vapid || !db.vapid.publicKey) { db.vapid = webpush.generateVAPIDKeys(); save(); }
+  webpush.setVapidDetails(process.env.RENDER_EXTERNAL_URL || "https://nexora-ujw6.onrender.com", db.vapid.publicKey, db.vapid.privateKey);
+}
+const visibleSockets = new Map();   // userId -> sockets com a tela aberta (sem push para quem está olhando)
+const isActive = uid => { const s = visibleSockets.get(uid); return !!(s && s.size); };
+function pushTo(uid, payload) {
+  const u = db.users[uid];
+  if (!webpush || !db.vapid || !u || !Array.isArray(u.push) || !u.push.length || isActive(uid) || u.status === "dnd") return;
+  const body = JSON.stringify({ icon: "/icons/icon-192.png", ...payload });
+  for (const sub of u.push.slice()) {
+    webpush.sendNotification(sub, body, { TTL: 6 * 3600, urgency: "high" }).catch(e => {
+      if (e && (e.statusCode === 404 || e.statusCode === 410)) { u.push = u.push.filter(x => x.endpoint !== sub.endpoint); save(); }
+    });
+  }
+}
+function mentionedIn(text, memberIds) {
+  const t = String(text || "").toLowerCase();
+  const all = /(^|\s)@(everyone|todos|here)\b/.test(t);
+  return memberIds.filter(id => { const u = db.users[id]; return u && (all || new RegExp(`(^|[^\\p{L}\\p{N}_.-])@${u.username.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}_])`, "u").test(t)); });
+}
+
 function setFriend(a, b, state) {
   const ua = db.users[a];
   if (!ua) return;
@@ -876,6 +905,20 @@ io.on("connection", socket => {
     if (list.length > HISTORY_KEEP) list.splice(0, list.length - HISTORY_KEEP);
     save();
     io.to(rooms).emit("msg", { channelId: c.id, serverId: s ? s.id : null, m, nonce: str(nonce, 40) });
+    // push para quem está com o app fechado: privado, grupo, atendimento e menções
+    const author = me().username, preview = (text || "📎 Anexo").slice(0, 140), url = "/?c=" + encodeURIComponent(c.id);
+    if (dm) for (const id of dm.members) { if (id !== uid) pushTo(id, { title: dm.group ? `${author} em ${dm.name || "grupo"}` : author, body: preview, url, tag: c.id }); }
+    else {
+      const tgt = getTarget(c.id);
+      if (tgt.order) {
+        const to = tgt.order.uid === uid ? Object.values(db.users).filter(isAdmin).map(u => u.id) : [tgt.order.uid];
+        for (const id of to) if (id !== uid) pushTo(id, { title: `Atendimento · ${PLANS[tgt.order.tier].name}`, body: `${author}: ${preview}`, url, tag: c.id });
+      } else if (s) {
+        const ids = new Set(mentionedIn(text, s.members));
+        if (m.re && m.re.a) ids.add(m.re.a);
+        for (const id of ids) if (id !== uid) pushTo(id, { title: `${author} em #${c.name || "canal"} (${s.name})`, body: preview, url, tag: c.id });
+      }
+    }
     return { id: m.id };
   });
 
@@ -1228,6 +1271,7 @@ io.on("connection", socket => {
     grantPlan(u, o.tier, PLAN_DAYS, o.id);
     audit("order:approve", o.uid, { order: o.id, tier: o.tier, amount: o.amount });
     ticketMsg(o, uid, "oapprove", PLANS[o.tier].name);
+    pushTo(o.uid, { title: "Pagamento aprovado! 🎉", body: `Seu plano ${PLANS[o.tier].name} foi liberado.`, url: "/?abrir=premium", tag: "order:" + o.id });
     save(); pushOrder(o);
   });
 
@@ -1241,6 +1285,7 @@ io.on("connection", socket => {
     o.status = "rejected"; o.reason = reason; o.by = uid; o.decided = o.updated = Date.now();
     audit("order:reject", o.uid, { order: o.id, tier: o.tier, reason });
     ticketMsg(o, uid, "oreject", reason);
+    pushTo(o.uid, { title: "Pedido recusado", body: `Plano ${PLANS[o.tier].name}: ${reason}`, url: "/?c=t." + o.id, tag: "order:" + o.id });
     save(); pushOrder(o);
   });
 
@@ -1312,7 +1357,7 @@ io.on("connection", socket => {
     if (mineF[other.id] === "out") fail("Pedido já enviado. Aguarde a resposta.");
     if (Object.keys(mineF).length >= 500) fail("Limite de amigos atingido.");
     if (mineF[other.id] === "in") { setFriend(uid, other.id, "friend"); setFriend(other.id, uid, "friend"); }
-    else { setFriend(uid, other.id, "out"); setFriend(other.id, uid, "in"); }
+    else { setFriend(uid, other.id, "out"); setFriend(other.id, uid, "in"); pushTo(other.id, { title: "Novo pedido de amizade", body: `${me().username} quer ser seu amigo na Auryx Nexavória`, url: "/?abrir=amigos", tag: "friend:" + uid }); }
     save();
     return { state: friendsOf(me())[other.id] };
   });
@@ -1487,7 +1532,28 @@ io.on("connection", socket => {
     io.to(msg.to).emit("voice:signal", { from: socket.id, userId: uid, data: msg.data });
   });
 
+  /* ---------- push e visibilidade ---------- */
+  const setVisible = vis => {
+    let s = visibleSockets.get(uid);
+    if (vis) { if (!s) visibleSockets.set(uid, (s = new Set())); s.add(socket.id); }
+    else if (s) { s.delete(socket.id); if (!s.size) visibleSockets.delete(uid); }
+  };
+  setVisible(true);
+  socket.on("vis", d => setVisible(!(d && d.hidden)));
+  on("push:key", () => ({ key: db.vapid ? db.vapid.publicKey : "" }));
+  on("push:sub", ({ sub }) => {
+    if (!webpush) fail("Notificações push não estão disponíveis no servidor.");
+    if (!sub || typeof sub.endpoint !== "string" || !/^https:\/\//.test(sub.endpoint) || sub.endpoint.length > 1000 || !sub.keys || typeof sub.keys.p256dh !== "string" || typeof sub.keys.auth !== "string") fail("Inscrição inválida.");
+    const u = me();
+    u.push = (u.push || []).filter(x => x.endpoint !== sub.endpoint);
+    u.push.push({ endpoint: sub.endpoint, keys: { p256dh: str(sub.keys.p256dh, 200), auth: str(sub.keys.auth, 100) } });
+    if (u.push.length > 6) u.push.splice(0, u.push.length - 6);
+    save();
+  });
+  on("push:unsub", ({ endpoint }) => { const u = me(); u.push = (u.push || []).filter(x => x.endpoint !== endpoint); save(); });
+
   socket.on("disconnect", () => {
+    setVisible(false);
     leaveVoice(socket.id);
     const set = online.get(uid);
     if (set) {

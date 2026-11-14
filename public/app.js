@@ -95,6 +95,8 @@ let logoN = 0;
 const LOGO = () => { const id = "axg" + (++logoN); return `<svg viewBox="0 0 48 48" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><path d="M11 37 24 11l13 26M16.5 28h15" fill="none" stroke="url(#${id})" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`; };
 
 const DESKTOP = window.nexoraDesktop || null;
+const ANDROID = window.AuryxAndroid || null;   // ponte do app Android (tela nativa, chamada em segundo plano, avisos)
+const ANDROID_URL = "https://github.com/duduzinho5455-sketch/nexora/releases/download/android/Auryx-Nexavoria.apk";
 const DESKTOP_URL = "https://github.com/duduzinho5455-sketch/nexora/releases/latest/download/Auryx-Nexavoria-Setup.exe";
 let installPrompt = null;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPrompt = e; });
@@ -1673,7 +1675,7 @@ function connect() {
     if (err && err.message === "verify") { sock.disconnect(); showAuth(); setAuthMode("verify", "Confirme seu e-mail para entrar. Digite o código que enviamos (ou peça outro)."); return; }
     if (S.ready) $("#connBar").classList.remove("hidden");
   });
-  sock.on("connect", () => $("#connBar").classList.add("hidden"));
+  sock.on("connect", () => { $("#connBar").classList.add("hidden"); sock.emit("vis", { hidden: document.hidden }); });
   sock.on("disconnect", reason => { if (reason !== "io client disconnect") $("#connBar").classList.remove("hidden"); });
 
   sock.on("ready", onReady);
@@ -1840,6 +1842,8 @@ function onReady(d) {
   renderAll();
   if (rejoin && chan(rejoin)) joinVoice(rejoin);
   if (S.openFriends) { S.openFriends = false; goFriends(); }
+  if (S.openUrl) { const u = S.openUrl; S.openUrl = null; setTimeout(() => openFromUrl(u), 600); }
+  if (first) setupPush(false);
   if (S.pendingInvite) { const code = S.pendingInvite; S.pendingInvite = null; try { sessionStorage.removeItem("nx:invite"); } catch {} joinModal(code); }
 }
 
@@ -1879,11 +1883,14 @@ function rerenderVisible() {
   if (stick) scrollBottom(); else el.scrollTop = top;
 }
 function notify(m, s, c) {
+  const u = user(m.a);
+  const title = c.ticket ? `Atendimento · ${u.username}` : c.group ? `${u.username} em ${groupTitle(c)}` : c.dm ? `${u.username} (privado)` : `${u.username} em #${c.name} (${s.name})`;
+  // no app Android o aviso sai pela notificação do próprio Android
+  if (ANDROID && ANDROID.notify) { if (document.hidden) { try { ANDROID.notify(title, (m.t || "📎 Anexo").slice(0, 160), "/?c=" + encodeURIComponent(c.id)); } catch {} } return; }
   if (!S.settings.notify || !("Notification" in window) || Notification.permission !== "granted") return;
   if (document.hasFocus() && S.channelId === c.id) return;
-  const u = user(m.a);
   try {
-    const n = new Notification(c.group ? `${u.username} em ${groupTitle(c)}` : c.dm ? `${u.username} (privado)` : `${u.username} em #${c.name} (${s.name})`, { body: m.t.slice(0, 160), tag: c.id, silent: true });
+    const n = new Notification(title, { body: (m.t || "📎 Anexo").slice(0, 160), tag: c.id, silent: true });
     n.onclick = () => { window.focus(); openChannel(c.id); n.close(); };
   } catch {}
 }
@@ -2037,6 +2044,7 @@ async function joinVoice(cid) {
     if (!V.loop) V.loop = setInterval(meterTick, 90);
     if (!V.statsTimer) V.statsTimer = setInterval(statsTick, 2000);
     sfx("join");
+    callBackground(true);
   } catch (e) {
     toast(e.message || "Não foi possível entrar na sala.", "error");
     if (!V.channelId && V.mic) { stopMic(V.mic); V.mic = null; }
@@ -2053,6 +2061,7 @@ function leaveVoice() {
   sfx("leave");
 }
 function teardownVoice(silent, keepMic) {
+  if (V.channelId) callBackground(false);
   V.act = null;
   destroyAct();
   if (V.controlling) stopControlling();
@@ -2198,6 +2207,7 @@ function afterAudioChange() {
   store.set("muted", S.muted); store.set("deaf", S.deaf);
   applyMic(); applyVolumes();
   if (V.channelId) emit("voice:update", { muted: S.muted || S.deaf || !V.mic, deaf: S.deaf });
+  if (V.channelId && "mediaSession" in navigator) { try { navigator.mediaSession.setMicrophoneActive(!(S.muted || S.deaf)); } catch {} }
   schedule("user", "stage");
 }
 function toggleMute() {
@@ -2274,12 +2284,16 @@ function rebalance() {
   }
 }
 async function startScreen(cfg) {
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) { toast("Seu navegador não permite compartilhar a tela.", "error"); return; }
+  const native = ANDROID && ANDROID.startScreen;
+  if (!native && (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia)) {
+    toast(/Android/i.test(navigator.userAgent) ? "Para transmitir a tela no Android, use o app Auryx Nexavória para Android (Configurações › Baixar o app)." : "Seu navegador não permite compartilhar a tela.", "error", 6000);
+    return;
+  }
   if (!V.channelId) { toast("Entre em uma sala de voz para transmitir.", "warn"); return; }
   const q = QUALITY[cfg.quality] || QUALITY["1080"];
   let stream;
   try {
-    stream = await navigator.mediaDevices.getDisplayMedia({
+    stream = native ? await androidScreenStream(q) : await navigator.mediaDevices.getDisplayMedia({
       video: { width: { ideal: q.w, max: q.w }, height: { ideal: q.h, max: q.h }, frameRate: { ideal: q.fps, max: q.fps } },
       audio: cfg.audio ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false } : false,
       selfBrowserSurface: "exclude", surfaceSwitching: "include", systemAudio: cfg.audio ? "include" : "exclude"
@@ -2307,9 +2321,116 @@ function stopScreen(silent) {
   for (const sock of [...V.granted.keys()]) endGrant(sock);
   for (const p of V.peers.values()) removeScreenFrom(p);
   V.screen.getTracks().forEach(t => t.stop());
+  if (V.screen._stopNative) V.screen._stopNative();
   V.screen = null;
   V.viewers.clear();
   if (!silent) { emit("voice:update", { screen: null }); sfx("unlive"); renderAll(); }
+}
+
+/* ------------------------------------------------------------------ */
+/* App Android: tela transmitida pelo próprio Android (MediaProjection)*/
+/* O app manda quadros JPEG; aqui eles viram um vídeo de verdade      */
+/* (canvas → captureStream) que segue pelo WebRTC como qualquer tela. */
+/* ------------------------------------------------------------------ */
+function androidScreenStream(q) {
+  return new Promise((resolve, reject) => {
+    const fps = Math.min(q.fps, 30);
+    window.__axScreenResult = ok => {
+      window.__axScreenResult = null;
+      if (!ok) { const e = new Error("negado"); e.name = "NotAllowedError"; reject(e); return; }
+      const cv = document.createElement("canvas");
+      cv.width = 1280; cv.height = 720;
+      const g = cv.getContext("2d");
+      const stream = cv.captureStream(fps);
+      let busy = false, alive = true, sized = false;
+      const toBlob = b64 => { const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Blob([u], { type: "image/jpeg" }); };
+      const pull = setInterval(async () => {
+        if (busy || !alive) return;
+        let b64 = "";
+        try { b64 = ANDROID.frame(); } catch {}
+        if (!b64) return;
+        busy = true;
+        try {
+          const bmp = await createImageBitmap(toBlob(b64));
+          if (!sized || cv.width !== bmp.width || cv.height !== bmp.height) { cv.width = bmp.width; cv.height = bmp.height; sized = true; }
+          g.drawImage(bmp, 0, 0);
+          bmp.close && bmp.close();
+        } catch {}
+        busy = false;
+      }, Math.round(1000 / fps));
+      // o usuário pode parar pela notificação do Android
+      const watch = setInterval(() => { let on = true; try { on = ANDROID.screenActive(); } catch {} if (!on && alive) stopScreen(); }, 1000);
+      stream._stopNative = () => { alive = false; clearInterval(pull); clearInterval(watch); try { ANDROID.stopScreen(); } catch {} };
+      resolve(stream);
+    };
+    try { ANDROID.startScreen(q.w, q.h, fps); } catch (e) { window.__axScreenResult = null; reject(e); }
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Segundo plano: a chamada continua com a tela bloqueada              */
+/* ------------------------------------------------------------------ */
+let keepAlive = null;
+const MS_ACTIONS = ["hangup", "togglemicrophone", "stop", "pause", "play"];
+function callBackground(on) {
+  const c = on ? chan(V.channelId) : null, s = on ? S.servers.get(V.serverId) : null;
+  if (ANDROID && ANDROID.callState) { try { ANDROID.callState(!!on, on ? `${c ? c.name : "Sala de voz"} · ${s ? s.name : ""}` : ""); } catch {} }
+  if ("mediaSession" in navigator) {
+    const set = (a, f) => { try { navigator.mediaSession.setActionHandler(a, f); } catch {} };
+    try {
+      if (on) {
+        navigator.mediaSession.metadata = new MediaMetadata({ title: `Em chamada: ${c ? c.name : "sala de voz"}`, artist: s ? s.name : "Auryx Nexavória", album: "Auryx Nexavória", artwork: [{ src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" }] });
+        navigator.mediaSession.playbackState = "playing";
+        set("hangup", () => leaveVoice()); set("stop", () => leaveVoice());
+        set("togglemicrophone", () => toggleMute()); set("pause", () => toggleMute()); set("play", () => toggleMute());
+        try { navigator.mediaSession.setMicrophoneActive(!(S.muted || S.deaf)); } catch {}
+      } else {
+        navigator.mediaSession.metadata = null;
+        navigator.mediaSession.playbackState = "none";
+        MS_ACTIONS.forEach(a => set(a, null));
+      }
+    } catch {}
+  }
+  // um "som" silencioso mantém a página como mídia tocando: o celular não congela a chamada
+  if (on && !keepAlive && V.ctx) {
+    try {
+      const dest = V.ctx.createMediaStreamDestination(), g = V.ctx.createGain(), o = V.ctx.createOscillator();
+      g.gain.value = 0.00001; o.connect(g).connect(dest); o.start();
+      const a = new Audio(); a.srcObject = dest.stream; a.play().catch(() => {});
+      keepAlive = { a, o };
+    } catch {}
+  }
+  if (!on && keepAlive) { try { keepAlive.o.stop(); keepAlive.a.pause(); keepAlive.a.srcObject = null; } catch {} keepAlive = null; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Notificações push (chegam com o app fechado)                        */
+/* ------------------------------------------------------------------ */
+const b64ToU8 = s => { const p = "=".repeat((4 - (s.length % 4)) % 4), b = atob((s + p).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(b, c => c.charCodeAt(0)); };
+const pushSupported = () => !LOCAL && !ANDROID && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+async function setupPush(ask) {
+  if (!pushSupported()) return false;
+  try {
+    if (Notification.permission === "default" && ask) await Notification.requestPermission();
+    if (Notification.permission !== "granted") return false;
+    const reg = await navigator.serviceWorker.ready;
+    const k = await emit("push:key", {});
+    if (!k.key) return false;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(k.key) });
+    const r = await emit("push:sub", { sub: sub.toJSON() });
+    if (!r.error) { S.settings.notify = true; saveSettings(); }
+    return !r.error;
+  } catch (e) { console.warn("[push]", e); return false; }
+}
+function openFromUrl(url) {
+  try {
+    const u = new URL(url, location.origin), c = u.searchParams.get("c"), a = u.searchParams.get("abrir");
+    if (c && isTicket(c)) openTicket(c.slice(2));
+    else if (c && chan(c)) openChannel(c);
+    else if (a === "amigos") goFriends();
+    else if (a === "premium") goPremium();
+  } catch {}
 }
 async function applyScreenQuality() {
   const vt = V.screen && V.screen.getVideoTracks()[0];
@@ -3702,7 +3823,7 @@ function userSettings(initial) {
     { id: "remote", name: "Controle remoto", render: renderRemote, mount: mountRemote },
     { label: "Aplicativo" },
     { id: "look", name: "Aparência", render: renderLook, mount: mountLook },
-    { id: "notif", name: "Notificações", render: () => toggleRow("sounds", "Sons do aplicativo", "Entrar/sair da sala, menções, mutar", S.settings.sounds) + toggleRow("notify", "Notificações na área de trabalho", "Avisa quando alguém menciona você", S.settings.notify && "Notification" in window && Notification.permission === "granted"), mount: p => bindToggles(p, async (k, v, inp) => { if (k === "notify" && v) { if (!("Notification" in window)) { inp.checked = false; S.settings.notify = false; saveSettings(); toast("Seu navegador não suporta notificações.", "warn"); return; } const perm = await Notification.requestPermission(); if (perm !== "granted") { inp.checked = false; S.settings.notify = false; saveSettings(); toast("Permissão de notificação negada.", "warn"); } } }) },
+    { id: "notif", name: "Notificações", render: () => toggleRow("sounds", "Sons do aplicativo", "Entrar/sair da sala, menções, mutar", S.settings.sounds) + (ANDROID ? `<p class="hint" style="margin-top:14px">No app Android os avisos chegam pela notificação do próprio celular.</p>` : toggleRow("notify", "Notificações (mesmo com o app fechado)", "Mensagens privadas, menções, pedidos de amizade e atendimento", S.settings.notify && "Notification" in window && Notification.permission === "granted") + `<p class="hint" style="margin-top:12px">No iPhone, as notificações só funcionam com o app instalado na Tela de Início (Compartilhar › Adicionar à Tela de Início).</p>`), mount: p => bindToggles(p, async (k, v, inp) => { if (k === "notify" && v) { if (!("Notification" in window)) { inp.checked = false; S.settings.notify = false; saveSettings(); toast("Seu navegador não suporta notificações.", "warn"); return; } const perm = await Notification.requestPermission(); if (perm !== "granted") { inp.checked = false; S.settings.notify = false; saveSettings(); toast("Permissão de notificação negada.", "warn"); } else if (await setupPush(false)) toast("Notificações ligadas! Elas chegam mesmo com o app fechado. 🔔", "ok"); } }) },
     { id: "keys", name: "Atalhos", render: () => [["Ctrl + K", "Ir para servidor ou canal"], ["Ctrl + Shift + M", "Silenciar / ativar microfone"], ["Ctrl + Shift + D", "Desativar / ativar áudio"], ["↑ (caixa vazia)", "Editar sua última mensagem"], ["Shift + Enter", "Nova linha"], ["Esc", "Fechar janela / cancelar resposta"], ["Shift + clique na lixeira", "Apagar sem confirmar"]].map(([k, d]) => `<div class="toggle-row"><span>${d}</span><span class="kbd">${k}</span></div>`).join("") },
     "-",
     { id: "logout", name: "Sair", danger: true, action: async close => { if (await confirmBox({ title: "Sair", html: "Tem certeza de que quer sair da sua conta?", ok: "Sair" })) { close(); logout(); } } }
@@ -3820,6 +3941,7 @@ function renderAppDl() {
   return `<p style="color:var(--muted);margin-top:-8px">Use a Auryx Nexavória como um app de verdade: janela própria, ícone na área de trabalho e notificações.</p>
     <div class="steps">
       <div class="step"><b>${ic("monitor", "sm")}</b><div><b>App para Windows</b><small>Programa completo: seletor de tela próprio, fica na bandeja e já vem com o controle remoto embutido (não precisa do Agente Auryx).</small>${DESKTOP ? `<small style="color:var(--green)">✅ Instalado — você está nele agora.</small>` : `<a class="btn primary sm" href="${DESKTOP_URL}" target="_blank" rel="noopener">${ic("arrowDown", "sm")}Baixar Auryx-Nexavoria-Setup.exe</a><small>Se o Windows avisar "O Windows protegeu o computador", clique em <b>Mais informações › Executar assim mesmo</b>.</small>`}</div></div>
+      <div class="step"><b>${ic("gamepad", "sm")}</b><div><b>App para Android (APK)</b><small>Transmite a tela do celular, mantém a chamada com a tela bloqueada e avisa de mensagens.</small>${ANDROID ? `<small style="color:var(--green)">✅ Instalado — você está nele agora.</small>` : `<a class="btn primary sm" href="${ANDROID_URL}" target="_blank" rel="noopener">${ic("arrowDown", "sm")}Baixar Auryx-Nexavoria.apk</a><small>No Android, permita "instalar apps desconhecidos" para o navegador quando pedir. Não está na Play Store.</small>`}</div></div>
       <div class="step"><b>${ic("users", "sm")}</b><div><b>Instalar pelo navegador (PC e celular)</b><small>Leve e sem baixar nada: vira um app com ícone, direto do site.</small>${installPrompt && !DESKTOP ? `<button class="btn primary sm" data-install>${ic("plus", "sm")}Instalar Auryx Nexavória</button>` : ""}${pwaState ? `<small>${pwaState}</small>` : ""}</div></div>
     </div>`;
 }
@@ -4350,7 +4472,15 @@ function wire() {
   });
   window.addEventListener("resize", () => { tipEl().classList.remove("show"); closeMenus(); }, { passive: true });
   window.addEventListener("focus", maybeRead);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) maybeRead(); });
+  document.addEventListener("visibilitychange", () => {
+    if (S.socket) {
+      S.socket.emit("vis", { hidden: document.hidden });            // o servidor só manda push se você não estiver olhando
+      if (!document.hidden && !S.socket.connected && !LOCAL) S.socket.connect();   // voltou ao app: reconecta na hora
+    }
+    if (!document.hidden) maybeRead();
+  });
+  if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", e => { if (e.data && e.data.type === "open") openFromUrl(e.data.url); });
+  window.__axOpen = url => openFromUrl(url);   // usado pelo app Android ao tocar numa notificação
 
   // rolagem das mensagens
   const mb = box();
@@ -4567,6 +4697,7 @@ function boot() {
     S.pendingInvite = null;
   }
   if (new URLSearchParams(location.search).get("abrir") === "amigos") S.openFriends = true;
+  if (/[?&](c|abrir)=/.test(location.search)) S.openUrl = location.href;
   if (!LOCAL && "serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
   }
