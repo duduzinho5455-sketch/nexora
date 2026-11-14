@@ -732,6 +732,14 @@ setInterval(pollSteam, 60000).unref();
 // Quando a conexão cai (tela bloqueada, troca de rede), a pessoa fica 60 s "segurando o lugar"
 // na sala; se voltar nesse tempo, retoma a MESMA chamada sem desligar.
 const VOICE_GRACE = 60000;
+/* Versão do app: muda a cada atualização do site. O app compara e se atualiza sozinho. */
+const APP_VER = (() => { try { return crypto.createHash("sha1").update(fs.readFileSync(path.join(__dirname, "public", "app.js"))).update(fs.readFileSync(path.join(__dirname, "public", "style.css"))).digest("hex").slice(0, 10); } catch { return String(Date.now()); } })();
+const NEWS_OLD = `🚀 A Auryx Nexavória foi atualizada!
+
+Novidades: chat dentro da call, Spotify nas atividades, Aury (IA do VIP), sobreposição de jogo no app de PC, transmissão do celular com som, grade da call nova e correção da voz duplicada.
+
+👉 Feche e abra o app (ou recarregue a página com F5) para usar a versão nova.`;
+const newsSent = new Set();
 const sockAlias = new Map();   // socket antigo -> socket novo (para os sinais de quem ainda usa o id antigo)
 function holdVoice(sock) {
   const v = voice.get(sock);
@@ -980,8 +988,14 @@ io.on("connection", socket => {
       now: Date.now(),
       voice: [...voice].filter(([, v]) => ids.has(v.sid)).map(([k, v]) => vView(k, v)),
       iceServers: ICE_SERVERS,
-      limits: { voice: VOICE_LIMIT }
+      limits: { voice: VOICE_LIMIT },
+      ver: APP_VER
     });
+    // app aberto numa versão antiga (não sabe se atualizar sozinho): avisa uma vez para recarregar
+    if (!(socket.handshake.auth && socket.handshake.auth.v) && !newsSent.has(uid)) {
+      newsSent.add(uid);
+      setTimeout(() => socket.emit("announce", { text: NEWS_OLD, by: "Equipe Auryx" }), 1500);
+    }
   }
 
   // Limitadores simples por conexão

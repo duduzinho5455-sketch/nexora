@@ -1327,3 +1327,16 @@ html.reduce-motion .gp-spin { border-top-color: var(--accent); border-right-colo
 .sp-q img, .sp-ph { width: 63px; height: 63px; object-fit: cover; border-radius: 6px; display: grid; place-items: center; background: #151826; color: #1ed760; }
 .sp-note { color: #9aa0b8; font-size: 12px; }
 .sp-wrap .yt-seek:disabled { opacity: .4; }
+
+/* grade da call: quadros iguais calculados pelo app (nada fica por cima de nada) */
+.stage-grid:not(.focus) { display: flex; flex-wrap: wrap; justify-content: center; align-content: center; overflow: hidden; }
+.stage-grid:not(.focus) > .tile { flex: none; width: var(--tw, 320px); height: var(--th, 200px); aspect-ratio: auto; }
+.stage-grid.small-tiles .tile-av .av { --s: 56px !important; }
+.stage-grid.small-tiles .tile-name { font-size: 12px; }
+
+/* novidades */
+.news { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 12px; }
+.news li { display: flex; gap: 12px; align-items: flex-start; }
+.news .nw-e { width: 36px; height: 36px; flex: none; border-radius: 10px; display: grid; place-items: center; background: var(--bg-3); font-size: 18px; }
+.news b { display: block; }
+.news small { color: var(--text-2); font-size: 13px; }

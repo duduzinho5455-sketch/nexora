@@ -2123,7 +2123,7 @@ function emit(ev, data) {
   });
 }
 function connect() {
-  const sock = LOCAL ? localSocket(S.token) : io({ auth: { token: S.token }, transports: ["websocket", "polling"], reconnectionDelayMax: 6000 });
+  const sock = LOCAL ? localSocket(S.token) : io({ auth: { token: S.token, v: 2 }, transports: ["websocket", "polling"], reconnectionDelayMax: 6000 });
   S.socket = sock;
   sock.on("connect_error", err => {
     if (err && err.message === "auth") { store.del("token"); S.token = null; sock.disconnect(); showAuth("Sua sessão expirou. Entre novamente."); return; }
@@ -2310,7 +2310,39 @@ async function resumeVoice(cid) {
   callBackground(true);
   renderAll();
 }
+/* Atualização automática: o servidor mudou de versão enquanto o app estava aberto */
+function checkVersion(ver) {
+  if (!ver) return;
+  if (!S.appVer) { S.appVer = ver; return; }
+  if (ver === S.appVer) return;
+  const busy = V.channelId || (document.activeElement && /TEXTAREA|INPUT/.test(document.activeElement.tagName) && document.activeElement.value);
+  if (busy) { showUpdateBar(); return; }
+  toast("Atualizando a Auryx Nexavória…", "info", 3000);
+  // apaga a cópia guardada do app para a recarga já vir com a versão nova
+  const wipe = window.caches ? caches.keys().then(ks => Promise.all(ks.map(k => caches.delete(k)))).catch(() => {}) : Promise.resolve();
+  wipe.then(() => setTimeout(() => location.reload(), 800));
+}
+/* Novidades: aparece uma vez para cada pessoa depois da atualização */
+const NEWS_ID = "2026-11-14b";
+function showNews() {
+  if (store.get("news") === NEWS_ID) return;
+  store.set("news", NEWS_ID);
+  const it = (e, t, d) => `<li><span class="nw-e">${e}</span><div><b>${t}</b><small>${d}</small></div></li>`;
+  modal({
+    title: "🚀 Novidades da Auryx", sub: "O app acabou de ser atualizado",
+    body: `<ul class="news">${[
+      it("💬", "Chat dentro da call", "Mande links e mensagens sem sair da chamada (botão de balão na barra da call)."),
+      it("🎧", "Spotify nas atividades", "Ouçam música juntos na call, com fila e tudo sincronizado."),
+      it("🤖", "Aury, a IA do VIP", "Converse com a IA no ✨ da barra lateral. Ela também ajuda no atendimento do pagamento."),
+      it("🎮", "Sobreposição de jogo (app de PC)", "Veja quem está na call e quem está falando por cima do jogo."),
+      it("📱", "Tela do celular com som", "No app Android, a transmissão agora leva o som do jogo (Android 10+)."),
+      it("🔲", "Call em quadradinhos", "Todo mundo cabe na tela, do mesmo tamanho."),
+      it("🔧", "Correções", "Voz duplicada, eco na transmissão e menos atraso na voz.")
+    ].join("")}</ul><div class="modal-foot"><button class="btn primary" data-close>Bora!</button></div>`
+  });
+}
 function onReady(d) {
+  checkVersion(d.ver);
   const rejoin = V.channelId;
   S.me = d.me;
   S.users = new Map(d.users.map(u => [u.id, u]));
@@ -2328,6 +2360,7 @@ function onReady(d) {
   const first = !S.ready;
   S.ready = true;
   showApp();
+  if (first && !LOCAL) setTimeout(showNews, 1200);
   if (!LOCAL) {
     // cookie HttpOnly para abrir comprovantes privados (sessões antigas não tinham)
     authApi("account/cookie", {}, true).catch(() => {});
@@ -2599,6 +2632,8 @@ function teardownVoice(silent, keepMic) {
 function createPeer(sock, userId, initiator) {
   const old = V.peers.get(sock);
   if (old) closePeer(old);
+  // nunca duas conexões com a mesma pessoa (era isso que fazia a voz sair dobrada depois de uma queda)
+  for (const q of [...V.peers.values()]) if (q.userId === userId && q.sock !== sock) closePeer(q);
   const pc = new RTCPeerConnection({ iceServers: S.ice, bundlePolicy: "max-bundle", rtcpMuxPolicy: "require" });
   const p = { sock, userId, pc, polite: S.socket.id < sock, makingOffer: false, ignoreOffer: false, tracksAdded: false, streams: new Map(), audios: new Map(), senders: {}, chain: Promise.resolve() };
   V.peers.set(sock, p);
@@ -2625,9 +2660,23 @@ function addBaseTracks(p) {
   if (p.tracksAdded) return;
   p.tracksAdded = true;
   const t = V.mic && V.mic.getAudioTracks()[0];
-  if (t) p.senders.mic = p.pc.addTrack(t, V.mic);
+  if (t) { p.senders.mic = p.pc.addTrack(t, V.mic); voicePriority(p.senders.mic); }
   else if (!p.pc.getTransceivers().some(x => x.receiver.track.kind === "audio")) p.pc.addTransceiver("audio", { direction: "recvonly" });
   if (V.cam) addCamTo(p);
+}
+// a voz tem prioridade na rede sobre a tela e a câmera: com alguém transmitindo, a fala não atrasa
+function voicePriority(sender) {
+  if (!sender || !sender.getParameters) return;
+  const go = () => {
+    try {
+      const prm = sender.getParameters();
+      if (!prm.encodings || !prm.encodings.length) return false;
+      prm.encodings[0].priority = "high"; prm.encodings[0].networkPriority = "high";
+      sender.setParameters(prm).catch(() => {});
+      return true;
+    } catch { return true; }
+  };
+  if (!go()) setTimeout(go, 1500);
 }
 function closePeer(p) {
   endGrant(p.sock, true);
@@ -2645,7 +2694,7 @@ function tuneSdp(desc) {
   const m = desc.sdp.match(/a=rtpmap:(\d+) opus\/48000/i);
   if (!m) return desc;
   const sdp = desc.sdp.replace(new RegExp(`a=fmtp:${m[1]} ([^\\r\\n]*)`, "g"), (line, params) => {
-    const add = ["useinbandfec=1", "usedtx=1", "maxaveragebitrate=64000"].filter(x => !params.includes(x.split("=")[0]));
+    const add = ["useinbandfec=1", "stereo=0", "maxaveragebitrate=64000"].filter(x => !params.includes(x.split("=")[0]));
     return add.length ? `${line};${add.join(";")}` : line;
   });
   return { type: desc.type, sdp };
@@ -2686,6 +2735,10 @@ async function handleSignal(p, data) {
 function onTrack(p, e) {
   const stream = e.streams[0] || new MediaStream([e.track]);
   p.streams.set(stream.id, stream);
+  if (e.track.kind === "audio") {
+    // voz: o menor atraso que a rede permitir
+    try { if ("jitterBufferTarget" in e.receiver) e.receiver.jitterBufferTarget = 0; } catch {}
+  }
   if (e.track.kind === "video") {
     // Baixa latência: o navegador mostra o quadro assim que chega (ideal para jogo e controle remoto).
     try {
@@ -2700,6 +2753,13 @@ function onTrack(p, e) {
     applyVolumes();
     a.play().catch(() => {});
   } else if (e.track.kind === "audio") {
+    const vs = S.voice.get(p.userId);
+    if (!vs || vs.screen !== stream.id) {
+      for (const q of V.peers.values()) for (const [sid, el] of q.audios) {
+        const qs = S.voice.get(q.userId);
+        if (q.userId === p.userId && sid !== stream.id && !(qs && qs.screen === sid)) { el.pause(); el.srcObject = null; q.audios.delete(sid); }
+      }
+    }
     const a = new Audio();
     a.autoplay = true;
     a.srcObject = stream;
@@ -2824,8 +2884,11 @@ async function startScreen(cfg) {
   if (!V.channelId) { stream.getTracks().forEach(t => t.stop()); return; }
   // garante que o som capturado não traga as vozes da call de volta (eco)
   for (const t of stream.getAudioTracks()) { try { await t.applyConstraints({ restrictOwnAudio: true }); } catch {} }
-  if (cfg.audio && stream.getAudioTracks().length && window.nexoraDesktop && window.nexoraDesktop.winBuild && window.nexoraDesktop.winBuild < 22000)
-    toast("No Windows 10 o som do PC pode levar as vozes da call junto. Se der eco, use fone de ouvido ou transmita sem som.", "warn", 7000);
+  if (cfg.audio && stream.getAudioTracks().length && !native && !(await ownAudioSafe(stream))) {
+    // o som do PC inteiro levaria as vozes da call de volta para todo mundo (voz duplicada): manda só a imagem
+    stream.getAudioTracks().forEach(t => { t.stop(); stream.removeTrack(t); });
+    toast("Som do PC desligado nesta transmissão: no seu Windows ele levaria as vozes da call junto (eco). Para mandar som, transmita uma aba do navegador ou use o Windows 11.", "warn", 9000);
+  }
   const vt = stream.getVideoTracks()[0];
   if ("contentHint" in vt) vt.contentHint = cfg.mode === "detail" ? "detail" : "motion";
   stream.getAudioTracks().forEach(t => { if ("contentHint" in t) t.contentHint = "music"; });
@@ -2838,6 +2901,23 @@ async function startScreen(cfg) {
   toast("Você está ao vivo! A transmissão só é enviada para quem assiste.", "ok", 4000);
   if (S.view !== "stage" || S.channelId !== V.channelId) openChannel(V.channelId, false);
   renderAll();
+}
+// O som capturado pode trazer as vozes da call de volta? Aba do navegador: nunca.
+// Tela/janela inteira: só é seguro onde o sistema separa o som do próprio app (Windows 11+, macOS).
+async function ownAudioSafe(stream) {
+  const at = stream.getAudioTracks()[0];
+  if (!at) return true;
+  const surface = (stream.getVideoTracks()[0] && stream.getVideoTracks()[0].getSettings().displaySurface) || "";
+  if (surface === "browser") return true;
+  const D = window.nexoraDesktop;
+  if (D && D.winBuild) return D.winBuild >= 22000;
+  const sup = navigator.mediaDevices.getSupportedConstraints ? navigator.mediaDevices.getSupportedConstraints() : {};
+  if (!sup.restrictOwnAudio) return false;
+  if (!/Windows/i.test(navigator.userAgent)) return /Mac/i.test(navigator.userAgent);
+  try {
+    const v = await navigator.userAgentData.getHighEntropyValues(["platformVersion"]);
+    return parseInt(v.platformVersion, 10) >= 13;       // 13+ = Windows 11
+  } catch { return false; }
 }
 function stopScreen(silent) {
   if (!V.screen) return;
@@ -3419,6 +3499,29 @@ async function statsTick() {
 }
 
 /* --- palco (grade de participantes) --- */
+// Escolhe quantas colunas usar para que todos os quadros fiquem do mesmo tamanho,
+// o maior possível, sem passar da tela e sem um ficar por cima do outro.
+function layoutGrid(grid) {
+  if (!grid || grid.classList.contains("focus")) { if (grid) { grid.style.removeProperty("--tw"); grid.style.removeProperty("--th"); } return; }
+  const n = grid.querySelectorAll(":scope > .tile").length;
+  if (!n) return;
+  const cs = getComputedStyle(grid), gap = parseFloat(cs.columnGap) || 10;
+  const W = grid.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const H = grid.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  if (W <= 0 || H <= 0) return;
+  const ratio = W < 560 ? 4 / 3 : 16 / 10;
+  let best = { w: 0, h: 0 };
+  for (let cols = 1; cols <= n; cols++) {
+    const rows = Math.ceil(n / cols);
+    let w = (W - gap * (cols - 1)) / cols, h = w / ratio;
+    if (h * rows + gap * (rows - 1) > H) { h = (H - gap * (rows - 1)) / rows; w = h * ratio; }
+    if (w > best.w) best = { w, h };
+  }
+  const w = Math.max(120, Math.floor(best.w)), h = Math.max(90, Math.floor(best.h));
+  grid.style.setProperty("--tw", w + "px");
+  grid.style.setProperty("--th", h + "px");
+  grid.classList.toggle("small-tiles", w < 260);
+}
 function stageTiles(cid) {
   const people = [...S.voice.values()].filter(v => v.channelId === cid).sort((a, b) => a.at - b.at);
   const tiles = [];
@@ -3514,6 +3617,8 @@ function renderStage() {
     if (strip) { [...strip.children].forEach(e => grid.append(e)); strip.remove(); }
     els.forEach((e, i) => { if (grid.children[i] !== e) grid.insertBefore(e, grid.children[i] || null); });
   }
+  layoutGrid(grid);
+  if (!grid._ro && window.ResizeObserver) { grid._ro = new ResizeObserver(() => layoutGrid(grid)); grid._ro.observe(grid); }
   let wait = root.querySelector(".stage-wait");
   const alone = c.dm && ![...S.voice.values()].some(v => v.channelId === c.id && v.userId !== S.me.id);
   if (alone && !wait) { wait = document.createElement("div"); wait.className = "stage-wait"; root.querySelector(".stage").prepend(wait); }
