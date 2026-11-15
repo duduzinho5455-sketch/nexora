@@ -28,7 +28,10 @@ const MAX_CHANNELS = 60;
 const MAX_MEMBERS = 1000;
 const SESSION_TTL = 60 * 24 * 3600e3;
 
-const ICE_SERVERS = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }];
+const ICE_SERVERS = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun.cloudflare.com:3478"] }];
+// TURN: retransmite a voz quando as duas pessoas não conseguem se ligar direto (4G, Wi-Fi de empresa/escola)
+// Configure no Render: TURN_URLS (separados por vírgula), TURN_USERNAME e TURN_CREDENTIAL
+if (process.env.TURN_URLS) ICE_SERVERS.push({ urls: process.env.TURN_URLS.split(",").map(x => x.trim()).filter(Boolean), username: process.env.TURN_USERNAME || "", credential: process.env.TURN_CREDENTIAL || "" });
 if (process.env.TURN_URL) {
   ICE_SERVERS.push({
     urls: process.env.TURN_URL.split(",").map(s => s.trim()).filter(Boolean),
@@ -243,8 +246,18 @@ function serverMeta(s) {
   return { id: s.id, name: s.name, icon: s.icon || "", color: s.color, description: s.description || "", public: !!s.public, ownerId: s.ownerId, created: s.created };
 }
 function serverView(s) {
-  return { ...serverMeta(s), channels: s.channels.map(chanView), members: s.members.slice() };
+  return { ...serverMeta(s), channels: s.channels.map(chanView), members: s.members.slice(), roles: rolesSorted(s), memberRoles: s.memberRoles || {} };
 }
+/* ---------- cargos e permissões dos servidores ---------- */
+// admin = tudo · server = editar o servidor · channels = canais · roles = cargos · kick = expulsar · ban = banir · messages = apagar mensagens dos outros
+const PERMS = ["admin", "server", "channels", "roles", "kick", "ban", "messages"];
+const MAX_ROLES = 30;
+const rolesSorted = s => (s.roles || []).map((r, i) => ({ id: r.id, name: r.name, color: r.color, perms: r.perms, hoist: !!r.hoist, pos: i })).reverse();
+function rolesOf(s, userId) { const ids = (s.memberRoles && s.memberRoles[userId]) || []; return (s.roles || []).filter(r => ids.includes(r.id)); }
+function hasPerm(s, userId, p) { if (s.ownerId === userId) return true; return rolesOf(s, userId).some(r => r.perms.includes("admin") || r.perms.includes(p)); }
+function topPos(s, userId) { if (s.ownerId === userId) return Infinity; let t = -1; (s.roles || []).forEach((r, i) => { if (rolesOf(s, userId).includes(r)) t = i; }); return t; }
+const canManagePerms = s => uid => PERMS.some(p => hasPerm(s, uid, p));
+function emitRoles(s) { io.to("s:" + s.id).emit("server:roles", { serverId: s.id, roles: rolesSorted(s), memberRoles: s.memberRoles || {} }); }
 function vView(sock, v) {
   return { sock, userId: v.uid, serverId: v.sid, channelId: v.cid, muted: v.muted, deaf: v.deaf, screen: v.screen, cam: v.cam, at: v.at };
 }
@@ -846,7 +859,7 @@ const VOICE_GRACE = 60000;
 const APP_VER = (() => { try { return crypto.createHash("sha1").update(fs.readFileSync(path.join(__dirname, "public", "app.js"))).update(fs.readFileSync(path.join(__dirname, "public", "style.css"))).digest("hex").slice(0, 10); } catch { return String(Date.now()); } })();
 const NEWS_OLD = `🚀 A Auryx Nexavória foi atualizada!
 
-Novidades: chat dentro da call, Spotify nas atividades, Aury (IA do VIP), sobreposição de jogo no app de PC, transmissão do celular com som, grade da call nova e correção da voz duplicada.
+Novidades: cargos e permissões nos servidores, bot de música que toca a música inteira, voz mais confiável, transmissão de tela melhor (principalmente no celular), configurações reorganizadas e VIP renovado.
 
 👉 Feche e abra o app (ou recarregue a página com F5) para usar a versão nova.`;
 const newsSent = new Set();
@@ -905,6 +918,42 @@ function vipSweep() {
   }
   if (changed) save();
 }
+/* Bot de música: busca pelo nome (YouTube Data API oficial) e converte link do Spotify na mesma música */
+const YT_KEY = process.env.YOUTUBE_API_KEY || "";
+const musicCache = new Map();          // busca -> resultados (economiza a cota diária do YouTube)
+const ytTitleCache = new Map();        // id do vídeo -> título
+const htmlDecode = s => String(s || "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+async function ytSearch(q) {
+  const key = q.toLowerCase();
+  const hit = musicCache.get(key);
+  if (hit && Date.now() - hit.at < 6 * 3600e3) return hit.items;
+  const url = "https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&maxResults=8&regionCode=BR&relevanceLanguage=pt&q=" + encodeURIComponent(q) + "&key=" + encodeURIComponent(YT_KEY);
+  const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new Error(r.status === 403 ? "A cota diária de buscas do YouTube acabou. Cole o link do vídeo ou tente amanhã." : "A busca do YouTube falhou agora. Tente de novo.");
+  const j = await r.json();
+  const items = (j.items || []).filter(x => x.id && x.id.videoId).map(x => ({ id: x.id.videoId, title: htmlDecode(x.snippet.title), channel: htmlDecode(x.snippet.channelTitle), thumb: (x.snippet.thumbnails && (x.snippet.thumbnails.medium || x.snippet.thumbnails.default) || {}).url || "" }));
+  for (const it of items) ytTitleCache.set(it.id, it.title);
+  musicCache.set(key, { at: Date.now(), items });
+  if (musicCache.size > 500) musicCache.delete(musicCache.keys().next().value);
+  return items;
+}
+async function spotifyTitle(link) {
+  const m = String(link).match(/open\.spotify\.com\/(?:intl-[a-z-]+\/)?(track|album|playlist|episode)\/([A-Za-z0-9]{10,40})/);
+  if (!m) return "";
+  const r = await fetch("https://open.spotify.com/oembed?url=" + encodeURIComponent(`https://open.spotify.com/${m[1]}/${m[2]}`), { signal: AbortSignal.timeout(6000) }).catch(() => null);
+  if (!r || !r.ok) return "";
+  const j = await r.json().catch(() => ({}));
+  return htmlDecode(j.title || "");
+}
+async function ytTitle(id) {
+  if (ytTitleCache.has(id)) return ytTitleCache.get(id);
+  const r = await fetch("https://www.youtube.com/oembed?format=json&url=" + encodeURIComponent("https://www.youtube.com/watch?v=" + id), { signal: AbortSignal.timeout(6000) }).catch(() => null);
+  const j = r && r.ok ? await r.json().catch(() => null) : null;
+  const t = j ? htmlDecode(j.title) : "";
+  ytTitleCache.set(id, t);
+  if (ytTitleCache.size > 2000) ytTitleCache.delete(ytTitleCache.keys().next().value);
+  return t;
+}
 const sockAlias = new Map();   // socket antigo -> socket novo (para os sinais de quem ainda usa o id antigo)
 function holdVoice(sock) {
   const v = voice.get(sock);
@@ -943,6 +992,7 @@ function systemMsg(s, userId, kind) {
 const inviteOk = inv => !!inv && !(inv.exp && inv.exp < Date.now()) && !(inv.max && (inv.uses || 0) >= inv.max);
 function addMember(s, userId) {
   if (s.members.includes(userId)) return false;
+  if (s.bans && s.bans[userId]) fail("Você foi banido deste servidor.");
   if (s.members.length >= MAX_MEMBERS) fail("Este servidor está lotado.");
   if (userServers(userId).length >= MAX_SERVERS_PER_USER) fail("Você atingiu o limite de servidores.");
   s.members.push(userId);
@@ -1180,6 +1230,9 @@ io.on("connection", socket => {
       else { console.error(`[${ev}]`, e); ack({ error: "Erro interno do servidor." }); }
     }
   });
+  const needPerm = (s, p) => { if (!hasPerm(s, uid, p)) fail("Você não tem permissão para isso neste servidor."); };
+  // só age em quem está abaixo de você na lista de cargos (o dono está acima de todos)
+  const above = (s, target) => { if (target === s.ownerId || topPos(s, uid) <= topPos(s, target)) fail("Essa pessoa tem um cargo igual ou acima do seu."); };
   const getServer = (id, owner) => {
     const s = typeof id === "string" ? db.servers[id] : null;
     if (!s || !s.members.includes(uid)) fail("Servidor não encontrado.");
@@ -1291,7 +1344,7 @@ io.on("connection", socket => {
 
   on("delete", ({ channelId, id }) => {
     const { s, c, m, rooms } = findMsg(channelId, id);
-    if (m.a !== uid && !(s && s.ownerId === uid)) fail("Sem permissão para apagar esta mensagem.");
+    if (m.a !== uid && !(s && hasPerm(s, uid, "messages"))) fail("Sem permissão para apagar esta mensagem.");
     const list = db.messages[c.id];
     list.splice(list.indexOf(m), 1);
     save();
@@ -1354,7 +1407,8 @@ io.on("connection", socket => {
   });
 
   on("server:update", ({ serverId, name, icon, color, description, isPublic }) => {
-    const s = getServer(serverId, true);
+    const s = getServer(serverId);
+    needPerm(s, "server");
     if (name !== undefined) { const n = str(name, 40); if (n.length < 2) fail("Nome muito curto."); s.name = n; }
     if (icon !== undefined) s.icon = cleanPic(icon);
     if (color !== undefined && isColor(color)) s.color = color;
@@ -1377,11 +1431,116 @@ io.on("connection", socket => {
   });
 
   on("server:kick", ({ serverId, userId }) => {
-    const s = getServer(serverId, true);
+    const s = getServer(serverId);
+    needPerm(s, "kick");
     if (userId === uid || !s.members.includes(userId)) fail("Membro inválido.");
+    above(s, userId);
+    if (s.memberRoles) delete s.memberRoles[userId];
+    serverLog(s, "kick", userId);
     removeMember(s, userId, `Você foi removido de "${s.name}".`);
   });
 
+  const serverLog = (s, action, target, extra) => {
+    s.log = s.log || [];
+    s.log.push({ at: Date.now(), by: uid, action, target: target || "", ...(extra || {}) });
+    if (s.log.length > 300) s.log.splice(0, s.log.length - 300);
+  };
+  const cleanPerms = (s, perms) => {
+    const list = Array.isArray(perms) ? PERMS.filter(p => perms.includes(p)) : [];
+    for (const p of list) if (!hasPerm(s, uid, p)) fail("Você não pode dar uma permissão que você não tem.");
+    return list;
+  };
+  on("role:save", ({ serverId, roleId, name, color, perms, hoist }) => {
+    const s = getServer(serverId);
+    needPerm(s, "roles");
+    s.roles = s.roles || [];
+    name = str(name, 32).replace(/\s+/g, " ");
+    if (!name) fail("Dê um nome ao cargo.");
+    color = isColor(color) ? color : "#99aab5";
+    if (roleId) {
+      const i = s.roles.findIndex(r => r.id === roleId);
+      if (i < 0) fail("Cargo não encontrado.");
+      if (i >= topPos(s, uid)) fail("Você só pode editar cargos abaixo do seu.");
+      Object.assign(s.roles[i], { name, color, perms: cleanPerms(s, perms), hoist: !!hoist });
+      serverLog(s, "role:edit", "", { role: name });
+    } else {
+      if (s.roles.length >= MAX_ROLES) fail(`Máximo de ${MAX_ROLES} cargos por servidor.`);
+      s.roles.unshift({ id: newId(), name, color, perms: cleanPerms(s, perms), hoist: !!hoist });   // nasce no fim da lista
+      serverLog(s, "role:create", "", { role: name });
+    }
+    save(); emitRoles(s);
+    return { ok: true };
+  });
+  on("role:delete", ({ serverId, roleId }) => {
+    const s = getServer(serverId);
+    needPerm(s, "roles");
+    const i = (s.roles || []).findIndex(r => r.id === roleId);
+    if (i < 0) fail("Cargo não encontrado.");
+    if (i >= topPos(s, uid)) fail("Você só pode apagar cargos abaixo do seu.");
+    const [r] = s.roles.splice(i, 1);
+    for (const k of Object.keys(s.memberRoles || {})) s.memberRoles[k] = s.memberRoles[k].filter(x => x !== roleId);
+    serverLog(s, "role:delete", "", { role: r.name });
+    save(); emitRoles(s);
+    return { ok: true };
+  });
+  on("role:move", ({ serverId, roleId, dir }) => {
+    const s = getServer(serverId);
+    needPerm(s, "roles");
+    const i = (s.roles || []).findIndex(r => r.id === roleId), j = i + (dir > 0 ? 1 : -1);   // +1 = sobe
+    if (i < 0 || j < 0 || j >= s.roles.length) return { ok: true };
+    if (Math.max(i, j) >= topPos(s, uid)) fail("Você só pode organizar cargos abaixo do seu.");
+    [s.roles[i], s.roles[j]] = [s.roles[j], s.roles[i]];
+    save(); emitRoles(s);
+    return { ok: true };
+  });
+  on("member:roles", ({ serverId, userId, roleIds }) => {
+    const s = getServer(serverId);
+    needPerm(s, "roles");
+    if (!s.members.includes(userId)) fail("Membro inválido.");
+    if (userId !== uid) above(s, userId);
+    const want = new Set(Array.isArray(roleIds) ? roleIds : []);
+    const had = new Set((s.memberRoles && s.memberRoles[userId]) || []);
+    const top = topPos(s, uid);
+    (s.roles || []).forEach((r, i) => { if (want.has(r.id) !== had.has(r.id) && i >= top) fail(`Você não pode mexer no cargo "${r.name}" (está acima ou igual ao seu).`); });
+    s.memberRoles = s.memberRoles || {};
+    s.memberRoles[userId] = (s.roles || []).filter(r => want.has(r.id)).map(r => r.id);
+    serverLog(s, "member:roles", userId);
+    save(); emitRoles(s);
+    return { ok: true };
+  });
+  on("server:ban", ({ serverId, userId, reason }) => {
+    const s = getServer(serverId);
+    needPerm(s, "ban");
+    if (userId === uid || !db.users[userId]) fail("Membro inválido.");
+    if (s.members.includes(userId)) above(s, userId);
+    s.bans = s.bans || {};
+    s.bans[userId] = { at: Date.now(), by: uid, reason: str(reason, 200) };
+    if (s.memberRoles) delete s.memberRoles[userId];
+    serverLog(s, "ban", userId, { reason: str(reason, 200) });
+    if (s.members.includes(userId)) removeMember(s, userId, `Você foi banido de "${s.name}".${reason ? " Motivo: " + str(reason, 200) : ""}`);
+    else save();
+    return { ok: true };
+  });
+  on("server:unban", ({ serverId, userId }) => {
+    const s = getServer(serverId);
+    needPerm(s, "ban");
+    if (!s.bans || !s.bans[userId]) fail("Essa pessoa não está banida.");
+    delete s.bans[userId];
+    serverLog(s, "unban", userId);
+    save();
+    return { ok: true };
+  });
+  on("server:bans", ({ serverId }) => {
+    const s = getServer(serverId);
+    needPerm(s, "ban");
+    return { bans: Object.entries(s.bans || {}).map(([id, b]) => ({ user: db.users[id] ? pubUser(db.users[id]) : { id, username: "Conta apagada" }, at: b.at, reason: b.reason, by: (db.users[b.by] || {}).username || "?" })) };
+  });
+  on("server:log", ({ serverId }) => {
+    const s = getServer(serverId);
+    if (!canManagePerms(s)(uid)) fail("Você não tem permissão para isso neste servidor.");
+    const nm = id => (db.users[id] || {}).username || "?";
+    return { log: (s.log || []).slice(-150).reverse().map(x => ({ ...x, byName: nm(x.by), targetName: x.target ? nm(x.target) : "" })) };
+  });
   on("server:transfer", ({ serverId, userId }) => {
     const s = getServer(serverId, true);
     if (userId === uid || !s.members.includes(userId)) fail("Membro inválido.");
@@ -1455,7 +1614,8 @@ io.on("connection", socket => {
 
   /* ---------- Canais ---------- */
   on("channel:create", ({ serverId, name, type, topic }) => {
-    const s = getServer(serverId, true);
+    const s = getServer(serverId);
+    needPerm(s, "channels");
     type = type === "voice" ? "voice" : "text";
     name = cleanChannelName(name, type);
     if (!name) fail("Dê um nome ao canal.");
@@ -1470,7 +1630,7 @@ io.on("connection", socket => {
 
   on("channel:update", ({ channelId, name, topic }) => {
     const { s, c } = getChannel(channelId);
-    if (s.ownerId !== uid) fail("Apenas o dono do servidor pode fazer isso.");
+    needPerm(s, "channels");
     if (name !== undefined) { const n = cleanChannelName(name, c.type); if (!n) fail("Nome inválido."); c.name = n; }
     if (topic !== undefined && c.type === "text") c.topic = str(topic, 160);
     save();
@@ -1479,7 +1639,7 @@ io.on("connection", socket => {
 
   on("channel:delete", ({ channelId }) => {
     const { s, c } = getChannel(channelId);
-    if (s.ownerId !== uid) fail("Apenas o dono do servidor pode fazer isso.");
+    needPerm(s, "channels");
     if (c.type === "text" && s.channels.filter(x => x.type === "text").length <= 1) fail("O servidor precisa de pelo menos um canal de texto.");
     for (const [k, v] of voice) if (v.cid === c.id) { leaveVoice(k); io.to(k).emit("voice:kicked", {}); }
     s.channels = s.channels.filter(x => x.id !== c.id);
@@ -1491,7 +1651,7 @@ io.on("connection", socket => {
 
   on("channel:move", ({ channelId, dir }) => {
     const { s, c } = getChannel(channelId);
-    if (s.ownerId !== uid) fail("Apenas o dono do servidor pode fazer isso.");
+    needPerm(s, "channels");
     const same = s.channels.filter(x => x.type === c.type);
     const i = same.indexOf(c), j = i + (dir < 0 ? -1 : 1);
     if (j < 0 || j >= same.length) return { ok: true };
@@ -1797,6 +1957,66 @@ io.on("connection", socket => {
     audit("user:unban", u.id, {});
     save();
   });
+  /* --- painel ADM: números da plataforma e ficha do usuário --- */
+  on("admin:stats", async () => {
+    requireAdmin();
+    const now = Date.now(), day = 86400e3, users = Object.values(db.users), servers = Object.values(db.servers);
+    const subs = { plus: 0, pro: 0, max: 0 };
+    for (const u of users) { const t = planOf(u); if (t) subs[t]++; }
+    const orders = Object.values(db.orders);
+    const paid = orders.filter(o => o.status === "approved");
+    const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+    let msgs = 0, msgsDay = 0;
+    for (const list of Object.values(db.messages)) { msgs += list.length; for (let i = list.length - 1; i >= 0 && list[i].ts > now - day; i--) msgsDay++; }
+    const bl = await backupList().catch(() => []);
+    return {
+      users: users.length, online: online.size, newDay: users.filter(u => u.created > now - day).length, newWeek: users.filter(u => u.created > now - 7 * day).length,
+      verified: users.filter(u => u.emailVerified).length, banned: users.filter(u => u.banned).length,
+      servers: servers.length, publicServers: servers.filter(s => s.public && !s.blocked).length, blocked: servers.filter(s => s.blocked).length,
+      voiceNow: voice.size, rooms: new Set([...voice.values()].map(v => v.cid)).size,
+      msgs, msgsDay, subs, pending: orders.filter(o => o.status === "pending" || o.status === "review").length,
+      revenueMonth: paid.filter(o => (o.decided || o.updated) >= monthStart.getTime()).reduce((a, o) => a + o.amount, 0), revenueTotal: paid.reduce((a, o) => a + o.amount, 0), paidCount: paid.length,
+      ai: AI.configured(), mail: MAIL_ON, turn: !!process.env.TURN_URLS, db: pg ? "PostgreSQL" : "arquivo", lastBackup: bl[0] ? bl[0].at : 0,
+      uptime: Math.round(process.uptime()), mem: Math.round(process.memoryUsage().rss / 1048576)
+    };
+  });
+  on("admin:user", ({ userId }) => {
+    requireAdmin();
+    const u = db.users[userId];
+    if (!u) fail("Usuário não encontrado.");
+    const servers = Object.values(db.servers).filter(s => s.members.includes(u.id));
+    const sessions = Object.entries(db.sessions).filter(([, v]) => v.userId === u.id);
+    return {
+      user: { ...pubUser(u), email: u.email || "", emailVerified: !!u.emailVerified, admin: isAdmin(u), banned: u.banned || null, created: u.created,
+        plan: planOf(u), planUntil: u.plan ? u.plan.until : 0, planSince: u.plan ? u.plan.since || 0 : 0 },
+      online: online.has(u.id),
+      servers: servers.map(s => ({ id: s.id, name: s.name, owner: s.ownerId === u.id, members: s.members.length, blocked: !!s.blocked })),
+      sessions: sessions.map(([, v]) => ({ dev: v.dev || "Aparelho", created: v.created, last: v.last || v.created })),
+      orders: Object.values(db.orders).filter(o => o.uid === u.id).sort((a, b) => b.created - a.created).slice(0, 20).map(o => ({ id: o.id, plan: PLANS[o.tier].name, amount: o.amount, status: o.status, created: o.created })),
+      planLog: (u.planLog || []).slice(-20).reverse().map(x => ({ ...x, name: (PLANS[x.tier] || {}).name || x.tier })),
+      friends: Object.values(friendsOf(u)).filter(x => x === "friend").length,
+      ai: db.ai && db.ai[u.id] ? db.ai[u.id].msgs.length : 0
+    };
+  });
+  on("admin:user:logout", ({ userId }) => {
+    requireAdmin();
+    const u = db.users[userId];
+    if (!u) fail("Usuário não encontrado.");
+    const n = endSessions(u.id, null);
+    audit("user:logout", u.id, { n });
+    save();
+    return { ended: n };
+  });
+  on("admin:user:verify", ({ userId }) => {
+    requireAdmin();
+    const u = db.users[userId];
+    if (!u || !u.email) fail("Essa conta não tem e-mail.");
+    u.emailVerified = true; delete u.vc;
+    audit("user:verify", u.id, {});
+    save();
+    io.to("u:" + u.id).emit("me:update", { me: meView(u) });
+    return { ok: true };
+  });
   on("admin:backups", async () => {
     requireAdmin();
     const list = await backupList();
@@ -2029,6 +2249,27 @@ io.on("connection", socket => {
   /* ---------- atividades, sons e reações na call ---------- */
   const myVoice = () => { const v = voice.get(socket.id); if (!v) fail("Entre numa sala de voz primeiro."); return v; };
   const fxLimit = mk(12, 5000);
+  const musicLimit = mk(10, 30000);
+  on("music:search", async ({ q }) => {
+    q = str(q, 200);
+    if (!q) fail("Digite o nome da música.");
+    if (!musicLimit()) fail("Calma! Espere uns segundos para buscar de novo.");
+    let from = "";
+    if (/open\.spotify\.com\//.test(q)) {
+      from = await spotifyTitle(q);
+      if (!from) fail("Não consegui ler esse link do Spotify. Tente digitar o nome da música.");
+      q = from;
+    }
+    if (!YT_KEY) fail("A busca por nome ainda não foi ligada pela equipe (falta a chave do YouTube). Por enquanto, cole o link do vídeo do YouTube.");
+    try { return { results: await ytSearch(q), from }; }
+    catch (e) { fail(e.message || "A busca falhou."); }
+  });
+  on("music:titles", async ({ ids }) => {
+    const list = Array.isArray(ids) ? ids.filter(x => typeof x === "string" && /^[A-Za-z0-9_-]{11}$/.test(x)).slice(0, 25) : [];
+    const out = {};
+    await Promise.all(list.map(async id => { out[id] = await ytTitle(id).catch(() => ""); }));
+    return { titles: out };
+  });
   on("act:start", ({ type }) => {
     const v = myVoice();
     if (!ACT_TYPES.includes(type)) fail("Atividade inválida.");

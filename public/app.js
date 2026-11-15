@@ -148,7 +148,7 @@ const S = {
   volumes: store.get("volumes", {}), localMute: {}, order: store.get("order", []),
   pendingInvite: null, voiceLimit: 12, ready: false,
   friends: new Map(), dms: new Map(), friendsTab: "online", steamAuto: false,
-  orders: new Map(), tickets: new Map(), plans: [], adminTab: "orders", adminFilter: "open",
+  orders: new Map(), tickets: new Map(), plans: [], adminTab: "dash", adminFilter: "open",
   acts: new Map(), clockOff: 0
 };
 const V = {
@@ -457,7 +457,7 @@ function renderSide() {
   head.className = "side-head clickable";
   head.dataset.act = "server-menu";
   head.innerHTML = `<span class="title">${esc(s.name)}</span>${ic("chevron", "chev")}`;
-  const owner = isOwner(s);
+  const owner = canDo(s, "channels");
   const tools = id => (owner ? `<span class="ch-tools"><i data-act="ch-settings" data-id="${id}" data-tip="Editar canal">${ic("settings", "sm")}</i></span>` : "");
   const text = s.channels.filter(c => c.type === "text"), voiceCh = s.channels.filter(c => c.type === "voice");
   let h = `<div class="cat"><span>Canais de texto</span>${owner ? `<button data-act="new-channel" data-type="text" data-tip="Criar canal">${ic("plus", "sm")}</button>` : ""}</div>`;
@@ -534,6 +534,205 @@ function renderTop() {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Cargos e permissões dos servidores                                  */
+/* ------------------------------------------------------------------ */
+const PERM_INFO = [
+  ["admin", "Administrador", "Pode tudo, menos excluir o servidor. Dê só para quem você confia muito."],
+  ["server", "Editar o servidor", "Nome, ícone, cor, descrição e se é público."],
+  ["channels", "Gerenciar canais", "Criar, editar, mover e excluir canais e salas de voz."],
+  ["roles", "Gerenciar cargos", "Criar cargos e dar cargos (só abaixo do próprio)."],
+  ["kick", "Expulsar membros", "Tirar alguém do servidor (pode voltar com convite)."],
+  ["ban", "Banir membros", "Tirar e impedir de voltar. Também desbane."],
+  ["messages", "Gerenciar mensagens", "Apagar mensagens de outras pessoas."]
+];
+const ROLE_COLORS = ["#99aab5", "#f87171", "#fb923c", "#fbbf24", "#34d399", "#22d3ee", "#60a5fa", "#7c5cff", "#c084fc", "#f472b6", "#e11d48", "#16a34a"];
+const sRoles = s => (s && s.roles) || [];                                   // do mais alto para o mais baixo
+const userRoles = (s, uid) => { const ids = (s && s.memberRoles && s.memberRoles[uid]) || []; return sRoles(s).filter(r => ids.includes(r.id)); };
+function canDo(s, p, uid = S.me && S.me.id) {
+  if (!s || !uid) return false;
+  if (s.ownerId === uid) return true;
+  return userRoles(s, uid).some(r => r.perms.includes("admin") || r.perms.includes(p));
+}
+const canManage = s => PERM_INFO.some(([p]) => canDo(s, p));
+function myTopPos(s, uid = S.me && S.me.id) { if (s.ownerId === uid) return Infinity; const r = userRoles(s, uid); return r.length ? Math.max(...r.map(x => x.pos)) : -1; }
+// cor do nome = cargo mais alto que tem cor
+function roleColor(s, uid) { const r = userRoles(s, uid).find(x => x.color && x.color !== "#99aab5"); return r ? r.color : ""; }
+function onServerRoles({ serverId, roles, memberRoles }) {
+  const s = S.servers.get(serverId);
+  if (!s) return;
+  s.roles = roles; s.memberRoles = memberRoles;
+  schedule("side", "members", "chat", "rail");
+  if (S.view === "chat" && S.serverId === serverId) rerenderVisible && rerenderVisible();
+  const p = document.querySelector(".settings-wrap [data-roles-root]");
+  if (p && p._redraw) p._redraw();
+}
+const roleChip = r => `<span class="role-chip" style="--rc:${esc(r.color)}"><i></i>${esc(r.name)}</span>`;
+
+function rolesSection(s, sid) {
+  return {
+    id: "roles", name: "Cargos",
+    render: () => `<div data-roles-root></div>`,
+    mount(p) {
+      const root = p.querySelector("[data-roles-root]");
+      let editing = null;
+      const draw = () => {
+        const srv = S.servers.get(sid) || s, top = myTopPos(srv), roles = sRoles(srv);
+        const count = r => Object.values(srv.memberRoles || {}).filter(ids => ids.includes(r.id)).length;
+        if (editing) {
+          const r = editing === "new" ? { name: "", color: "#7c5cff", perms: [], hoist: true } : roles.find(x => x.id === editing);
+          if (!r) { editing = null; draw(); return; }
+          root.innerHTML = `<button class="btn ghost sm" data-back>← Voltar aos cargos</button>
+            <div class="role-edit"><div class="role-prev">${roleChip({ name: r.name || "Novo cargo", color: r.color })}</div>
+            <label class="field"><span>Nome do cargo</span><input data-rname maxlength="32" value="${esc(r.name)}" placeholder="Ex.: Moderador, VIP, Amigos"></label>
+            <span class="label">Cor</span><div class="swatches" style="margin:8px 0 16px">${ROLE_COLORS.map(c => `<button type="button" class="swatch${c === r.color ? " on" : ""}" style="--c:${c}" data-rcolor="${c}"></button>`).join("")}<label class="swatch custom" data-tip="Outra cor" style="--c:${esc(r.color)}"><input type="color" data-rcustom value="${esc(r.color)}"></label></div>
+            <div class="toggle-row"><span><b>Mostrar separado na lista de membros</b><small>Quem tem esse cargo aparece num grupo próprio</small></span><label class="switch"><input type="checkbox" data-rhoist ${r.hoist ? "checked" : ""}><i></i></label></div>
+            <span class="label" style="display:block;margin-top:16px">Permissões</span>
+            <div class="perm-list">${PERM_INFO.map(([k, t, d]) => { const mine = canDo(srv, k); return `<label class="perm${mine ? "" : " locked"}" ${mine ? "" : 'data-tip="Você não tem essa permissão para poder dar"'}><span><b>${t}</b><small>${d}</small></span><label class="switch"><input type="checkbox" data-perm="${k}" ${r.perms.includes(k) ? "checked" : ""} ${mine ? "" : "disabled"}><i></i></label></label>`; }).join("")}</div>
+            <div class="modal-foot" style="justify-content:space-between">${editing !== "new" ? `<button class="btn danger" data-rdel>Apagar cargo</button>` : "<span></span>"}<button class="btn primary" data-rsave>${editing === "new" ? "Criar cargo" : "Salvar"}</button></div></div>`;
+          const prev = () => { root.querySelector(".role-prev").innerHTML = roleChip({ name: root.querySelector("[data-rname]").value || "Novo cargo", color: r.color }); };
+          root.querySelector("[data-rname]").addEventListener("input", prev);
+          root.querySelector("[data-rcustom]").addEventListener("input", e => { r.color = e.target.value; $$("[data-rcolor]", root).forEach(b => b.classList.remove("on")); prev(); });
+          root.onclick = async e => {
+            if (e.target.closest("[data-back]")) { editing = null; draw(); return; }
+            const c = e.target.closest("[data-rcolor]");
+            if (c) { r.color = c.dataset.rcolor; $$("[data-rcolor]", root).forEach(b => b.classList.toggle("on", b === c)); prev(); return; }
+            if (e.target.closest("[data-rsave]")) {
+              const perms = $$("[data-perm]", root).filter(x => x.checked).map(x => x.dataset.perm);
+              const res = await emit("role:save", { serverId: sid, roleId: editing === "new" ? undefined : editing, name: root.querySelector("[data-rname]").value, color: r.color, perms, hoist: root.querySelector("[data-rhoist]").checked });
+              if (res.error) { toast(res.error, "error"); return; }
+              toast("Cargo salvo.", "ok"); editing = null; setTimeout(draw, 150);
+            }
+            if (e.target.closest("[data-rdel]")) {
+              if (!(await confirmBox({ title: "Apagar cargo", html: `Apagar o cargo <b>${esc(r.name)}</b>? Quem tem esse cargo perde ele.`, ok: "Apagar" }))) return;
+              const res = await emit("role:delete", { serverId: sid, roleId: editing });
+              if (res.error) { toast(res.error, "error"); return; }
+              editing = null; setTimeout(draw, 150);
+            }
+          };
+          return;
+        }
+        root.innerHTML = `<p style="color:var(--muted);margin-top:-8px">Cargos dão cor ao nome e permissões. Quem está mais acima na lista manda em quem está abaixo. O dono (👑) está acima de todos.</p>
+          <button class="btn primary" data-rnew ${canDo(srv, "roles") ? "" : "disabled"}>${ic("plus", "sm")}Criar cargo</button>
+          <div class="role-list">${roles.length ? roles.map((r, i) => { const can = r.pos < top; return `<div class="role-row${can ? "" : " locked"}"><span class="role-dot" style="--rc:${esc(r.color)}"></span><div class="who"><b>${esc(r.name)}</b><small>${count(r)} ${count(r) === 1 ? "membro" : "membros"} · ${r.perms.includes("admin") ? "Administrador" : r.perms.length ? r.perms.length + " permiss" + (r.perms.length === 1 ? "ão" : "ões") : "só a cor"}</small></div>${can ? `<button class="icon-btn" data-rup="${r.id}" data-tip="Subir" ${i === 0 ? "disabled" : ""}>${ic("arrowUp", "sm")}</button><button class="icon-btn" data-rdown="${r.id}" data-tip="Descer" ${i === roles.length - 1 ? "disabled" : ""}>${ic("arrowDown", "sm")}</button><button class="btn sm" data-redit="${r.id}">Editar</button>` : `<small class="role-lock">${ic("shield", "xs")} acima de você</small>`}</div>`; }).join("") : `<div class="empty" style="padding:24px">${ic("shield")}<p>Nenhum cargo ainda. Crie um "Moderador" para ter ajuda com o servidor.</p></div>`}</div>`;
+        root.onclick = async e => {
+          if (e.target.closest("[data-rnew]")) { editing = "new"; draw(); return; }
+          const ed = e.target.closest("[data-redit]"), up = e.target.closest("[data-rup]"), dn = e.target.closest("[data-rdown]");
+          if (ed) { editing = ed.dataset.redit; draw(); return; }
+          if (up || dn) { const res = await emit("role:move", { serverId: sid, roleId: (up || dn).dataset[up ? "rup" : "rdown"], dir: up ? 1 : -1 }); if (res.error) toast(res.error, "error"); else setTimeout(draw, 150); }
+        };
+      };
+      root._redraw = () => { if (!editing) draw(); };
+      draw();
+    }
+  };
+}
+function memberRolesMenu(sid, uid, at, after) {
+  const s = S.servers.get(sid);
+  if (!s) return;
+  const top = myTopPos(s), cur = new Set(userRoles(s, uid).map(r => r.id));
+  const items = sRoles(s).filter(r => r.pos < top).map(r => ({ label: `${cur.has(r.id) ? "✓ " : ""}${r.name}`, icon: "shield", run: async () => {
+    cur.has(r.id) ? cur.delete(r.id) : cur.add(r.id);
+    const res = await emit("member:roles", { serverId: sid, userId: uid, roleIds: [...cur] });
+    if (res.error) toast(res.error, "error"); else { toast("Cargos atualizados.", "ok"); after && setTimeout(after, 150); }
+  } }));
+  if (!items.length) { toast("Nenhum cargo que você possa dar. Crie um em Configurações › Cargos.", "info"); return; }
+  menu(at, items);
+}
+function banModal(sid, u, after) {
+  modal({
+    title: "Banir membro", sub: esc(u.username),
+    body: `<p style="color:var(--text-2)">A pessoa sai do servidor e <b>não consegue voltar</b> nem com convite, até alguém desbanir.</p><label class="field"><span>Motivo (opcional)</span><textarea data-r maxlength="200" placeholder="Ex.: spam, ofensas"></textarea></label><div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn danger" data-go>Banir</button></div>`,
+    onMount(m, close) {
+      m.querySelector("[data-go]").onclick = async () => {
+        const r = await emit("server:ban", { serverId: sid, userId: u.id, reason: m.querySelector("[data-r]").value });
+        if (r.error) { toast(r.error, "error"); return; }
+        close(); toast(`${u.username} foi banido(a).`, "ok"); after && setTimeout(after, 150);
+      };
+    }
+  });
+}
+function membersSection(s, sid) {
+  return {
+    id: "members", name: "Membros",
+    render: () => `<div data-mem-root></div>`,
+    mount(p) {
+      const root = p.querySelector("[data-mem-root]");
+      let q = "";
+      const draw = () => {
+        const srv = S.servers.get(sid) || s, top = myTopPos(srv);
+        const list = srv.members.map(user).filter(u => !q || u.username.toLowerCase().includes(q)).sort((a, b) => myTopPos(srv, b.id) - myTopPos(srv, a.id) || a.username.localeCompare(b.username));
+        root.innerHTML = `<div class="mem-head"><input data-mq placeholder="Buscar membro…" value="${esc(q)}"><small>${srv.members.length} ${srv.members.length === 1 ? "membro" : "membros"}</small></div>` +
+          list.map(u => {
+            const mine = u.id === S.me.id, below = !mine && u.id !== srv.ownerId && myTopPos(srv, u.id) < top;
+            return `<div class="member-row">${avatar(u, 36, true)}<div class="who"><b style="color:${esc(roleColor(srv, u.id) || "inherit")}">${esc(u.username)}${u.id === srv.ownerId ? " 👑" : ""}</b><div class="mr-roles">${userRoles(srv, u.id).map(roleChip).join("") || `<small style="color:var(--muted)">sem cargo</small>`}</div></div>
+              <div class="ao-acts">${canDo(srv, "roles") && (below || (mine && srv.ownerId === S.me.id)) ? `<button class="btn sm" data-mroles="${u.id}">${ic("shield", "sm")}Cargos</button>` : ""}${below && canDo(srv, "kick") ? `<button class="btn sm" data-mkick="${u.id}">Expulsar</button>` : ""}${below && canDo(srv, "ban") ? `<button class="btn sm danger" data-mban="${u.id}">Banir</button>` : ""}${srv.ownerId === S.me.id && !mine ? `<button class="btn sm ghost" data-mtransfer="${u.id}" data-tip="Tornar dono">👑</button>` : ""}</div></div>`;
+          }).join("");
+        const inp = root.querySelector("[data-mq]");
+        inp.oninput = () => { q = inp.value.trim().toLowerCase(); const pos = inp.selectionStart; draw(); const n = root.querySelector("[data-mq]"); n.focus(); n.setSelectionRange(pos, pos); };
+      };
+      root.addEventListener("click", async e => {
+        const srv = S.servers.get(sid) || s;
+        const rb = e.target.closest("[data-mroles]"), k = e.target.closest("[data-mkick]"), b = e.target.closest("[data-mban]"), t = e.target.closest("[data-mtransfer]");
+        if (rb) memberRolesMenu(sid, rb.dataset.mroles, rb, draw);
+        if (k) {
+          const u = user(k.dataset.mkick);
+          if (await confirmBox({ title: "Expulsar membro", html: `Expulsar <b>${esc(u.username)}</b> de ${esc(srv.name)}? A pessoa pode voltar com um novo convite.`, ok: "Expulsar" })) {
+            const r = await emit("server:kick", { serverId: sid, userId: u.id });
+            if (r.error) toast(r.error, "error"); else { toast(`${u.username} foi expulso(a).`, "ok"); setTimeout(draw, 150); }
+          }
+        }
+        if (b) banModal(sid, user(b.dataset.mban), draw);
+        if (t) {
+          const u = user(t.dataset.mtransfer);
+          if (await confirmBox({ title: "Transferir posse", html: `Tornar <b>${esc(u.username)}</b> dono(a) de ${esc(srv.name)}? Você perderá as permissões de dono.`, ok: "Transferir" })) {
+            const r = await emit("server:transfer", { serverId: sid, userId: u.id });
+            if (r.error) toast(r.error, "error"); else { toast("Posse transferida.", "ok"); closeTop(); }
+          }
+        }
+      });
+      root._redraw = draw;
+      root.setAttribute("data-roles-root", "");
+      draw();
+    }
+  };
+}
+function bansSection(sid) {
+  return {
+    id: "bans", name: "Banidos",
+    render: () => `<div data-bans><p style="color:var(--muted)">Carregando…</p></div>`,
+    mount(p) {
+      const root = p.querySelector("[data-bans]");
+      const draw = async () => {
+        const r = await emit("server:bans", { serverId: sid });
+        if (r.error) { root.innerHTML = esc(r.error); return; }
+        root.innerHTML = r.bans.length ? r.bans.map(b => `<div class="member-row">${avatar(b.user, 36)}<div class="who"><b>${esc(b.user.username)}</b><small>Banido em ${fmtDate(b.at)} por ${esc(b.by)}${b.reason ? " · " + esc(b.reason) : ""}</small></div><button class="btn sm" data-unban="${b.user.id}">Desbanir</button></div>`).join("") : `<div class="empty" style="padding:24px">${ic("shield")}<p>Ninguém banido.</p></div>`;
+      };
+      root.addEventListener("click", async e => {
+        const u = e.target.closest("[data-unban]");
+        if (!u) return;
+        const r = await emit("server:unban", { serverId: sid, userId: u.dataset.unban });
+        if (r.error) toast(r.error, "error"); else { toast("Desbanido(a). A pessoa já pode voltar com um convite.", "ok"); draw(); }
+      });
+      draw();
+    }
+  };
+}
+function logSection(sid) {
+  const NAMES = { kick: "expulsou", ban: "baniu", unban: "desbaniu", "role:create": "criou o cargo", "role:edit": "editou o cargo", "role:delete": "apagou o cargo", "member:roles": "mudou os cargos de" };
+  return {
+    id: "log", name: "Registro",
+    render: () => `<div data-slog><p style="color:var(--muted)">Carregando…</p></div>`,
+    mount(p) {
+      const root = p.querySelector("[data-slog]");
+      emit("server:log", { serverId: sid }).then(r => {
+        if (r.error) { root.innerHTML = esc(r.error); return; }
+        root.innerHTML = r.log.length ? `<div class="audit">${r.log.map(x => `<div class="au-row"><small>${new Date(x.at).toLocaleString("pt-BR")}</small><b>${esc(x.byName)}</b><span>${esc(NAMES[x.action] || x.action)} ${x.role ? `<b>${esc(x.role)}</b>` : ""}${x.targetName ? `<b>${esc(x.targetName)}</b>` : ""}${x.reason ? ` — ${esc(x.reason)}` : ""}</span></div>`).join("")}</div>` : `<div class="empty" style="padding:24px">${ic("receipt")}<p>Nada registrado ainda. Expulsões, banimentos e mudanças de cargo aparecem aqui.</p></div>`;
+      });
+    }
+  };
+}
+
 function renderMembers() {
   const el = $("#members"), app = $("#app"), gc = S.view === "chat" ? chan() : null;
   const s = gc && gc.group ? { members: gc.members, ownerId: gc.ownerId, id: gc.id } : srv();
@@ -550,7 +749,14 @@ function renderMembers() {
       : u.about ? `<small>${esc(u.about)}</small>` : "";
     return `<div class="member${u.status === "offline" ? " off" : ""}${V.speaking.has(u.id) ? " speaking" : ""}" data-act="profile" data-uid="${u.id}" data-voice-user="${u.id}">${avatar(u, 34, true)}<div class="who"><b>${nameHTML(u)}${u.id === s.ownerId ? `<span data-tip="Dono do servidor">${ic("crown", "xs")}</span>` : ""}</b>${sub}</div></div>`;
   };
-  el.innerHTML = `<div class="cat">Online — ${on.length}</div>${on.map(row).join("")}${off.length ? `<div class="cat">Offline — ${off.length}</div>${off.map(row).join("")}` : ""}`;
+  const hoisted = sRoles(s).filter(r => r.hoist);
+  const groupOf = u => hoisted.find(r => userRoles(s, u.id).includes(r));
+  let html = "";
+  for (const r of hoisted) { const g = on.filter(u => groupOf(u) === r); if (g.length) html += `<div class="cat" style="color:${esc(r.color)}">${esc(r.name)} — ${g.length}</div>${g.map(row).join("")}`; }
+  const rest = on.filter(u => !groupOf(u));
+  if (rest.length) html += `<div class="cat">Online — ${rest.length}</div>${rest.map(row).join("")}`;
+  if (off.length) html += `<div class="cat">Offline — ${off.length}</div>${off.map(row).join("")}`;
+  el.innerHTML = html;
 }
 
 function renderUserPanel() {
@@ -797,12 +1003,37 @@ async function renderAdmin(soft) {
   const root = $("#adminView");
   if (!root || !S.me.admin) return;
   const tab = S.adminTab;
-  const tabs = [["orders", "Solicitações"], ["users", "Usuários e planos"], ["servers", "Servidores"], ["games", "Jogos"], ["backup", "Backups"], ["audit", "Histórico"]];
+  const tabs = [["dash", "Visão geral"], ["orders", "Solicitações"], ["users", "Usuários e planos"], ["servers", "Servidores"], ["games", "Jogos"], ["backup", "Backups"], ["audit", "Histórico"]];
   const head = `<div class="page admin"><div class="hero adm-hero"><h1>${ic("shield", "lg")} Painel ADM</h1><p>Confira no extrato do banco se o Pix caiu antes de aprovar. Toda decisão fica registrada com o seu nome.</p><button class="btn adm-announce" data-act="admin-broadcast">📢 Aviso geral</button></div><div class="tabs-row">${tabs.map(([k, n]) => `<button class="tab${k === tab ? " on" : ""}" data-act="admin-tab" data-tab="${k}">${n}</button>`).join("")}</div><div class="adm-body"></div></div>`;
   if (!soft || !root.querySelector(".adm-body")) root.innerHTML = head;
   else root.querySelectorAll(".tabs-row .tab").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
   const body = root.querySelector(".adm-body");
-  if (tab === "orders") {
+  if (tab === "dash") {
+    const r = await emit("admin:stats", {});
+    if (r.error) { body.innerHTML = esc(r.error); return; }
+    const card = (ic_, v, t, sub, cls = "") => `<div class="dash-card ${cls}"><span class="dash-ic">${ic(ic_)}</span><b>${v}</b><small>${t}</small>${sub ? `<em>${sub}</em>` : ""}</div>`;
+    const dur = s => s < 3600 ? Math.round(s / 60) + " min" : s < 86400 ? Math.round(s / 3600) + " h" : Math.round(s / 86400) + " dias";
+    const ok = (b, t) => `<span class="ost ${b ? "st-ok" : "st-bad"}">${t}</span>`;
+    body.innerHTML = `<div class="dash-grid">
+      ${card("users", r.users, "Contas", `+${r.newDay} hoje · +${r.newWeek} na semana`)}
+      ${card("signal", r.online, "Online agora", `${r.voiceNow} em call · ${r.rooms} salas`, "green")}
+      ${card("message", r.msgsDay, "Mensagens nas últimas 24 h", `${r.msgs} guardadas no total`)}
+      ${card("grid", r.servers, "Servidores", `${r.publicServers} públicos · ${r.blocked} bloqueados`)}
+      ${card("gem", r.subs.plus + r.subs.pro + r.subs.max, "Assinantes ativos", `VIP ${r.subs.plus} · Pro ${r.subs.pro} · Max ${r.subs.max}`, "violet")}
+      ${card("receipt", fmtMoney(r.revenueMonth), "Recebido este mês", `${fmtMoney(r.revenueTotal)} no total · ${r.paidCount} pagamentos`, "gold")}
+      ${card("info", r.pending, "Pedidos esperando", r.pending ? "Abra Solicitações" : "Tudo em dia", r.pending ? "warn" : "")}
+      ${card("shield", r.banned, "Contas suspensas", `${r.verified} com e-mail confirmado`)}
+    </div>
+    <div class="section-title">${ic("settings", "sm")} Estado dos serviços</div>
+    <div class="svc-list">
+      <div><b>Banco de dados</b>${ok(true, r.db)}</div>
+      <div><b>Último backup</b>${r.lastBackup ? ok(Date.now() - r.lastBackup < 2 * 86400e3, new Date(r.lastBackup).toLocaleString("pt-BR")) : ok(false, "nenhum ainda")}</div>
+      <div><b>E-mail (Resend)</b>${ok(r.mail, r.mail ? "ligado" : "desligado")}</div>
+      <div><b>Aury (IA)</b>${ok(r.ai, r.ai ? "ligada" : "sem chave")}</div>
+      <div><b>Servidor TURN (voz em 4G)</b>${ok(r.turn, r.turn ? "ligado" : "não configurado")}</div>
+      <div><b>Servidor ligado há</b><span class="ost st-rev">${dur(r.uptime)} · ${r.mem} MB</span></div>
+    </div>`;
+  } else if (tab === "orders") {
     const r = await emit("order:list", { status: S.adminFilter });
     if (r.error) { body.innerHTML = `<p>${esc(r.error)}</p>`; return; }
     for (const o of r.orders) S.orders.set(o.id, o);
@@ -822,7 +1053,7 @@ async function renderAdmin(soft) {
     const list = body.querySelector("[data-ulist]");
     const r = await emit("admin:users", { q: S.adminQ || "" });
     if (r.error) { list.innerHTML = esc(r.error); return; }
-    list.innerHTML = r.users.map(u => `<div class="adm-user">${avatar(u, 36)}<div class="who"><b>${esc(u.username)}${u.admin ? ` <span class="ost st-rev">ADM</span>` : ""}</b><small>${esc(u.email || "sem e-mail")}${u.email && !u.emailVerified ? " (não confirmado)" : ""}</small></div><div>${u.plan ? `<span class="ost st-ok">${esc(PLAN_NAME[u.plan])}</span><small style="display:block;color:var(--muted)">até ${fmtDate(u.until)}</small>` : `<small style="color:var(--muted)">sem plano</small>`}</div><div class="ao-acts">${u.banned ? `<span class="ost st-bad" data-tip="${esc(u.banned.reason || "sem motivo")}">Suspensa</span>` : ""}${u.admin ? "" : `<button class="btn sm" data-act="admin-pass" data-uid="${u.id}" data-name="${esc(u.username)}">🔑 Senha</button>`}<button class="btn sm" data-act="admin-grant" data-uid="${u.id}" data-name="${esc(u.username)}">Dar plano</button>${u.plan ? `<button class="btn sm danger" data-act="admin-revoke" data-uid="${u.id}" data-name="${esc(u.username)}">Revogar</button>` : ""}${u.admin ? "" : u.banned ? `<button class="btn sm green" data-act="admin-unban" data-uid="${u.id}" data-name="${esc(u.username)}">Reativar conta</button>` : `<button class="btn sm danger" data-act="admin-ban" data-uid="${u.id}" data-name="${esc(u.username)}">Suspender</button>`}</div></div>`).join("") || `<p style="color:var(--muted)">Ninguém encontrado.</p>`;
+    list.innerHTML = r.users.map(u => `<div class="adm-user">${avatar(u, 36)}<div class="who" data-act="admin-user" data-uid="${u.id}" role="button" tabindex="0" style="cursor:pointer" data-tip="Ver ficha completa"><b>${esc(u.username)}${u.admin ? ` <span class="ost st-rev">ADM</span>` : ""}</b><small>${esc(u.email || "sem e-mail")}${u.email && !u.emailVerified ? " (não confirmado)" : ""}</small></div><div>${u.plan ? `<span class="ost st-ok">${esc(PLAN_NAME[u.plan])}</span><small style="display:block;color:var(--muted)">até ${fmtDate(u.until)}</small>` : `<small style="color:var(--muted)">sem plano</small>`}</div><div class="ao-acts">${u.banned ? `<span class="ost st-bad" data-tip="${esc(u.banned.reason || "sem motivo")}">Suspensa</span>` : ""}${u.admin ? "" : `<button class="btn sm" data-act="admin-pass" data-uid="${u.id}" data-name="${esc(u.username)}">🔑 Senha</button>`}<button class="btn sm" data-act="admin-grant" data-uid="${u.id}" data-name="${esc(u.username)}">Dar plano</button>${u.plan ? `<button class="btn sm danger" data-act="admin-revoke" data-uid="${u.id}" data-name="${esc(u.username)}">Revogar</button>` : ""}${u.admin ? "" : u.banned ? `<button class="btn sm green" data-act="admin-unban" data-uid="${u.id}" data-name="${esc(u.username)}">Reativar conta</button>` : `<button class="btn sm danger" data-act="admin-ban" data-uid="${u.id}" data-name="${esc(u.username)}">Suspender</button>`}</div></div>`).join("") || `<p style="color:var(--muted)">Ninguém encontrado.</p>`;
   } else if (tab === "servers") {
     const f = S.adminSrvF || "active";
     body.innerHTML = `<div class="adm-games-head"><div class="chips"><button class="chip${f === "active" ? " on" : ""}" data-act="admin-srv-f" data-f="active">Ativos</button><button class="chip${f === "blocked" ? " on" : ""}" data-act="admin-srv-f" data-f="blocked">🔒 Bloqueados <b data-bcount></b></button></div><form class="add-box" data-ssearch style="flex:1;max-width:380px"><input placeholder="Buscar servidor ou dono" value="${esc(S.adminSrvQ || "")}"><button class="btn primary">Buscar</button></form></div><div data-slist><p style="color:var(--muted)">Carregando…</p></div>`;
@@ -848,7 +1079,7 @@ async function renderAdmin(soft) {
   } else {
     const r = await emit("admin:audit", {});
     if (r.error) { body.innerHTML = esc(r.error); return; }
-    const NAMES = { "order:approve": "Aprovou pedido", "order:reject": "Recusou pedido", "order:review": "Pôs em análise", "plan:grant": "Deu plano", "plan:revoke": "Revogou plano", "game:save": "Salvou jogo", "game:delete": "Removeu jogo", "server:block": "Bloqueou servidor de", "server:unblock": "Desbloqueou servidor de", "server:delete": "Excluiu servidor de", "user:ban": "Suspendeu", "user:unban": "Reativou", "broadcast": "Enviou aviso geral", "backup:now": "Fez backup do banco", "user:setpass": "Trocou a senha de" };
+    const NAMES = { "order:approve": "Aprovou pedido", "order:reject": "Recusou pedido", "order:review": "Pôs em análise", "plan:grant": "Deu plano", "plan:revoke": "Revogou plano", "game:save": "Salvou jogo", "game:delete": "Removeu jogo", "server:block": "Bloqueou servidor de", "server:unblock": "Desbloqueou servidor de", "server:delete": "Excluiu servidor de", "user:ban": "Suspendeu", "user:unban": "Reativou", "broadcast": "Enviou aviso geral", "backup:now": "Fez backup do banco", "user:setpass": "Trocou a senha de", "user:logout": "Desconectou de tudo", "user:verify": "Confirmou o e-mail de" };
     body.innerHTML = r.entries.length ? `<div class="audit">${r.entries.map(e => `<div class="au-row"><small>${new Date(e.at).toLocaleString("pt-BR")}</small><b>${esc(e.adminName)}</b><span>${esc(NAMES[e.action] || e.action)}</span><span>→ ${esc(e.targetName === "?" && e.details.game ? e.details.game : e.targetName)}</span><small>${esc([e.details.tier, e.details.days ? e.details.days + " dias" : "", e.details.amount ? fmtMoney(e.details.amount) : "", e.details.server ? "“" + e.details.server + "”" : "", e.details.reason].filter(Boolean).join(" · "))}</small></div>`).join("")}</div>` : `<div class="empty">${ic("shield")}<p>Nenhuma ação registrada ainda.</p></div>`;
   }
 }
@@ -932,6 +1163,40 @@ function adminSrvDelete(id, name) {
 function adminBan(uid, name) {
   admReason("Suspender conta", esc(name), "Motivo (a pessoa vai ver)", "Suspender", "Ex.: golpe / ofensas / spam",
     reason => admRun("admin:ban", { userId: uid, reason }, `Conta de ${name} suspensa.`));
+}
+/* ficha completa de um usuário (Painel ADM) */
+async function adminUserCard(uid) {
+  const r = await emit("admin:user", { userId: uid });
+  if (r.error) { toast(r.error, "error"); return; }
+  const u = r.user, ST = { pending: "Pendente", review: "Em análise", approved: "Aprovado", rejected: "Recusado", expired: "Expirado" };
+  modal({
+    title: esc(u.username), sub: `${u.admin ? "ADM · " : ""}conta criada em ${fmtDate(u.created)}`, cls: "wide",
+    body: `<div class="uc-head">${avatar(u, 64, true)}<div><b>${esc(u.username)}</b><small>${esc(u.email || "sem e-mail")} ${u.email ? (u.emailVerified ? '<span class="ost st-ok">confirmado</span>' : '<span class="ost st-pend">não confirmado</span>') : ""}</small><small>${r.online ? '<span class="ost st-ok">online agora</span>' : "offline"} · ${r.friends} amigos · ${r.ai} mensagens com a Aury</small>${u.banned ? `<small><span class="ost st-bad">suspensa</span> ${esc(u.banned.reason || "")}</small>` : ""}</div></div>
+      <div class="uc-grid">
+        <div><span class="label">Plano</span><p>${u.plan ? `<b>${esc(PLAN_NAME[u.plan])}</b> até ${fmtDate(u.planUntil)}` : "Sem plano"}</p></div>
+        <div><span class="label">Aparelhos conectados</span><p>${r.sessions.length ? r.sessions.map(x => `${esc(x.dev)} <small>(ativo ${fmtDate(x.last)})</small>`).join("<br>") : "nenhum"}</p></div>
+        <div><span class="label">Servidores (${r.servers.length})</span><p>${r.servers.slice(0, 12).map(x => `${esc(x.name)}${x.owner ? " 👑" : ""} <small>${x.members} membros${x.blocked ? " · bloqueado" : ""}</small>`).join("<br>") || "nenhum"}</p></div>
+        <div><span class="label">Pagamentos</span><p>${r.orders.map(o => `${esc(o.plan)} · ${fmtMoney(o.amount)} · ${ST[o.status] || o.status} <small>${fmtDate(o.created)}</small>`).join("<br>") || "nenhum"}</p></div>
+      </div>
+      <div class="modal-foot uc-acts">
+        ${u.admin ? "" : `<button class="btn sm" data-uc="logout">${ic("logout", "sm")}Desconectar de tudo</button>`}
+        ${u.email && !u.emailVerified ? `<button class="btn sm" data-uc="verify">${ic("check", "sm")}Confirmar e-mail</button>` : ""}
+        ${u.admin ? "" : `<button class="btn sm" data-uc="pass">🔑 Senha</button><button class="btn sm" data-uc="grant">${ic("gem", "sm")}Dar plano</button>${u.banned ? `<button class="btn sm green" data-uc="unban">Reativar</button>` : `<button class="btn sm danger" data-uc="ban">Suspender</button>`}`}
+      </div>`,
+    onMount(m, close) {
+      m.addEventListener("click", async e => {
+        const b = e.target.closest("[data-uc]");
+        if (!b) return;
+        const k = b.dataset.uc;
+        if (k === "logout") { if (!confirm(`Desconectar ${u.username} de todos os aparelhos?`)) return; const x = await emit("admin:user:logout", { userId: uid }); if (x.error) toast(x.error, "error"); else { toast(`${x.ended} aparelho(s) desconectado(s).`, "ok"); close(); } }
+        if (k === "verify") { const x = await emit("admin:user:verify", { userId: uid }); if (x.error) toast(x.error, "error"); else { toast("E-mail confirmado.", "ok"); close(); renderAdmin(true); } }
+        if (k === "pass") { close(); adminSetPass(uid, u.username); }
+        if (k === "grant") { close(); const g = document.querySelector(`[data-act="admin-grant"][data-uid="${uid}"]`); if (g) g.click(); }
+        if (k === "ban") { close(); adminBan(uid, u.username); }
+        if (k === "unban") { close(); const x = await emit("admin:unban", { userId: uid }); if (x.error) toast(x.error, "error"); else { toast("Conta reativada.", "ok"); renderAdmin(true); } }
+      });
+    }
+  });
 }
 function adminSetPass(uid, name) {
   modal({
@@ -1515,7 +1780,7 @@ function msgHTML(m, prev, isNew) {
   h += cont ? `<time class="msg-side-time" title="${esc(fmtFull(m.ts))}">${fmtTime(m.ts)}</time>` : avatar(u, 40, false, `data-act="profile" data-uid="${esc(u.id)}"`);
   h += `<div class="msg-body">`;
   if (!cont) {
-    h += `<div class="msg-head"><span class="msg-author" data-act="profile" data-uid="${esc(u.id)}" style="color:${esc(u.color)}">${nameHTML(u)}</span>${s && s.ownerId === u.id ? `<span class="owner-tag" data-tip="Dono do servidor">${ic("crown")}</span>` : ""}<time title="${esc(fmtFull(m.ts))}">${fmtStamp(m.ts)}</time></div>`;
+    h += `<div class="msg-head"><span class="msg-author" data-act="profile" data-uid="${esc(u.id)}" style="color:${esc((s && roleColor(s, u.id)) || u.color)}">${nameHTML(u)}</span>${s ? userRoles(s, u.id).slice(0, 1).map(r => `<span class="msg-role" style="--rc:${esc(r.color)}">${esc(r.name)}</span>`).join("") : ""}${s && s.ownerId === u.id ? `<span class="owner-tag" data-tip="Dono do servidor">${ic("crown")}</span>` : ""}<time title="${esc(fmtFull(m.ts))}">${fmtStamp(m.ts)}</time></div>`;
   }
   h += `<div class="msg-text${jumbo ? " jumbo" : ""}">${html}${m.e ? `<span class="edited" title="${esc(fmtFull(m.e))}">(editado)</span>` : ""}</div>`;
   h += filesHTML(m);
@@ -2306,6 +2571,7 @@ function connect() {
     }
   });
   sock.on("typing", onTyping);
+  sock.on("server:roles", onServerRoles);
   sock.on("ai:delta", onAIDelta);
   sock.on("ai:done", onAIDone);
   sock.on("ai:error", onAIError);
@@ -2373,7 +2639,7 @@ function checkVersion(ver) {
   wipe.then(() => setTimeout(() => location.reload(), 800));
 }
 /* Novidades: aparece uma vez para cada pessoa depois da atualização */
-const NEWS_ID = "2026-11-14b";
+const NEWS_ID = "2026-11-15a";
 function showNews() {
   if (store.get("news") === NEWS_ID) return;
   store.set("news", NEWS_ID);
@@ -2381,13 +2647,13 @@ function showNews() {
   modal({
     title: "🚀 Novidades da Auryx", sub: "O app acabou de ser atualizado",
     body: `<ul class="news">${[
-      it("💬", "Chat dentro da call", "Mande links e mensagens sem sair da chamada (botão de balão na barra da call)."),
-      it("🎧", "Spotify nas atividades", "Ouçam música juntos na call, com fila e tudo sincronizado."),
-      it("🤖", "Aury, a IA do VIP", "Converse com a IA no ✨ da barra lateral. Ela também ajuda no atendimento do pagamento."),
-      it("🎮", "Sobreposição de jogo (app de PC)", "Veja quem está na call e quem está falando por cima do jogo."),
-      it("📱", "Tela do celular com som", "No app Android, a transmissão agora leva o som do jogo (Android 10+)."),
-      it("🔲", "Call em quadradinhos", "Todo mundo cabe na tela, do mesmo tamanho."),
-      it("🔧", "Correções", "Voz duplicada, eco na transmissão e menos atraso na voz.")
+      it("🛡️", "Cargos nos servidores", "Crie cargos com cor e permissões (moderador, admin…), dê para os membros, bana e veja o registro do servidor."),
+      it("🎵", "Bot de música sem prévia", "Digite o nome da música e ela toca inteira. Link do Spotify? Ele acha a música inteira sozinho."),
+      it("🔊", "Voz mais confiável", "Se o navegador pausar o som, aparece um aviso para liberar; conexões que travam se refazem sozinhas."),
+      it("🖥️", "Transmissão de tela melhor", "Cada pessoa recebe na qualidade certa para a tela e a internet dela — muito melhor no celular — e menos atraso."),
+      it("⚙️", "Configurações reorganizadas", "Menu com ícones, seleções mais bonitas e a seção de Segurança."),
+      it("🎮", "Sobreposição de jogo (app de PC)", "Veja quem está na call e quem está falando por cima do jogo — continua no app de PC."),
+      it("💠", "VIP renovado", "Área da assinatura, QR Code do Pix e aviso antes de vencer.")
     ].join("")}</ul><div class="modal-foot"><button class="btn primary" data-close>Bora!</button></div>`
   });
 }
@@ -2701,7 +2967,8 @@ function createPeer(sock, userId, initiator) {
   if (initiator) setupDc(p, pc.createDataChannel("nx", { ordered: true }));
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === "failed") { try { pc.restartIce(); } catch {} }
-    schedule("vpanel");
+    watchPeer(p);
+    schedule("vpanel", "stage");
   };
   if (initiator) addBaseTracks(p);
   return p;
@@ -2761,7 +3028,7 @@ function onSignal({ from, userId, data }) {
 async function handleSignal(p, data) {
   const pc = p.pc;
   if (pc.signalingState === "closed") return;
-  if (data.watch) { V.viewers.add(p.sock); addScreenTo(p); return; }
+  if (data.watch) { V.viewers.add(p.sock); p.viewer = data.dev || null; addScreenTo(p); return; }
   if (data.unwatch) { V.viewers.delete(p.sock); removeScreenFrom(p); rebalance(); endGrant(p.sock, true); return; }
   if (data.ctrlReq) { askControl(p); return; }
   if (data.ctrlGrant) { onGranted(p, data.ctrlGrant); return; }
@@ -2801,7 +3068,7 @@ function onTrack(p, e) {
     const a = p.audios.get(stream.id);
     a.srcObject = null; a.srcObject = stream;
     applyVolumes();
-    a.play().catch(() => {});
+    playAudio(a);
   } else if (e.track.kind === "audio") {
     const vs = S.voice.get(p.userId);
     if (!vs || vs.screen !== stream.id) {
@@ -2816,7 +3083,7 @@ function onTrack(p, e) {
     p.audios.set(stream.id, a);
     if (S.settings.outputId && a.setSinkId) a.setSinkId(S.settings.outputId).catch(() => {});
     applyVolumes();
-    a.play().catch(() => {});
+    playAudio(a);
     const st = S.voice.get(p.userId);
     if (!st || st.screen !== stream.id) attachMeter(p.userId, stream);
   }
@@ -2824,6 +3091,42 @@ function onTrack(p, e) {
   e.track.addEventListener("ended", () => { try { stream.removeTrack(e.track); } catch {} schedule("stage"); });
   stream.onremovetrack = () => schedule("stage");
   schedule("stage");
+}
+// O navegador às vezes não deixa tocar som sem um clique (ex.: depois de recarregar dentro da call).
+// Antes isso falhava calado e a pessoa não ouvia ninguém; agora aparece um aviso e o primeiro clique libera.
+const blockedAudio = new Set();
+function playAudio(a) {
+  const p = a.play();
+  if (p && p.catch) p.catch(err => { if (err && err.name === "NotAllowedError") { blockedAudio.add(a); showAudioUnlock(); } });
+}
+function showAudioUnlock() {
+  if ($("#audioUnlock")) return;
+  const el = document.createElement("button");
+  el.id = "audioUnlock"; el.className = "audio-unlock"; el.type = "button";
+  el.innerHTML = `${ic("volume")}<span><b>Toque para ativar o som da call</b><small>O navegador pausou o áudio até você interagir</small></span>`;
+  document.body.append(el);
+  const go = () => {
+    for (const a of blockedAudio) a.play().catch(() => {});
+    blockedAudio.clear();
+    if (V.ctx && V.ctx.state === "suspended") V.ctx.resume().catch(() => {});
+    el.remove();
+    removeEventListener("pointerdown", go, true); removeEventListener("keydown", go, true);
+  };
+  addEventListener("pointerdown", go, true); addEventListener("keydown", go, true);
+}
+// Conexão com alguém travou: tenta reiniciar; se não voltar, refaz a ligação do zero (só um lado refaz, para não brigar)
+function watchPeer(p) {
+  const pc = p.pc;
+  clearTimeout(p.fixT);
+  if (pc.connectionState === "connected") { p.fails = 0; return; }
+  if (pc.connectionState !== "failed" && pc.connectionState !== "disconnected") return;
+  p.fixT = setTimeout(() => {
+    if (!V.peers.has(p.sock) || V.peers.get(p.sock) !== p) return;
+    if (pc.connectionState === "connected") return;
+    p.fails = (p.fails || 0) + 1;
+    if (p.fails <= 1) { try { pc.restartIce(); } catch {} watchPeer(p); return; }
+    if (S.socket && S.socket.id < p.sock) { console.warn("[voz] refazendo conexão com", user(p.userId).username); createPeer(p.sock, p.userId, true); }
+  }, pc.connectionState === "failed" ? 1500 : 6000);
 }
 function applyMic() { const en = !(S.muted || S.deaf); if (V.mic) V.mic.getAudioTracks().forEach(t => (t.enabled = en)); }
 function applyVolumes() {
@@ -2874,12 +3177,22 @@ function screenBitrate() {
   const q = QUALITY[V.screenCfg.quality] || QUALITY["1080"];
   return Math.max(900000, Math.round(q.br / Math.sqrt(Math.max(1, V.viewers.size))));
 }
+function viewerEnc(p) {
+  const q = QUALITY[V.screenCfg.quality] || QUALITY["1080"], v = p.viewer || {};
+  const vt = V.screen && V.screen.getVideoTracks()[0], st = vt ? vt.getSettings() : {};
+  const srcH = st.height || q.h;
+  let maxH = v.mobile ? 720 : Math.max(480, Math.min(v.h || q.h, q.h));
+  let br = screenBitrate(), fps = q.fps;
+  if (v.mobile) { br = Math.min(br, 2500000); fps = Math.min(fps, 30); }
+  if (v.slow) { br = Math.min(br, 1200000); maxH = Math.min(maxH, 540); fps = Math.min(fps, 24); }
+  return { maxBitrate: br, maxFramerate: fps, scaleResolutionDownBy: Math.max(1, srcH / maxH) };
+}
 function addScreenTo(p) {
   if (!V.screen || p.senders.screen) return;
   const q = QUALITY[V.screenCfg.quality] || QUALITY["1080"], detail = V.screenCfg.mode === "detail";
   const vt = V.screen.getVideoTracks()[0];
   if (!vt) return;
-  const tv = p.pc.addTransceiver(vt, { direction: "sendonly", streams: [V.screen], sendEncodings: [{ maxBitrate: screenBitrate(), maxFramerate: q.fps, priority: "high", networkPriority: "high" }] });
+  const tv = p.pc.addTransceiver(vt, { direction: "sendonly", streams: [V.screen], sendEncodings: [{ ...viewerEnc(p), priority: "high", networkPriority: "high" }] });
   preferCodec(tv, detail ? ["video/VP9", "video/H264", "video/VP8", "video/AV1"] : ["video/H264", "video/VP8", "video/VP9", "video/AV1"]);
   try {
     const prm = tv.sender.getParameters();
@@ -2906,8 +3219,7 @@ function rebalance() {
     try {
       const prm = tv.sender.getParameters();
       if (!prm.encodings || !prm.encodings.length) continue;
-      prm.encodings[0].maxBitrate = br;
-      prm.encodings[0].maxFramerate = q.fps;
+      Object.assign(prm.encodings[0], viewerEnc(p));
       tv.sender.setParameters(prm).catch(() => {});
     } catch {}
   }
@@ -3037,7 +3349,9 @@ function androidScreenStream(q, wantAudio) {
       const cv = document.createElement("canvas");
       cv.width = 1280; cv.height = 720;
       const g = cv.getContext("2d");
-      const stream = cv.captureStream(fps);
+      const stream = cv.captureStream(0);
+      const vtr = stream.getVideoTracks()[0];
+      if (vtr && "contentHint" in vtr) vtr.contentHint = "motion";
       let busy = false, alive = true, sized = false;
       const toBlob = b64 => fetch("data:image/jpeg;base64," + b64).then(r => r.blob());
       const pull = setInterval(async () => {
@@ -3050,10 +3364,11 @@ function androidScreenStream(q, wantAudio) {
           const bmp = await createImageBitmap(await toBlob(b64));
           if (!sized || cv.width !== bmp.width || cv.height !== bmp.height) { cv.width = bmp.width; cv.height = bmp.height; sized = true; }
           g.drawImage(bmp, 0, 0);
+          if (vtr && vtr.requestFrame) vtr.requestFrame();
           bmp.close && bmp.close();
         } catch {}
         busy = false;
-      }, Math.round(1000 / fps));
+      }, Math.max(15, Math.round(500 / fps)));
       // o usuário pode parar pela notificação do Android
       const watch = setInterval(() => { let on = true; try { on = ANDROID.screenActive(); } catch {} if (!on && alive) stopScreen(); }, 1000);
       if (snd && snd.track) stream.addTrack(snd.track);
@@ -3161,7 +3476,8 @@ function watch(uid) {
   const st = S.voice.get(uid), p = peerByUser(uid);
   if (!st || !st.screen || !p) { toast("Ainda conectando com essa pessoa — tente de novo em instantes.", "warn"); return; }
   V.watching.add(uid);
-  sig(p.sock, { watch: true });
+  const conn = navigator.connection || {};
+  sig(p.sock, { watch: true, dev: { w: Math.round(screen.width * (devicePixelRatio || 1)), h: Math.round(screen.height * (devicePixelRatio || 1)), mobile: matchMedia("(pointer: coarse)").matches || !!ANDROID, slow: /(^|-)2g|3g/.test(conn.effectiveType || "") || !!conn.saveData } });
   V.focus = uid + ":screen";
   schedule("stage");
 }
@@ -3620,6 +3936,7 @@ function updateTile(el, t) {
   } else {
     if (!hasVideo) h += `<div class="tile-av">${avatar(u, 84)}</div>`;
     h += `<div class="tile-name">${t.v.deaf ? ic("headOff") : t.v.muted ? ic("micOff") : ""}<span>${esc(u.username)}${mine ? " (você)" : ""}</span></div>`;
+    { const pp = mine ? null : peerByUser(u.id), cs = pp && pp.pc.connectionState; if (cs === "failed" || cs === "disconnected" || (pp && cs === "new" && Date.now() - (t.v.at || 0) > 15000)) h += `<div class="tile-conn" data-tip="Sem conexão de voz com essa pessoa — tentando de novo">${ic("signal", "xs")}Reconectando…</div>`; }
     h += `<div class="tile-btns">${btn("tile-focus", "focus", V.focus === t.key ? "Sair do foco" : "Focar")}${hasVideo ? btn("fullscreen", "maximize", "Tela cheia") : ""}</div>`;
   }
   el.insertAdjacentHTML("beforeend", h);
@@ -3867,7 +4184,9 @@ const ytPos = st => (st.pos || 0) + (st.playing ? (nowServer() - st.at) / 1000 :
 function mountYT(el) {
   el.innerHTML = `<div class="yt-wrap"><div class="yt-player"><div class="yt-frame"></div><div class="yt-empty">${ic("music", "lg")}<b>Ouvir juntos</b><small>Cole um link do YouTube aqui embaixo — música, clipe ou vídeo. Todo mundo na call ouve sincronizado.</small></div></div>
     <div class="yt-bar"><button class="icon-btn" data-yt="toggle" data-tip="Tocar / pausar">${ic("play")}</button><button class="icon-btn" data-yt="skip" data-tip="Próxima">${ic("skip")}</button><span class="yt-time">0:00</span><input type="range" class="yt-seek" min="0" max="100" value="0" step="0.5"><span class="yt-dur">0:00</span><span data-tip="Volume (só para você)" style="display:grid">${ic("volume", "sm")}</span><input type="range" class="yt-vol" min="0" max="100" value="${store.get("ytVol", 70)}"><span class="mm-sep"></span><button class="icon-btn" data-mm="mute" data-tip="Mutar a música (só para você)">${ic(musicMuted() ? "volumeX" : "volume")}</button><button class="icon-btn" data-mm="min" data-tip="Diminuir / aumentar o player">${ic("minimize")}</button></div>
-    <form class="yt-add"><input placeholder="Cole um link do YouTube para tocar ou pôr na fila…" spellcheck="false"><button class="btn sm primary">${ic("plus", "sm")}Adicionar</button></form>
+    <div class="yt-now hidden"></div>
+    <form class="yt-add"><input placeholder="Nome da música, ou link do YouTube ou do Spotify…" spellcheck="false" enterkeyhint="search"><button class="btn sm primary">${ic("search", "sm")}Tocar</button></form>
+    <div class="yt-results hidden"></div>
     <div class="yt-queue"></div></div>`;
   let player = null, ready = false, lastVid = "", seeking = false;
   const st = () => (V.act && V.act.type === "yt" ? V.act.state : null);
@@ -3890,7 +4209,7 @@ function mountYT(el) {
     el.querySelector(".yt-empty").classList.toggle("hidden", !!s.vid);
     el.querySelector('[data-yt="toggle"]').innerHTML = ic(s.playing ? "pause" : "play");
     const q = s.queue || [];
-    el.querySelector(".yt-queue").innerHTML = q.length ? `<span class="label">Na fila — ${q.length}</span><div class="yt-qs">${q.map((v, i) => `<div class="yt-q"><img src="https://i.ytimg.com/vi/${esc(v)}/mqdefault.jpg" alt="" referrerpolicy="no-referrer"><button class="icon-btn" data-yt-del="${i}" data-tip="Tirar da fila">${ic("x", "xs")}</button></div>`).join("")}</div>` : "";
+    el.querySelector(".yt-queue").innerHTML = q.length ? `<span class="label">Na fila — ${q.length}</span><div class="yt-qs">${q.map((v, i) => `<div class="yt-q" data-v="${esc(v)}"><img src="https://i.ytimg.com/vi/${esc(v)}/mqdefault.jpg" alt="" referrerpolicy="no-referrer"><button class="icon-btn" data-yt-del="${i}" data-tip="Tirar da fila">${ic("x", "xs")}</button></div>`).join("")}</div>` : "";
     if (!ready || !player) return;
     if (!s.vid) { if (lastVid) { player.stopVideo(); lastVid = ""; } return; }
     const want = ytPos(s);
@@ -3929,17 +4248,50 @@ function mountYT(el) {
   seek.addEventListener("input", () => { seeking = true; });
   seek.addEventListener("change", () => { seeking = false; const s = st(); if (s && s.vid) push({ ...s, pos: +seek.value }); });
   el.querySelector(".yt-vol").addEventListener("input", e => { store.set("ytVol", +e.target.value); if (player && ready) player.setVolume(+e.target.value); });
-  el.querySelector(".yt-add").addEventListener("submit", e => {
-    e.preventDefault();
-    const inp = e.target.querySelector("input"), id = ytId(inp.value), s = st();
-    if (!id) { toast("Cole um link válido do YouTube.", "warn"); return; }
+  const titles = new Map();
+  const needTitles = ids => { const miss = ids.filter(x => x && !titles.has(x)); if (!miss.length) return; miss.forEach(x => titles.set(x, "")); emit("music:titles", { ids: miss }).then(r => { for (const [k, v] of Object.entries(r.titles || {})) titles.set(k, v); drawMeta(); }); };
+  const drawMeta = () => {
+    const s = st();
     if (!s) return;
-    inp.value = "";
+    const now = el.querySelector(".yt-now");
+    now.classList.toggle("hidden", !s.vid);
+    if (s.vid) now.innerHTML = `<span class="eq${s.playing ? " on" : ""}"><i></i><i></i><i></i></span><b>${esc(titles.get(s.vid) || "Tocando agora")}</b>`;
+    $$(".yt-q", el).forEach(q => { const v = q.dataset.v; if (v) q.dataset.tip = titles.get(v) || "Na fila"; });
+    needTitles([s.vid, ...(s.queue || [])]);
+  };
+  const addVid = id => {
+    const s = st();
+    if (!s) return;
     if (!s.vid) push({ ...s, vid: id, pos: 0, playing: true });
     else { push({ ...s, pos: ytPos(s), queue: [...(s.queue || []), id].slice(0, 50) }); toast("Adicionado à fila. 🎵", "ok"); }
+  };
+  const results = el.querySelector(".yt-results");
+  el.querySelector(".yt-add").addEventListener("submit", async e => {
+    e.preventDefault();
+    const inp = e.target.querySelector("input"), text = inp.value.trim(), id = ytId(text);
+    if (!text) return;
+    if (id) { inp.value = ""; results.classList.add("hidden"); addVid(id); return; }
+    const btn = e.target.querySelector("button");
+    btn.classList.add("loading");
+    const r = await emit("music:search", { q: text });
+    btn.classList.remove("loading");
+    if (r.error) { toast(r.error, "warn", 7000); return; }
+    if (!r.results.length) { toast("Nada encontrado com esse nome.", "warn"); return; }
+    inp.value = "";
+    results.innerHTML = `<div class="yr-head"><small>${r.from ? `Do Spotify: <b>${esc(r.from)}</b> — escolha a versão inteira` : "Escolha a música"}</small><button class="icon-btn" type="button" data-yr-close>${ic("x", "sm")}</button></div>` + r.results.map(x => `<button type="button" class="yr" data-yr="${esc(x.id)}" data-t="${esc(x.title)}"><img src="${esc(x.thumb)}" alt="" referrerpolicy="no-referrer"><span><b>${esc(x.title)}</b><small>${esc(x.channel)}</small></span>${ic("plus", "sm")}</button>`).join("");
+    results.classList.remove("hidden");
   });
-  el._update = () => sync();
+  results.addEventListener("click", e => {
+    if (e.target.closest("[data-yr-close]")) { results.classList.add("hidden"); return; }
+    const b = e.target.closest("[data-yr]");
+    if (!b) return;
+    titles.set(b.dataset.yr, b.dataset.t);
+    addVid(b.dataset.yr);
+    results.classList.add("hidden");
+  });
+  el._update = () => { sync(); drawMeta(); };
   el._destroy = () => { clearInterval(timer); clearInterval(drift); try { if (player) player.destroy(); } catch {} };
+  drawMeta();
 }
 
 /* --- Ouvir juntos no Spotify (player oficial embutido, sincronizado) --- */
@@ -3988,12 +4340,27 @@ function spotifyLogin(done) {
   toast("Entre na sua conta do Spotify e feche a janela quando terminar.", "info", 6000);
   const t = setInterval(() => { if (w.closed) { clearInterval(t); toast("Pronto! Se entrou, a música toca inteira agora.", "ok"); done && done(); } }, 800);
 }
+// Troca o Spotify (prévia de 30 s) pela mesma música inteira no player do YouTube, para todos da call
+async function spotifyToFull(s) {
+  if (!s || !s.uri) { toast("Coloque uma música do Spotify primeiro.", "warn"); return; }
+  const [, kind, id] = s.uri.split(":");
+  const r = await emit("music:search", { q: `https://open.spotify.com/${kind}/${id}` });
+  if (r.error) { toast(r.error, "warn", 7000); return; }
+  if (!r.results.length) { toast("Não achei essa música inteira.", "warn"); return; }
+  const st0 = await emit("act:start", { type: "yt" });
+  if (st0 && st0.error) { toast(st0.error, "error"); return; }
+  setTimeout(() => {
+    const cur = V.act && V.act.type === "yt" ? V.act.state : { vid: "", queue: [], playing: false, pos: 0 };
+    emit("act:state", { state: { ...cur, vid: r.results[0].id, pos: 0, playing: true, queue: [] } });
+    toast(`🎧 Tocando "${r.from || r.results[0].title}" inteira`, "ok", 4000);
+  }, 500);
+}
 function mountSpotify(el) {
   el.innerHTML = `<div class="yt-wrap sp-wrap"><div class="sp-player"><div class="sp-frame"></div><div class="yt-empty sp-empty">${ic("music", "lg")}<b>Ouvir juntos no Spotify</b><small>Cole aqui embaixo o link de uma música, álbum, playlist ou podcast do Spotify (Compartilhar › Copiar link). Todo mundo na call ouve junto.</small></div></div>
     <div class="yt-bar"><button class="icon-btn" data-sp="toggle" data-tip="Tocar / pausar para todos">${ic("play")}</button><button class="icon-btn" data-sp="skip" data-tip="Próxima da fila">${ic("skip")}</button><span class="yt-time">0:00</span><input type="range" class="yt-seek" min="0" max="100" value="0" step="0.5"><span class="yt-dur">0:00</span><span class="mm-sep"></span><button class="icon-btn" data-mm="mute" data-tip="Mutar a música (só para você)">${ic(musicMuted() ? "volumeX" : "volume")}</button><button class="icon-btn" data-mm="min" data-tip="Diminuir / aumentar o player">${ic("minimize")}</button></div>
     <form class="yt-add"><input placeholder="Cole um link do Spotify para tocar ou pôr na fila…" spellcheck="false"><button class="btn sm primary">${ic("plus", "sm")}Adicionar</button></form>
     <div class="yt-queue"></div>
-    <div class="sp-login"><small>🎧 Tocando só 30 s? O Spotify só toca a música inteira para quem está logado nele.</small><button class="btn sm" type="button" data-sp="login">${ic("headphones", "sm")}Entrar no Spotify</button></div></div>`;
+    <div class="sp-login"><small>🎧 Tocando só 30 s? O Spotify só toca a música inteira para quem está logado nele.</small><button class="btn sm primary" type="button" data-sp="full">${ic("play", "sm")}Tocar inteira (sem prévia)</button><button class="btn sm" type="button" data-sp="login">${ic("headphones", "sm")}Entrar no Spotify</button></div></div>`;
   let ctl = null, ready = false, lastUri = "", seeking = false, pb = { paused: true, pos: 0, dur: 0 }, alive = true;
   const st = () => (V.act && V.act.type === "sp" ? V.act.state : null);
   const push = s => emit("act:state", { state: s }).then(r => r.error && toast(r.error, "error"));
@@ -4065,6 +4432,7 @@ function mountSpotify(el) {
     if (!b) return;
     if (b.dataset.sp === "toggle" && s.uri) push({ ...s, playing: !s.playing, pos: spSingle(s.uri) ? posOf(s) : 0 });
     if (b.dataset.sp === "skip") next();
+    if (b.dataset.sp === "full") { spotifyToFull(s); return; }
     if (b.dataset.sp === "login") spotifyLogin(() => { const s2 = st(); if (ctl && s2 && s2.uri) { lastUri = ""; sync(); } });
   });
   const seek = el.querySelector(".yt-seek");
@@ -4782,7 +5150,10 @@ function settingsShell(sections, initial) {
   closeMenus();
   const wrap = document.createElement("div");
   wrap.className = "settings-wrap";
-  wrap.innerHTML = `<div class="settings-nav"><nav>${sections.map(s => s === "-" ? "<hr>" : s.label ? `<span class="label">${esc(s.label)}</span>` : `<button type="button" data-sec="${s.id}" class="${s.danger ? "danger" : ""}">${esc(s.name)}</button>`).join("")}</nav></div><div class="settings-main"></div><div class="settings-close"><button type="button" data-close aria-label="Fechar">${ic("x")}</button><small>ESC</small></div>`;
+  // menu com ícones do mesmo estilo (sem emojis misturados) e marca no item aberto
+  const SEC_IC = { account: "users", security: "shield", turbo: "sparkles", plans: "gem", voice: "mic", stream: "monitorUp", app: "download", games: "gamepad", overlay: "grid", remote: "monitor", look: "brush", notif: "bell", keys: "settings", overview: "settings", roles: "shield", members: "users", bans: "x", log: "receipt", delete: "trash", invites: "link" };
+  const secName = n => String(n).replace(/^[^\p{L}\p{N}]+/u, "").trim();
+  wrap.innerHTML = `<div class="settings-nav"><nav>${sections.map(s => s === "-" ? "<hr>" : s.label ? `<span class="label">${esc(s.label)}</span>` : `<button type="button" data-sec="${s.id}" class="${s.danger ? "danger" : ""}">${ic(SEC_IC[s.id] || "settings", "sm")}<span>${esc(secName(s.name))}</span></button>`).join("")}</nav></div><div class="settings-main"></div><div class="settings-close"><button type="button" data-close aria-label="Fechar">${ic("x")}</button><small>ESC</small></div>`;
   $("#layer").append(wrap);
   const main = wrap.querySelector(".settings-main");
   let cleanup = null;
@@ -4792,7 +5163,7 @@ function settingsShell(sections, initial) {
     if (sec.action) { sec.action(close); return; }
     if (cleanup) { cleanup(); cleanup = null; }
     $$(".settings-nav button", wrap).forEach(b => b.classList.toggle("on", b.dataset.sec === id));
-    main.innerHTML = `<div class="pane"><h2>${esc(sec.name)}</h2>${sec.render()}</div>`;
+    main.innerHTML = `<div class="pane"><h2>${esc(String(sec.name).replace(/^[^\p{L}\p{N}]+/u, "").trim())}</h2>${sec.render()}</div>`;
     main.scrollTop = 0;
     cleanup = sec.mount ? sec.mount(main.querySelector(".pane"), () => show(id)) || null : null;
   };
@@ -5198,11 +5569,11 @@ function mountLook(p, rerender) {
 }
 function serverSettings(sid, initial) {
   const s = S.servers.get(sid);
-  if (!s || !isOwner(s)) return;
+  if (!s || !canManage(s)) return;
   const st = { icon: s.icon, color: s.color };
   settingsShell([
     { label: s.name },
-    {
+    canDo(s, "server") && {
       id: "overview", name: "Visão geral",
       render: () => `<div class="icon-pick"><div data-icon-prev data-tip="Trocar ícone"></div><div style="flex:1"><label class="field" style="margin:0"><span>Nome do servidor</span><input id="ssName" maxlength="40" value="${esc(s.name)}"></label></div></div>
         <span class="label">Cor</span><div class="swatches" style="margin:8px 0 18px">${COLORS.map(c => `<button type="button" class="swatch${c === st.color ? " on" : ""}" style="--c:${c}" data-color="${c}"></button>`).join("")}</div>
@@ -5226,31 +5597,12 @@ function serverSettings(sid, initial) {
         });
       }
     },
-    {
-      id: "members", name: "Membros",
-      render: () => `<p style="color:var(--muted);margin-top:-8px">${s.members.length} ${s.members.length === 1 ? "membro" : "membros"}</p>` + s.members.map(user).sort((a, b) => a.username.localeCompare(b.username)).map(u => `<div class="member-row">${avatar(u, 36, true)}<div class="who"><b>${esc(u.username)}</b>${u.id === s.ownerId ? `<small>${ic("crown", "xs")} Dono</small>` : `<small>${STATUS[u.status]}</small>`}</div>${u.id !== s.ownerId ? `<button class="btn sm ghost" data-transfer="${u.id}">Tornar dono</button><button class="btn sm danger" data-kick="${u.id}">Expulsar</button>` : ""}</div>`).join(""),
-      mount(p, rerender) {
-        p.addEventListener("click", async e => {
-          const k = e.target.closest("[data-kick]"), t = e.target.closest("[data-transfer]");
-          if (k) {
-            const u = user(k.dataset.kick);
-            if (await confirmBox({ title: "Expulsar membro", html: `Expulsar <b>${esc(u.username)}</b> de ${esc(s.name)}? A pessoa pode voltar com um novo convite.`, ok: "Expulsar" })) {
-              const r = await emit("server:kick", { serverId: sid, userId: u.id });
-              if (r.error) toast(r.error, "error"); else { toast(`${u.username} foi expulso(a).`, "ok"); setTimeout(rerender, 100); }
-            }
-          }
-          if (t) {
-            const u = user(t.dataset.transfer);
-            if (await confirmBox({ title: "Transferir posse", html: `Tornar <b>${esc(u.username)}</b> dono(a) de ${esc(s.name)}? Você perderá as permissões de dono.`, ok: "Transferir" })) {
-              const r = await emit("server:transfer", { serverId: sid, userId: u.id });
-              if (r.error) toast(r.error, "error"); else { toast("Posse transferida.", "ok"); closeTop(); }
-            }
-          }
-        });
-      }
-    },
-    "-",
-    {
+    canDo(s, "roles") && rolesSection(s, sid),
+    membersSection(s, sid),
+    canDo(s, "ban") && bansSection(sid),
+    logSection(sid),
+    s.ownerId === S.me.id && "-",
+    s.ownerId === S.me.id && {
       id: "delete", name: "Excluir servidor", danger: true,
       action: async close => {
         if (await confirmBox({ title: `Excluir "${s.name}"`, html: `Todos os canais e mensagens serão apagados para sempre. Isso não pode ser desfeito.`, ok: "Excluir servidor" })) {
@@ -5259,7 +5611,7 @@ function serverSettings(sid, initial) {
         }
       }
     }
-  ], initial);
+  ].filter(Boolean), initial);
 }
 
 /* ------------------------------------------------------------------ */
@@ -5272,8 +5624,9 @@ function serverMenu(sid, at) {
   const anyUnread = s.channels.some(isUnread) || s.channels.some(c => S.mentions.has(c.id));
   menu(at, [
     { label: "Convidar pessoas", icon: "userPlus", run: () => inviteModal(sid) },
-    owner && { label: "Configurações do servidor", icon: "settings", run: () => serverSettings(sid) },
-    owner && { label: "Criar canal", icon: "plus", run: () => channelModal("text", sid) },
+    canManage(s) && { label: "Configurações do servidor", icon: "settings", run: () => serverSettings(sid) },
+    canDo(s, "roles") && { label: "Cargos", icon: "shield", run: () => serverSettings(sid, "roles") },
+    canDo(s, "channels") && { label: "Criar canal", icon: "plus", run: () => channelModal("text", sid) },
     anyUnread && { label: "Marcar como lido", icon: "check", run: () => s.channels.forEach(c => markRead(c.id)) },
     "-",
     owner ? { label: "Excluir servidor", icon: "trash", danger: true, run: () => serverSettings(sid, "delete") }
@@ -5289,11 +5642,11 @@ function channelMenu(cid, at) {
     c.type === "voice" && V.channelId !== cid && { label: "Entrar na sala", icon: "volume", run: () => openChannel(cid) },
     c.type === "voice" && V.channelId === cid && { label: "Desconectar", icon: "phoneOff", run: leaveVoice },
     { label: "Convidar pessoas", icon: "userPlus", run: () => inviteModal(s.id) },
-    owner && "-",
-    owner && { label: "Editar canal", icon: "settings", run: () => channelSettings(cid) },
-    owner && { label: "Mover para cima", icon: "arrowUp", run: () => emit("channel:move", { channelId: cid, dir: -1 }) },
-    owner && { label: "Mover para baixo", icon: "arrowDown", run: () => emit("channel:move", { channelId: cid, dir: 1 }) },
-    owner && { label: "Excluir canal", icon: "trash", danger: true, run: () => channelSettings(cid) }
+    canDo(s, "channels") && "-",
+    canDo(s, "channels") && { label: "Editar canal", icon: "settings", run: () => channelSettings(cid) },
+    canDo(s, "channels") && { label: "Mover para cima", icon: "arrowUp", run: () => emit("channel:move", { channelId: cid, dir: -1 }) },
+    canDo(s, "channels") && { label: "Mover para baixo", icon: "arrowDown", run: () => emit("channel:move", { channelId: cid, dir: 1 }) },
+    canDo(s, "channels") && { label: "Excluir canal", icon: "trash", danger: true, run: () => channelSettings(cid) }
   ]);
 }
 function messageMenu(id, at) {
@@ -5305,8 +5658,8 @@ function messageMenu(id, at) {
     { label: "Responder", icon: "reply", run: () => startReply(id) },
     mine && { label: "Editar mensagem", icon: "edit", run: () => startEdit(id) },
     { label: "Copiar texto", icon: "copy", run: () => navigator.clipboard.writeText(m.t).then(() => toast("Texto copiado.", "ok")).catch(() => {}) },
-    (mine || isOwner(s)) && "-",
-    (mine || isOwner(s)) && { label: "Apagar mensagem", icon: "trash", danger: true, run: e => deleteMsg(id, e && e.shiftKey) }
+    (mine || canDo(s, "messages")) && "-",
+    (mine || canDo(s, "messages")) && { label: "Apagar mensagem", icon: "trash", danger: true, run: e => deleteMsg(id, e && e.shiftKey) }
   ]);
 }
 function memberMenu(uid, at) {
@@ -5326,8 +5679,10 @@ function memberMenu(uid, at) {
     inMyVoice && S.voice.get(uid)?.screen && { label: V.watching.has(uid) ? "Parar de assistir" : "Assistir transmissão", icon: "eye", run: () => (V.watching.has(uid) ? unwatch(uid) : (openChannel(V.channelId, false), watch(uid))) },
     !mine && S.friends.get(uid) === "friend" && "-",
     !mine && S.friends.get(uid) === "friend" && { label: "Desfazer amizade", icon: "x", danger: true, run: async () => { if (await confirmBox({ title: "Desfazer amizade", html: `Remover <b>${esc(u.username)}</b> dos seus amigos?`, ok: "Remover" })) emit("friend:remove", { userId: uid }); } },
-    isOwner(s) && !mine && s.members.includes(uid) && "-",
-    isOwner(s) && !mine && s.members.includes(uid) && { label: `Expulsar ${u.username}`, icon: "logout", danger: true, run: async () => { if (await confirmBox({ title: "Expulsar membro", html: `Expulsar <b>${esc(u.username)}</b> de ${esc(s.name)}?`, ok: "Expulsar" })) { const r = await emit("server:kick", { serverId: s.id, userId: uid }); if (r.error) toast(r.error, "error"); } } }
+    s && !mine && s.members.includes(uid) && canDo(s, "roles") && uid !== s.ownerId && myTopPos(s, uid) < myTopPos(s) && { label: "Cargos…", icon: "shield", run: () => memberRolesMenu(s.id, uid, at) },
+    s && !mine && s.members.includes(uid) && canDo(s, "ban") && uid !== s.ownerId && myTopPos(s, uid) < myTopPos(s) && { label: `Banir ${u.username}`, icon: "x", danger: true, run: () => banModal(s.id, u) },
+    canDo(s, "kick") && !mine && uid !== (s && s.ownerId) && s.members.includes(uid) && myTopPos(s, uid) < myTopPos(s) && "-",
+    canDo(s, "kick") && !mine && uid !== (s && s.ownerId) && s.members.includes(uid) && myTopPos(s, uid) < myTopPos(s) && { label: `Expulsar ${u.username}`, icon: "logout", danger: true, run: async () => { if (await confirmBox({ title: "Expulsar membro", html: `Expulsar <b>${esc(u.username)}</b> de ${esc(s.name)}?`, ok: "Expulsar" })) { const r = await emit("server:kick", { serverId: s.id, userId: uid }); if (r.error) toast(r.error, "error"); } } }
   ]);
 }
 function statusMenu(at) {
@@ -5353,6 +5708,7 @@ const ACTIONS = {
   "buy-plan": a => buyModal(a.dataset.tier),
   "open-ticket": a => openTicket(a.dataset.id),
   "admin-tab": a => { S.adminTab = a.dataset.tab; renderAdmin(true); },
+  "admin-user": a => adminUserCard(a.dataset.uid),
   "admin-filter": a => { S.adminFilter = a.dataset.f; renderAdmin(true); },
   games: () => goGames(),
   ai: () => goAI(),
