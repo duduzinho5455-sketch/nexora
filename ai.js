@@ -19,8 +19,9 @@ const GEMINI_BASE = (process.env.GEMINI_BASE_URL || "https://generativelanguage.
 let client = null;
 
 const hasClaude = () => process.env.AI_PROVIDER !== "gemini" && !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
-const hasGemini = () => !!process.env.GEMINI_API_KEY;
-const configured = () => hasClaude() || hasGemini();
+const hasGemini = () => !!process.env.GEMINI_API_KEY && process.env.AI_PROVIDER !== "groq";
+const hasGroq = () => !!process.env.GROQ_API_KEY && process.env.AI_PROVIDER !== "gemini";
+const configured = () => hasClaude() || hasGemini() || hasGroq();
 
 function getClient() {
   if (!hasClaude()) return null;
@@ -101,6 +102,45 @@ async function replyGemini({ system, messages, maxTokens, onText }) {
   throw lastErr || new Error("Gemini indisponível");
 }
 
+/* Groq (plano grátis, modelos Llama) pela API REST, com a resposta chegando aos pedaços */
+const GROQ_MODELS = [process.env.GROQ_MODEL, "llama-3.3-70b-versatile", "llama-3.1-8b-instant"].filter(Boolean);
+const GROQ_BASE = (process.env.GROQ_BASE_URL || "https://api.groq.com/openai/v1").replace(/\/+$/, "");
+async function replyGroq({ system, messages, maxTokens, onText }) {
+  const sys = Array.isArray(system) ? system.map(b => b.text || "").join("\n\n") : String(system || "");
+  let lastErr = null;
+  for (const model of GROQ_MODELS) {
+    const res = await fetch(GROQ_BASE + "/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer " + process.env.GROQ_API_KEY },
+      body: JSON.stringify({ model, stream: true, max_tokens: maxTokens, temperature: 0.8, messages: [{ role: "system", content: sys }, ...messages] }),
+      signal: AbortSignal.timeout(90 * 1000)
+    }).catch(e => { lastErr = e; return null; });
+    if (!res) continue;
+    if (!res.ok) {
+      const t = await res.text().catch(() => "");
+      if (res.status === 404 || /model_(not_found|decommissioned)|does not exist/.test(t)) { lastErr = new Error("modelo " + model + " indisponível"); continue; }
+      throw new Error("Groq " + res.status + ": " + t.slice(0, 200));
+    }
+    let full = "", buf = "";
+    const dec = new TextDecoder();
+    for await (const chunk of res.body) {
+      buf += dec.decode(chunk, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        if (!line.startsWith("data:") || line === "data: [DONE]") continue;
+        let j;
+        try { j = JSON.parse(line.slice(5)); } catch { continue; }
+        const piece = (j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content) || "";
+        if (piece) { full += piece; if (onText) { try { onText(full); } catch {} } }
+      }
+    }
+    return { text: full.trim(), refused: false };
+  }
+  throw lastErr || new Error("Groq indisponível");
+}
+
 /**
  * Gera uma resposta em streaming.
  * @param {object} o
@@ -112,15 +152,14 @@ async function replyGemini({ system, messages, maxTokens, onText }) {
  */
 async function reply({ system, messages, maxTokens = 2000, onText }) {
   if (!configured()) throw new Error("IA não configurada");
-  if (hasClaude()) {
-    try { return await replyClaude({ system, messages, maxTokens, onText }); }
-    catch (e) {
-      if (!hasGemini()) throw e;
-      console.warn("[ia] Claude falhou, usando o Gemini:", e && e.message);
-      if (onText) { try { onText(""); } catch {} }
-    }
+  // tenta na ordem: Claude (pago) → Gemini (grátis) → Groq (grátis); se um falhar, o próximo assume
+  const chain = [hasClaude() && ["Claude", replyClaude], hasGemini() && ["Gemini", replyGemini], hasGroq() && ["Groq", replyGroq]].filter(Boolean);
+  let err = null;
+  for (const [name, fn] of chain) {
+    try { return await fn({ system, messages, maxTokens, onText }); }
+    catch (e) { err = e; console.warn("[ia] " + name + " falhou:", e && e.message); if (onText) { try { onText(""); } catch {} } }
   }
-  return replyGemini({ system, messages, maxTokens, onText });
+  throw err || new Error("IA indisponível");
 }
 
 /** Transforma o histórico em mensagens válidas: começa e termina com "user", sem vazios. */
@@ -138,5 +177,5 @@ function tidy(list) {
   return out;
 }
 
-const provider = () => (hasClaude() ? (hasGemini() ? "Claude + Gemini" : "Claude") : hasGemini() ? "Gemini (grátis)" : "");
+const provider = () => [hasClaude() && "Claude", hasGemini() && "Gemini (grátis)", hasGroq() && "Groq (grátis)"].filter(Boolean).join(" + ");
 module.exports = { configured, reply, tidy, MODEL, provider };
