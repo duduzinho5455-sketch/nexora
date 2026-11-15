@@ -1029,7 +1029,7 @@ async function renderAdmin(soft) {
       <div><b>Banco de dados</b>${ok(true, r.db)}</div>
       <div><b>Último backup</b>${r.lastBackup ? ok(Date.now() - r.lastBackup < 2 * 86400e3, new Date(r.lastBackup).toLocaleString("pt-BR")) : ok(false, "nenhum ainda")}</div>
       <div><b>E-mail (Resend)</b>${ok(r.mail, r.mail ? "ligado" : "desligado")}</div>
-      <div><b>Aury (IA)</b>${ok(r.ai, r.ai ? "ligada" : "sem chave")}</div>
+      <div><b>Aury (IA)</b>${ok(r.ai, r.ai ? (r.aiName || "ligada") : "sem chave")}</div>
       <div><b>Servidor TURN (voz em 4G)</b>${ok(r.turn, r.turn ? "ligado" : "não configurado")}</div>
       <div><b>Servidor ligado há</b><span class="ost st-rev">${dur(r.uptime)} · ${r.mem} MB</span></div>
     </div>`;
