@@ -28,7 +28,8 @@ function getClient() {
   if (!client) {
     const mod = require("@anthropic-ai/sdk");
     const Anthropic = mod.Anthropic || mod.default || mod;
-    client = new Anthropic({ timeout: 90 * 1000, maxRetries: 2 });
+    // com outra IA de reserva, não insiste: falhou uma vez, passa para a próxima
+    client = new Anthropic({ timeout: 60 * 1000, maxRetries: hasGemini() || hasGroq() ? 0 : 2 });
   }
   return client;
 }
@@ -73,10 +74,12 @@ async function replyGemini({ system, messages, maxTokens, onText }) {
       signal: AbortSignal.timeout(90 * 1000)
     }).catch(e => { lastErr = e; return null; });
     if (!res) continue;
-    if (res.status === 404) { lastErr = new Error("modelo " + model + " indisponível"); continue; }   // tenta o próximo nome de modelo
     if (!res.ok) {
       const t = await res.text().catch(() => "");
-      throw new Error(`Gemini ${res.status}: ${t.slice(0, 200)}`);
+      lastErr = new Error(`Gemini ${res.status} (${model}): ${t.slice(0, 200)}`);
+      // chave errada ou sem permissão: nenhum modelo vai funcionar
+      if (res.status === 401 || res.status === 403 || /API_KEY_INVALID|API key not valid/.test(t)) throw lastErr;
+      continue;   // 404 (modelo), 429 (limite), 500/503 (sobrecarga): tenta o próximo modelo
     }
     let full = "", blocked = false, buf = "";
     const dec = new TextDecoder();
@@ -97,6 +100,7 @@ async function replyGemini({ system, messages, maxTokens, onText }) {
       }
     }
     if (!full.trim() && blocked) return { text: "", refused: true };
+    if (!full.trim()) { lastErr = new Error(`Gemini (${model}) respondeu vazio`); continue; }
     return { text: full.trim(), refused: false };
   }
   throw lastErr || new Error("Gemini indisponível");
@@ -153,14 +157,32 @@ async function replyGroq({ system, messages, maxTokens, onText }) {
 async function reply({ system, messages, maxTokens = 2000, onText }) {
   if (!configured()) throw new Error("IA não configurada");
   // tenta na ordem: Claude (pago) → Gemini (grátis) → Groq (grátis); se um falhar, o próximo assume
-  const chain = [hasClaude() && ["Claude", replyClaude], hasGemini() && ["Gemini", replyGemini], hasGroq() && ["Groq", replyGroq]].filter(Boolean);
+  // uma IA que falhou por conta/créditos fica 15 min de castigo (não atrasa cada resposta)
+  const now = Date.now();
+  let chain = [hasClaude() && ["Claude", replyClaude], hasGemini() && ["Gemini", replyGemini], hasGroq() && ["Groq", replyGroq]].filter(Boolean);
+  const ready = chain.filter(([n]) => !(cooldown[n] > now));
+  if (ready.length) chain = ready;
   let err = null;
   for (const [name, fn] of chain) {
-    try { return await fn({ system, messages, maxTokens, onText }); }
-    catch (e) { err = e; console.warn("[ia] " + name + " falhou:", e && e.message); if (onText) { try { onText(""); } catch {} } }
+    try {
+      const r = await fn({ system, messages, maxTokens, onText });
+      if (!r.refused && !r.text) throw new Error(name + " respondeu vazio");
+      lastOk = { at: Date.now(), provider: name };
+      return r;
+    } catch (e) {
+      err = e;
+      const msg = String((e && e.message) || e);
+      console.warn("[ia] " + name + " falhou:", msg);
+      lastError = { at: Date.now(), provider: name, msg: msg.slice(0, 300) };
+      if (/credit|balance|billing|quota|401|403|invalid.*key|API key|authentication|permission/i.test(msg)) cooldown[name] = Date.now() + 15 * 60e3;
+      if (onText) { try { onText(""); } catch {} }
+    }
   }
   throw err || new Error("IA indisponível");
 }
+const cooldown = {};
+let lastError = null, lastOk = null;
+const status = () => ({ lastError, lastOk, cooldown: Object.fromEntries(Object.entries(cooldown).filter(([, t]) => t > Date.now())) });
 
 /** Transforma o histórico em mensagens válidas: começa e termina com "user", sem vazios. */
 function tidy(list) {
@@ -178,4 +200,4 @@ function tidy(list) {
 }
 
 const provider = () => [hasClaude() && "Claude", hasGemini() && "Gemini (grátis)", hasGroq() && "Groq (grátis)"].filter(Boolean).join(" + ");
-module.exports = { configured, reply, tidy, MODEL, provider };
+module.exports = { configured, reply, tidy, MODEL, provider, status };

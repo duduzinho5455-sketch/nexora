@@ -2121,7 +2121,7 @@ io.on("connection", socket => {
       voiceNow: voice.size, rooms: new Set([...voice.values()].map(v => v.cid)).size,
       msgs, msgsDay, subs, pending: orders.filter(o => o.status === "pending" || o.status === "review").length,
       revenueMonth: paid.filter(o => (o.decided || o.updated) >= monthStart.getTime()).reduce((a, o) => a + o.amount, 0), revenueTotal: paid.reduce((a, o) => a + o.amount, 0), paidCount: paid.length,
-      ai: AI.configured(), aiName: AI.provider(), mail: MAIL_ON, turn: !!process.env.TURN_URLS, db: pg ? "PostgreSQL" : "arquivo", lastBackup: bl[0] ? bl[0].at : 0,
+      ai: AI.configured(), aiName: AI.provider(), aiStatus: AI.status(), mail: MAIL_ON, turn: !!process.env.TURN_URLS, db: pg ? "PostgreSQL" : "arquivo", lastBackup: bl[0] ? bl[0].at : 0,
       uptime: Math.round(process.uptime()), mem: Math.round(process.memoryUsage().rss / 1048576),
       // tempo real
       sockets: io.engine.clientsCount, msgsMin: msgClock.filter(t => t > now - 60e3).length, msgsHour: msgClock.filter(t => t > now - 3600e3).length,

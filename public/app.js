@@ -1083,6 +1083,7 @@ async function renderAdmin(soft) {
       <div><b>Último backup</b>${r.lastBackup ? ok(Date.now() - r.lastBackup < 2 * 86400e3, new Date(r.lastBackup).toLocaleString("pt-BR")) : ok(false, "nenhum ainda")}</div>
       <div><b>E-mail (Resend)</b>${ok(r.mail, r.mail ? "ligado" : "desligado")}</div>
       <div><b>Aury (IA)</b>${ok(r.ai, r.ai ? (r.aiName || "ligada") : "sem chave")}</div>
+      ${r.aiStatus && (r.aiStatus.lastError || r.aiStatus.lastOk) ? `<div class="ai-diag"><b>Aury · diagnóstico</b><small>${r.aiStatus.lastOk ? `✅ Última resposta: ${esc(r.aiStatus.lastOk.provider)} em ${new Date(r.aiStatus.lastOk.at).toLocaleString("pt-BR")}` : "Nenhuma resposta desde que o servidor ligou"}${r.aiStatus.lastError ? `<br>⚠️ Último erro (${esc(r.aiStatus.lastError.provider)}, ${new Date(r.aiStatus.lastError.at).toLocaleString("pt-BR")}): ${esc(r.aiStatus.lastError.msg)}` : ""}${Object.keys(r.aiStatus.cooldown || {}).length ? `<br>⏸️ Pausado por 15 min (conta/créditos): ${esc(Object.keys(r.aiStatus.cooldown).join(", "))}` : ""}</small></div>` : ""}
       <div><b>Servidor TURN (voz em 4G)</b>${ok(r.turn, r.turn ? "ligado" : "não configurado")}</div>
       <div><b>Servidor ligado há</b><span class="ost st-rev">${dur(r.uptime)} · ${r.mem} MB</span></div>
     </div>`;

@@ -1669,3 +1669,6 @@ html.aurys .rail-item.home .srv-icon { box-shadow: 0 0 0 2px color-mix(in srgb, 
   .app { grid-template-columns: 76px 280px minmax(0, 1fr) 272px; }
   .app.no-members { grid-template-columns: 76px 280px minmax(0, 1fr) 0; }
 }
+
+.ai-diag { grid-column: 1 / -1; display: block !important; }
+.ai-diag small { display: block; margin-top: 4px; color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
