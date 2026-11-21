@@ -18,7 +18,10 @@ const GEMINI_MODELS = [process.env.GEMINI_MODEL, "gemini-3.8-flash", "gemini-fla
 // O Google aposenta modelos com frequência: se os nomes acima falharem, pergunta à API quais modelos
 // "flash" esta chave pode usar agora e tenta esses (a lista fica guardada por 6 h).
 let geminiFound = null, geminiFoundAt = 0, geminiGood = "";
-const noThinkCfg = new Set();   // modelos que não aceitam o ajuste de raciocínio
+// Raciocínio do Gemini: tenta o mais rápido primeiro ("minimal") e desce na lista só se o modelo recusar.
+// Guarda por modelo qual opção funcionou, para não repetir o erro 400 a cada mensagem.
+const thinkStep = new Map();
+const thinkOpts = model => /gemini-2\./.test(model) ? [{ thinkingBudget: 0 }, null] : [{ thinkingLevel: "minimal" }, { thinkingLevel: "low" }, null];
 async function geminiDiscover() {
   if (geminiFound && Date.now() - geminiFoundAt < 6 * 3600e3) return geminiFound;
   try {
@@ -83,7 +86,7 @@ async function replyGemini({ system, messages, maxTokens, onText }) {
   const body = {
     systemInstruction: { parts: [{ text: sys }] },
     contents: messages.map(m => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
-    generationConfig: { maxOutputTokens: maxTokens, temperature: 0.8 }
+    generationConfig: { maxOutputTokens: maxTokens }
   };
   let lastErr = null;
   const tried = new Set();
@@ -95,20 +98,24 @@ async function replyGemini({ system, messages, maxTokens, onText }) {
     tried.add(model);
     // acabaram os nomes conhecidos: descobre os modelos disponíveis na chave
     if (k === models.length - 1) for (const m of await geminiDiscover()) if (!models.includes(m)) models.push(m);
-    // conversa do dia a dia: raciocínio mínimo = resposta muito mais rápida (se o modelo não aceitar, manda sem)
-    const think = noThinkCfg.has(model) ? null : /gemini-2\./.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: "low" };
+    // conversa do dia a dia: raciocínio mínimo = primeira palavra chega muito antes
+    // (gemini-2.x: orçamento 0; gemini-3+: "minimal" → "low" → sem ajuste, conforme o modelo aceitar)
+    // a temperatura fica no padrão do Google: nos modelos novos, baixar a temperatura pode travar a resposta em repetição
+    const opts = thinkOpts(model);
     const send = cfg => fetch(`${GEMINI_BASE}/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
       body: JSON.stringify(cfg ? { ...body, generationConfig: { ...body.generationConfig, thinkingConfig: cfg } } : body),
       signal: AbortSignal.timeout(60 * 1000)
     }).catch(e => { lastErr = e; return null; });
-    let res = await send(think);
-    if (res && res.status === 400 && think) {
+    let step = thinkStep.get(model) || 0, res = await send(opts[step]), bad400 = "";
+    while (res && res.status === 400 && opts[step]) {
       const t = await res.text().catch(() => "");
-      if (/thinking/i.test(t)) { noThinkCfg.add(model); res = await send(null); }
-      else { lastErr = new Error(`Gemini 400 (${model}): ${t.slice(0, 200)}`); continue; }
+      if (!/thinking/i.test(t)) { bad400 = t; break; }
+      thinkStep.set(model, ++step);
+      res = await send(opts[step]);
     }
+    if (bad400) { lastErr = new Error(`Gemini 400 (${model}): ${bad400.slice(0, 200)}`); continue; }
     if (!res) continue;
     if (!res.ok) {
       const t = await res.text().catch(() => "");

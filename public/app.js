@@ -1402,7 +1402,7 @@ async function loadGames(force) {
 /* Aury — IA exclusiva dos assinantes VIP (e atendente do pagamento)   */
 /* ------------------------------------------------------------------ */
 const AURY = { id: "aury", username: "Aury (IA)", color: "#8b5cf6", avatar: "🤖", status: "online", about: "Assistente com inteligência artificial da Auryx Nexos.", created: 0, bot: true };
-const AIS = { loaded: false, on: false, tier: "", limit: 0, used: 0, msgs: [], pending: null, busy: false };
+const AIS = { loaded: false, on: false, tier: "", limit: 0, limits: { plus: 60, pro: 200, max: 500 }, used: 0, msgs: [], pending: null, busy: false };
 const AI_SUGGEST = ["Me dá ideias de nome para meu servidor de jogos", "Como transmito a tela do celular na call?", "Me ajuda a escrever as regras do meu servidor", "Me recomenda jogos para jogar com amigos"];
 async function goAI() {
   setView("ai");
@@ -1413,7 +1413,7 @@ async function goAI() {
   renderAll(); updateMini();
   const r = await emit("ai:state", {});
   if (r.error) { toast(r.error, "error"); return; }
-  Object.assign(AIS, { loaded: true, on: r.on, tier: r.tier, limit: r.limit, used: r.used, msgs: r.msgs || [], busy: !!r.busy });
+  Object.assign(AIS, { loaded: true, on: r.on, tier: r.tier, limit: r.limit, limits: r.limits || AIS.limits, used: r.used, msgs: r.msgs || [], busy: !!r.busy });
   if (S.view === "ai") { renderAIView(true); renderSide(); }
 }
 function aiBubble(m) {
@@ -1425,7 +1425,7 @@ function renderAIView(scroll) {
   const root = $("#aiView");
   if (!root) return;
   if (!AIS.tier) {
-    root.innerHTML = `<div class="page ai-lock"><div class="ai-orb">🤖</div><h1>Conheça a <span class="grad">Aury</span></h1><p>Uma inteligência artificial só sua, para conversar sobre qualquer coisa: jogos, estudos, ideias, textos e dúvidas sobre o app. Responde na hora, em português.</p><ul><li>💠 <b>Plus</b> — ${40} mensagens por dia</li><li>💎 <b>Pro</b> — ${120} mensagens por dia</li><li>👑 <b>Max</b> — ${300} mensagens por dia</li></ul><button class="btn primary big" style="width:auto;padding:0 28px" data-act="premium">${ic("gem", "sm")} Ver planos VIP</button><small>Exclusiva para assinantes do VIP.</small></div>`;
+    root.innerHTML = `<div class="page ai-lock"><div class="ai-orb">🤖</div><h1>Conheça a <span class="grad">Aury</span></h1><p>Uma inteligência artificial só sua, para conversar sobre qualquer coisa: jogos, estudos, ideias, textos e dúvidas sobre o app. Responde na hora, em português.</p><ul><li>💠 <b>Plus</b> — ${AIS.limits.plus} mensagens por dia</li><li>💎 <b>Pro</b> — ${AIS.limits.pro} mensagens por dia</li><li>👑 <b>Max</b> — ${AIS.limits.max} mensagens por dia</li></ul><button class="btn primary big" style="width:auto;padding:0 28px" data-act="premium">${ic("gem", "sm")} Ver planos VIP</button><small>Exclusiva para assinantes do VIP.</small></div>`;
     return;
   }
   if (!root.querySelector(".ai-wrap")) {
@@ -1460,13 +1460,28 @@ async function sendAI() {
   renderAIView(true);
 }
 function aiAtBottom() { const l = $("#aiList"); return !l || l.scrollHeight - l.scrollTop - l.clientHeight < 80; }
+// A resposta chega aos pedaços; o desenho acontece no máximo uma vez por quadro de tela
+// (antes, cada pedaço refazia a formatação do texto inteiro na hora, travando celulares fracos).
+let aiPaintRaf = 0;
+function aiPaint() {
+  aiPaintRaf = 0;
+  const p = AIS.pending;
+  if (!p || S.view !== "ai") return;
+  const el = $(`#aiList [data-id="${CSS.escape(p.id)}"] .ai-b`), stick = aiAtBottom();
+  if (el) el.innerHTML = p.t ? renderText(p.t).html : `<span class="ai-dots"><i></i><i></i><i></i></span>`; else renderAIView();
+  if (stick) { const l = $("#aiList"); if (l) l.scrollTop = l.scrollHeight; }
+}
+function aiQueuePaint() { if (!aiPaintRaf) aiPaintRaf = requestAnimationFrame(aiPaint); }
 function onAIDelta({ id, t }) {
-  if (!AIS.pending || AIS.pending.id !== id) return;
+  if (!AIS.pending || AIS.pending.id !== id || typeof t !== "string") return;
   AIS.pending.t = t;
-  if (S.view !== "ai") return;
-  const el = $(`#aiList [data-id="${CSS.escape(id)}"] .ai-b`), stick = aiAtBottom();
-  if (el) el.innerHTML = renderText(t).html; else renderAIView();
-  if (stick) { const l = $("#aiList"); l.scrollTop = l.scrollHeight; }
+  aiQueuePaint();
+}
+function onAIChunk({ id, n, d }) {
+  if (!AIS.pending || AIS.pending.id !== id) return;
+  // n = onde o pedaço começa; n menor que o texto atual = a IA recomeçou a resposta
+  AIS.pending.t = AIS.pending.t.slice(0, Math.max(0, n | 0)) + String(d || "");
+  aiQueuePaint();
 }
 function onAIDone({ msg, used }) {
   AIS.pending = null; AIS.busy = false;
@@ -2575,7 +2590,7 @@ function emit(ev, data) {
   });
 }
 function connect() {
-  const sock = LOCAL ? localSocket(S.token) : io({ auth: { token: S.token, v: 3 }, transports: ["websocket", "polling"], reconnectionDelayMax: 6000 });
+  const sock = LOCAL ? localSocket(S.token) : io({ auth: { token: S.token, v: 4 }, transports: ["websocket", "polling"], reconnectionDelayMax: 6000 });
   S.socket = sock;
   sock.on("connect_error", err => {
     if (err && err.message === "auth") { store.del("token"); S.token = null; sock.disconnect(); showAuth(Date.now() < Date.UTC(2027, 0, 15) ? "A Auryx Nexavória agora é Auryx Nexos! ✨ Por segurança, entre de novo." : "Sua sessão expirou. Entre novamente."); return; }
@@ -2730,6 +2745,7 @@ function connect() {
   sock.on("typing", onTyping);
   sock.on("server:roles", onServerRoles);
   sock.on("ai:delta", onAIDelta);
+  sock.on("ai:chunk", onAIChunk);
   sock.on("ai:done", onAIDone);
   sock.on("ai:error", onAIError);
   sock.on("voice:state", onVoiceState);

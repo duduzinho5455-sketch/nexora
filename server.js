@@ -90,6 +90,8 @@ async function loadDb() {
   db.migrations = Array.isArray(db.migrations) ? db.migrations : [];
   db.settings = Object.assign({ regOpen: true, maintenance: "", pixKey: "", links: {}, minApp: null, announce: null }, db.settings || {});
   db.metrics = Array.isArray(db.metrics) ? db.metrics : [];
+  // conversas antigas com a Aury guardavam até 200 mensagens por pessoa; agora ficam as últimas 80
+  for (const st of Object.values(db.ai || {})) if (st && Array.isArray(st.msgs) && st.msgs.length > 80) st.msgs.splice(0, st.msgs.length - 80);
   refreshAdmins();
   for (const u of Object.values(db.users)) { byName.set(u.username.toLowerCase(), u.id); if (u.email) byEmail.set(u.email, u.id); }
   for (const s of Object.values(db.servers)) for (const c of s.channels) chanIndex.set(c.id, s.id);
@@ -297,7 +299,8 @@ const MIME = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg", ".webp": "image/webp", ".ico": "image/x-icon", ".webmanifest": "application/manifest+json",
-  ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".woff2": "font/woff2"
+  ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".woff2": "font/woff2",
+  ".txt": "text/plain; charset=utf-8", ".xml": "application/xml; charset=utf-8"
 };
 const fileCache = new Map();
 
@@ -313,9 +316,14 @@ async function serveStatic(req, res, pathname) {
   if (!entry || entry.mtime !== st.mtimeMs) {
     const raw = await fsp.readFile(file);
     const type = MIME[path.extname(file).toLowerCase()] || "application/octet-stream";
-    const gz = /text|javascript|json|svg/.test(type) && raw.length > 1024 ? zlib.gzipSync(raw, { level: 9 }) : null;
-    entry = { mtime: st.mtimeMs, raw, gz, type, etag: `"${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}"` };
+    const zip = /text|javascript|json|svg/.test(type) && raw.length > 1024;
+    // gzip fora da thread principal (antes era gzipSync: travava o servidor no 1º acesso de cada arquivo)
+    const gz = zip ? await new Promise(ok => zlib.gzip(raw, { level: 9 }, (e, b) => ok(e ? null : b))) : null;
+    entry = { mtime: st.mtimeMs, raw, gz, br: null, type, etag: `"${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}"` };
     fileCache.set(file, entry);
+    // Brotli: ~20% menor que o gzip no app.js (134 KB → 107 KB), mas leva ~0,8 s de CPU;
+    // comprime em segundo plano e passa a usar assim que ficar pronto (até lá vai gzip)
+    if (zip) zlib.brotliCompress(raw, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: raw.length } }, (e, b) => { if (!e && b.length < (gz ? gz.length : raw.length)) entry.br = b; });
   }
   const headers = {
     "content-type": entry.type, "cache-control": "no-cache", etag: entry.etag,
@@ -326,10 +334,11 @@ async function serveStatic(req, res, pathname) {
     ...(process.env.RENDER || process.env.NODE_ENV === "production" ? { "strict-transport-security": "max-age=15552000" } : {})
   };
   if (req.headers["if-none-match"] === entry.etag) { res.writeHead(304, headers); res.end(); return; }
-  const gzip = entry.gz && /\bgzip\b/.test(req.headers["accept-encoding"] || "");
-  if (gzip) headers["content-encoding"] = "gzip";
+  const ae = req.headers["accept-encoding"] || "";
+  const body = entry.br && /\bbr\b/.test(ae) ? (headers["content-encoding"] = "br", entry.br)
+    : entry.gz && /\bgzip\b/.test(ae) ? (headers["content-encoding"] = "gzip", entry.gz) : entry.raw;
   res.writeHead(200, headers);
-  res.end(req.method === "HEAD" ? undefined : gzip ? entry.gz : entry.raw);
+  res.end(req.method === "HEAD" ? undefined : body);
 }
 
 function sendJson(res, code, obj) {
@@ -1149,6 +1158,7 @@ const AI = require("./ai");
 const AI_ID = "aury";
 const AI_LIMIT = { plus: 60, pro: 200, max: 500 };          // mensagens por dia no bate-papo VIP
 const AI_TICKET_DAY = 25;                                   // respostas por dia em cada atendimento
+const AI_KEEP = 80;                                         // mensagens guardadas por pessoa no bate-papo
 const aiBusy = new Set();
 const brl = c => "R$ " + (c / 100).toFixed(2).replace(".", ",");
 const dayKey = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);   // dia no horário de Brasília
@@ -1205,7 +1215,7 @@ function aiTicket(o) {
       aiBusy.delete(cid);
       if (o.aiAgain) { o.aiAgain = false; const l = db.messages[cid] || [], last = l[l.length - 1]; if (last && last.a === o.uid) aiTicket(o); }
     });
-  }, 1200);
+  }, 700);   // junta mensagens mandadas em sequência, sem deixar o cliente esperando à toa
 }
 async function aiTicketRun(o) {
   const cid = "t." + o.id, list = db.messages[cid] || [];
@@ -1261,15 +1271,31 @@ async function aiChatRun(uid, replyId) {
   }
   const history = AI.tidy(recent.map(m => ({ role: m.r === "a" ? "assistant" : "user", content: m.t })));
   const sys = AI_BASE + `\n\nAgora você está no bate-papo exclusivo para assinantes VIP. A pessoa se chama ${u.username} e tem o plano ${(PLANS[tier] || PLANS.max).name}. Converse sobre qualquer assunto: dúvidas, jogos, estudos, ideias, textos e ajuda com o app. Ajuste o tamanho: curto para papo, mais completo quando pedirem explicação.`;
-  let last = 0;
+  // Streaming: o app novo (v4+) recebe só o pedaço novo ("ai:chunk", n = onde o pedaço começa);
+  // o app antigo continua recebendo o texto inteiro ("ai:delta"). Antes, cada atualização reenviava
+  // a resposta toda: numa resposta longa isso virava centenas de KB pela rede e travava o celular.
+  let last = 0, sent = 0;
+  const flush = full => {
+    const ids = online.get(uid);
+    if (ids) for (const sid of ids) {
+      const s = io.sockets.sockets.get(sid);
+      if (!s) continue;
+      if (Number(s.handshake.auth && s.handshake.auth.v) >= 4) s.emit("ai:chunk", { id: replyId, n: Math.min(sent, full.length), d: full.slice(Math.min(sent, full.length)) });
+      else if (full) s.emit("ai:delta", { id: replyId, t: full });
+    }
+    sent = full.length; last = Date.now();
+  };
   const r = await AI.reply({
     system: sys, messages: history, maxTokens: 2500,
-    onText: full => { if (Date.now() - last > 60) { last = Date.now(); io.to("u:" + uid).emit("ai:delta", { id: replyId, t: full }); } }
+    // a IA trocou de provedor no meio (texto recomeçou): avisa na hora; senão, no máximo a cada 50 ms
+    onText: full => { if (full.length < sent || Date.now() - last > 50) flush(full); }
   });
   const text = r.refused || !r.text ? "Desculpa, sobre isso eu não consigo ajudar. Quer falar de outra coisa? 🙂" : r.text;
   const m = { id: replyId, r: "a", t: text, ts: Date.now() };
   st.msgs.push(m);
-  if (st.msgs.length > 200) st.msgs.splice(0, st.msgs.length - 200);
+  // o app mostra só as últimas 80 e a IA lê só as últimas 20: guardar mais só inchava o banco
+  // (que é regravado inteiro a cada segundo com mudanças)
+  if (st.msgs.length > AI_KEEP) st.msgs.splice(0, st.msgs.length - AI_KEEP);
   st.n++;
   save();
   io.to("u:" + uid).emit("ai:done", { msg: aiMsgView(m), used: st.n });
@@ -1860,7 +1886,7 @@ io.on("connection", socket => {
   /* --- Aury: bate-papo com IA exclusivo dos assinantes --- */
   on("ai:state", () => {
     const tier = aiTier(me()), st = aiStore(uid);
-    return { on: AI.configured(), tier, limit: tier ? AI_LIMIT[tier] : 0, used: st.n, busy: aiBusy.has("c." + uid), msgs: tier ? st.msgs.slice(-80).map(aiMsgView) : [] };
+    return { on: AI.configured(), tier, limit: tier ? AI_LIMIT[tier] : 0, limits: AI_LIMIT, used: st.n, busy: aiBusy.has("c." + uid), msgs: tier ? st.msgs.slice(-AI_KEEP).map(aiMsgView) : [] };
   });
   on("ai:send", ({ text }) => {
     const tier = aiTier(me());
