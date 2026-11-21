@@ -117,12 +117,12 @@ while (res && res.status === 400 && opts[step]) {
 - **Onde está:** `server.js` → `aiTicket()`.
 - **Como foi resolvido:** 700 ms — ainda junta mensagens mandadas em sequência.
 
-### 🟡 [CRITICIDADE: Média] Claude Opus 5.5 é o modelo mais caro/lento para bate-papo
+### ✅ [CRITICIDADE: Média] Claude Opus 5.5 era o modelo mais caro/lento para bate-papo
 
 - **Onde está:** `ai.js` → `const MODEL = "claude-opus-5-5"`.
 - **O que está acontecendo:** quando a conta Anthropic tem créditos, todo bate-papo usa o Opus 5.5 ($4 entrada / $20 saída por milhão de tokens). Para conversa leve, o **Claude Haiku 5.5** custa $0,10 / $0,50 (40× menos) e é mais rápido. Hoje o Claude está sem créditos e a Aury está rodando no Gemini.
 - **Impacto real:** custo e tempo de resposta quando o Claude voltar a ser usado.
-- **Como resolver:** **decisão sua** (qualidade × custo). Se quiser trocar:
+- **Como foi resolvido (aprovado por você):** a Aury usa o **Claude Haiku 5.5** com esforço baixo; Opus/Sonnet continuam possíveis pela variável `CLAUDE_MODEL` no Render. O Haiku não tem o fallback automático do servidor para recusas — nesse caso a Aury responde com a mensagem educada de sempre. Mudança:
 ```js
 // ai.js
 const MODEL = process.env.CLAUDE_MODEL || "claude-haiku-5-5";
@@ -403,7 +403,7 @@ Trocar os 2 handlers inline por `addEventListener` e, sem relatórios por uma se
 | 5 | robots.txt, sitemap.xml, canonical, Open Graph | ✅ feito |
 | 6 | Restaurar o `.gitignore` (chaves do Android) | 🟡 1 comando seu |
 | 7 | Render sem dormir (plano pago ou monitor externo) | 🟡 precisa da sua conta |
-| 8 | Decidir o modelo do Claude (Opus 5.5 × Haiku 5.5) | 🟡 decisão sua |
+| 8 | Claude da Aury: Opus 5.5 → Haiku 5.5 | ✅ feito |
 
 ### Fase 2 — Otimização profunda de performance e UX
 1. Mensagens em tabela própria no Postgres (fim do JSON gigante e do limite de 500).

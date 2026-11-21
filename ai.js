@@ -13,7 +13,9 @@
  */
 "use strict";
 
-const MODEL = "claude-opus-5-5";
+// Haiku 5.5: o Claude mais rápido e barato ($0,10 / $0,50 por milhão de tokens) — ideal para bate-papo.
+// Para trocar sem mexer no código: variável CLAUDE_MODEL no Render (ex.: claude-opus-5-5).
+const MODEL = process.env.CLAUDE_MODEL || "claude-haiku-5-5";
 const GEMINI_MODELS = [process.env.GEMINI_MODEL, "gemini-3.8-flash", "gemini-flash-latest"].filter(Boolean);
 // O Google aposenta modelos com frequência: se os nomes acima falharem, pergunta à API quais modelos
 // "flash" esta chave pode usar agora e tenta esses (a lista fica guardada por 6 h).
@@ -58,14 +60,16 @@ function getClient() {
 }
 
 async function replyClaude({ system, messages, maxTokens, onText }) {
+  const haiku = /haiku/.test(MODEL);
   const stream = getClient().beta.messages.stream({
     model: MODEL,
-    max_tokens: maxTokens,
-    // conversa do dia a dia: pouco raciocínio, resposta rápida
+    // o raciocínio conta dentro do max_tokens: folga para não cortar a resposta
+    max_tokens: maxTokens + 1000,
+    // conversa do dia a dia: pouco raciocínio, resposta rápida (no Haiku ele pula o raciocínio em perguntas simples)
     output_config: { effort: "low" },
-    // se o modelo recusar por política, a própria API tenta outro modelo na mesma chamada
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
+    // Opus/Sonnet: se recusar por política, a própria API tenta outro modelo na mesma chamada.
+    // O Haiku não tem isso; se ele recusar, a Aury responde com a mensagem educada de sempre.
+    ...(haiku ? {} : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" }),
     system,
     messages
   });
