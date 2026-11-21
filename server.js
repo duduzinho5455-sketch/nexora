@@ -1,5 +1,5 @@
 /**
- * Auryx Nexavória — servidor
+ * Auryx Nexos — servidor
  * HTTP estático (com gzip + ETag em memória), API de conta, Socket.IO para
  * chat/servidores/convites e sinalização WebRTC para voz, câmera e tela.
  * Requer Node.js 18+. Única dependência: socket.io
@@ -86,6 +86,11 @@ async function loadDb() {
     save();
   }
   db.audit = db.audit || [];
+  db.admins = Array.isArray(db.admins) ? db.admins : [];
+  db.migrations = Array.isArray(db.migrations) ? db.migrations : [];
+  db.settings = Object.assign({ regOpen: true, maintenance: "", pixKey: "", links: {}, minApp: null, announce: null }, db.settings || {});
+  db.metrics = Array.isArray(db.metrics) ? db.metrics : [];
+  refreshAdmins();
   for (const u of Object.values(db.users)) { byName.set(u.username.toLowerCase(), u.id); if (u.email) byEmail.set(u.email, u.id); }
   for (const s of Object.values(db.servers)) for (const c of s.channels) chanIndex.set(c.id, s.id);
   const now = Date.now();
@@ -198,20 +203,33 @@ function gameOf(u) {
 /* ------------------------------------------------------------------ */
 /* Planos Premium (pagos por Pix, liberados só por um ADM)             */
 /* ------------------------------------------------------------------ */
+// price = mensal (30 dias) · price3 = trimestral (90 dias, com desconto)
 const PLANS = {
-  plus: { tier: "plus", name: "VIP", price: 599, rank: 1, link: "https://nubank.com.br/cobrar/577jqn/6af86b8d-a317-400e-85ce-bfb41001dfa5",
-    benefits: ["Insígnia VIP 💠 ao lado do nome", "Cores do perfil em degradê", "Status personalizado com emoji", "Aury, a IA: 40 mensagens por dia", "Arquivos de até 15 MB"] },
-  pro: { tier: "pro", name: "Pro", price: 1499, rank: 2, link: "https://nubank.com.br/cobrar/577jqn/6af86c01-b569-4fcc-8170-bc699f49f89f",
-    benefits: ["Tudo do VIP", "Insígnia Pro 💎", "Aury, a IA: 120 mensagens por dia", "Avatar animado (GIF) e imagem enviada", "Banner no perfil", "Efeito no nome (degradê, brilho, arco-íris)", "Arquivos de até 25 MB"] },
-  max: { tier: "max", name: "Max", price: 3499, rank: 3, link: "https://nubank.com.br/cobrar/577jqn/6af86c1d-40ed-4da3-82cc-221f2402949a",
-    benefits: ["Tudo do Pro", "Insígnia Max 👑 exclusiva", "Aury, a IA: 300 mensagens por dia", "Efeitos animados no perfil (aurora, neon, fogo, estrelas)", "Arquivos de até 50 MB", "Prioridade no atendimento"] }
+  plus: { tier: "plus", name: "VIP", price: 599, price3: 1499, rank: 1, link: "https://nubank.com.br/cobrar/577jqn/6af86b8d-a317-400e-85ce-bfb41001dfa5",
+    benefits: ["Insígnia VIP 💠 e nome colorido nos chats", "Destaque na lista de membros", "Cores do perfil em degradê", "Status personalizado com emoji", "Mensagens de até 5.000 caracteres", "Aury, a IA: 60 mensagens por dia", "Arquivos de até 15 MB"] },
+  pro: { tier: "pro", name: "Pro", price: 1499, price3: 3799, rank: 2, link: "https://nubank.com.br/cobrar/577jqn/6af86c01-b569-4fcc-8170-bc699f49f89f",
+    benefits: ["Tudo do VIP", "Insígnia Pro 💎", "Aurys: a cor do app inteiro do seu jeito", "Avatar e banner animados (GIF)", "Moldura animada no avatar", "Efeito no nome (degradê, brilho, arco-íris)", "Mensagens de até 7.000 caracteres", "Aury, a IA: 200 mensagens por dia", "Arquivos de até 25 MB"] },
+  max: { tier: "max", name: "Max", price: 3499, price3: 8799, rank: 3, link: "https://nubank.com.br/cobrar/577jqn/6af86c1d-40ed-4da3-82cc-221f2402949a",
+    benefits: ["Tudo do Pro", "Insígnia Max 👑 exclusiva", "Efeitos e partículas no perfil (aurora, neon, fogo, galáxia, sakura…)", "Molduras exclusivas (ouro, aurora)", "Mensagens de até 10.000 caracteres", "Aury, a IA: 500 mensagens por dia", "Arquivos de até 50 MB", "Prioridade no atendimento"] }
 };
 const PLAN_DAYS = 30;
+// ciclos de cobrança: m = mensal, q = trimestral (3 meses pagos de uma vez, mais barato)
+const CYCLES = { m: { days: 30, months: 1, name: "Mensal" }, q: { days: 90, months: 3, name: "Trimestral" } };
+const cycleOf = c => (CYCLES[c] ? c : "m");
+const priceOf = (p, c) => (cycleOf(c) === "q" ? p.price3 : p.price);
 const planOf = u => { const p = u && u.plan; return p && PLANS[p.tier] && p.until > Date.now() ? p.tier : ""; };
 const rankOf = u => (PLANS[planOf(u)] || { rank: 0 }).rank;
 const maxFileOf = u => [8, 15, 25, 50][rankOf(u)] * 1024 * 1024;
-const NEED = { theme: 1, cs: 1, avatarFile: 2, banner: 2, fx: 2, pfx: 3 };   // nível mínimo de cada benefício
+// "VIP+" = planos acima do VIP (Pro e Max)
+const NEED = { theme: 1, cs: 1, avatarFile: 2, banner: 2, fx: 2, accent: 2, ring: 2, pfx: 3, ringMax: 3 };   // nível mínimo de cada benefício
 const RANK_NAME = ["", "VIP", "Pro", "Max"];
+// limites de mensagem por plano (sem plano, VIP, Pro, Max): tamanho e quantas em 4 segundos
+const MSG_MAX = [3000, 5000, 7000, 10000];
+const MSG_RATE = [8, 12, 14, 16];
+const RINGS = { spin: 2, pulse: 2, rainbow: 2, gold: 3, aurora: 3 };   // molduras do avatar e o plano mínimo de cada
+const PFXS = ["aurora", "stars", "fire", "neon", "galaxy", "sakura", "snow", "hearts"];
+const BANNER_GIF_MAX = 6 * 1024 * 1024;
+const payLink = (p, c) => { const k = p.tier + "_" + cycleOf(c), l = db.settings && db.settings.links && db.settings.links[k]; return l !== undefined && l !== null ? l : cycleOf(c) === "m" ? p.link : ""; };
 
 function pubUser(u) {
   const off = presence(u) === "offline";
@@ -222,8 +240,12 @@ function pubUser(u) {
     about: u.about || "", status: presence(u), created: u.created,
     steam: u.steam || "", game: off ? null : gameOf(u), plan: planOf(u),
     // Perfil Turbo — só aparece o que o plano atual libera (se o plano vencer, some sem apagar nada)
-    banner: r >= NEED.banner ? u.banner || "" : "", theme: r >= NEED.theme ? u.theme || null : null, pron: u.pron || "",
-    cs: off || r < NEED.cs ? null : u.cs || null, fx: r >= NEED.fx ? u.fx || "" : "", pfx: r >= NEED.pfx ? u.pfx || "" : ""
+    banner: r >= NEED.banner ? u.banner || "" : "", bannerStill: r >= NEED.banner && u.banner ? u.bannerStill || "" : "",
+    theme: r >= NEED.theme ? u.theme || null : null, pron: u.pron || "",
+    cs: off || r < NEED.cs ? null : u.cs || null, fx: r >= NEED.fx ? u.fx || "" : "", pfx: r >= NEED.pfx ? u.pfx || "" : "",
+    ring: u.ring && r >= (RINGS[u.ring] || 9) ? u.ring : "",
+    aura: r >= NEED.accent && u.accent ? u.accent[0] : "",
+    staff: isOwnerUser(u) ? "owner" : isAdmin(u) ? "adm" : ""
   };
 }
 /* amigos e mensagens privadas */
@@ -240,10 +262,10 @@ const dmsOf = uid => Object.values(db.dms || {}).filter(d => d.members.includes(
 function chanView(c) {
   const list = db.messages[c.id];
   const last = list && list.length ? list[list.length - 1] : null;
-  return { id: c.id, name: c.name, type: c.type, topic: c.topic || "", last: last ? { id: last.id, ts: last.ts, a: last.a } : null };
+  return { id: c.id, name: c.name, type: c.type, topic: c.topic || "", emoji: c.emoji || "", cat: c.cat || "", last: last ? { id: last.id, ts: last.ts, a: last.a } : null };
 }
 function serverMeta(s) {
-  return { id: s.id, name: s.name, icon: s.icon || "", color: s.color, description: s.description || "", public: !!s.public, ownerId: s.ownerId, created: s.created };
+  return { id: s.id, name: s.name, icon: s.icon || "", color: s.color, description: s.description || "", public: !!s.public, ownerId: s.ownerId, created: s.created, banner: s.banner || "", accent: s.accent || "" };
 }
 function serverView(s) {
   return { ...serverMeta(s), channels: s.channels.map(chanView), members: s.members.slice(), roles: rolesSorted(s), memberRoles: s.memberRoles || {} };
@@ -252,7 +274,7 @@ function serverView(s) {
 // admin = tudo · server = editar o servidor · channels = canais · roles = cargos · kick = expulsar · ban = banir · messages = apagar mensagens dos outros
 const PERMS = ["admin", "server", "channels", "roles", "kick", "ban", "messages"];
 const MAX_ROLES = 30;
-const rolesSorted = s => (s.roles || []).map((r, i) => ({ id: r.id, name: r.name, color: r.color, perms: r.perms, hoist: !!r.hoist, pos: i })).reverse();
+const rolesSorted = s => (s.roles || []).map((r, i) => ({ id: r.id, name: r.name, color: r.color, icon: r.icon || "", perms: r.perms, hoist: !!r.hoist, pos: i })).reverse();
 function rolesOf(s, userId) { const ids = (s.memberRoles && s.memberRoles[userId]) || []; return (s.roles || []).filter(r => ids.includes(r.id)); }
 function hasPerm(s, userId, p) { if (s.ownerId === userId) return true; return rolesOf(s, userId).some(r => r.perms.includes("admin") || r.perms.includes(p)); }
 function topPos(s, userId) { if (s.ownerId === userId) return Infinity; let t = -1; (s.roles || []).forEach((r, i) => { if (rolesOf(s, userId).includes(r)) t = i; }); return t; }
@@ -350,14 +372,22 @@ function clientIp(req) {
 /* ------------------------------------------------------------------ */
 /* Contas: e-mail, verificação por código, recuperação de senha, ADM   */
 /* ------------------------------------------------------------------ */
-const APP_NAME = "Auryx Nexavória";
+const APP_NAME = "Auryx Nexos";
 const RESEND_KEY = process.env.RESEND_API_KEY || "";
 const MAIL_FROM = process.env.MAIL_FROM || `${APP_NAME} <onboarding@resend.dev>`;
 const MAIL_ON = !!RESEND_KEY;
 // ADMs: nomes de usuário na variável ADMIN_USERS (ex.: "laura,pedro"). Só vale para contas que já existem.
 // o dono do app é sempre ADM (nomes de usuário não podem ser trocados, então ninguém assume esse nome)
 const OWNER = "duduzinho5455";
-const ADMIN_SET = new Set([OWNER, ...(process.env.ADMIN_USERS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean)]);
+// ADM Supremo: a conta do dono tem acesso total (ADMs, sistema, desconexão geral, backups). Os outros ADMs moderam.
+const ENV_ADMINS = (process.env.ADMIN_USERS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+const ADMIN_SET = new Set([OWNER, ...ENV_ADMINS]);
+// ADMs nomeados pelo ADM Supremo no painel (ficam guardados no banco)
+function refreshAdmins() {
+  ADMIN_SET.clear();
+  for (const n of [OWNER, ...ENV_ADMINS, ...((db.admins || []).map(id => db.users[id] && db.users[id].username.toLowerCase()).filter(Boolean))]) ADMIN_SET.add(n);
+}
+const isOwnerUser = u => !!(u && String(u.username).toLowerCase() === OWNER);
 const isAdmin = u => !!(u && ADMIN_SET.has(String(u.username).toLowerCase()));
 const EMAIL_RE = /^[^\s@<>()"',;:]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}$/;
 const byEmail = new Map();
@@ -417,6 +447,19 @@ function endSessions(userId, keep, only) {
   if (n) save();
   return n;
 }
+// Desconexão geral: apaga TODAS as sessões (todas as contas, todos os aparelhos) e derruba as conexões.
+// keep = sessão que continua valendo (quem apertou o botão no painel); na atualização nada fica.
+function logoutEveryone(keep) {
+  let n = 0;
+  for (const k of Object.keys(db.sessions)) { if (k === keep) continue; delete db.sessions[k]; n++; }
+  if (typeof io !== "undefined") for (const sk of io.sockets.sockets.values()) {
+    if (sk.data.tk === keep) continue;
+    sk.emit("session:ended", { all: true });
+    setTimeout(() => sk.disconnect(true), 200);
+  }
+  save();
+  return n;
+}
 function newSession(req, res, user) {
   const token = crypto.randomBytes(32).toString("base64url");
   db.sessions[tokenKey(token)] = { userId: user.id, created: Date.now(), last: Date.now(), dev: deviceOf(req.headers["user-agent"]) };
@@ -438,7 +481,10 @@ function userFromCookie(req) {
   const sess = m ? db.sessions[tokenKey(m[1])] : null;
   return sess ? db.users[sess.userId] : null;
 }
-const meView = u => ({ ...pubUser(u), statusPref: u.status || "online", email: maskEmail(u.email), emailVerified: !!u.emailVerified, admin: isAdmin(u), planInfo: u.plan && planOf(u) ? { tier: u.plan.tier, until: u.plan.until } : null });
+const meView = u => ({ ...pubUser(u), statusPref: u.status || "online", email: maskEmail(u.email), emailVerified: !!u.emailVerified, admin: isAdmin(u), supreme: isOwnerUser(u),
+  planInfo: u.plan && planOf(u) ? { tier: u.plan.tier, until: u.plan.until } : null,
+  accent: rankOf(u) >= NEED.accent && u.accent ? u.accent : null, accentSaved: u.accent || null, ringPref: u.ring || "",
+  msgMax: MSG_MAX[rankOf(u)] });
 const failKey = new Map();   // tentativas erradas por conta: bloqueio de 15 min após 8 erros
 
 async function handleAuth(req, res, kind) {
@@ -454,6 +500,7 @@ async function handleAuth(req, res, kind) {
       if (!EMAIL_RE.test(email)) throw new HttpError(400, "Digite um e-mail válido.");
       if (password.length < 8 || password.length > 128) throw new HttpError(400, "A senha precisa ter pelo menos 8 caracteres.");
       if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) throw new HttpError(400, "Use letras e números na senha.");
+      if (db.settings.regOpen === false) throw new HttpError(403, "Os cadastros estão fechados no momento. Tente mais tarde.");
       const key = username.toLowerCase();
       if (byName.has(key) || ADMIN_SET.has(key) || /^aury([ _.-]?(ia|ai|bot))?$/.test(key)) throw new HttpError(409, "Esse nome de usuário já está em uso.");
       if (byEmail.has(email)) throw new HttpError(409, "Já existe uma conta com esse e-mail. Use “Esqueci a senha” se precisar.");
@@ -629,7 +676,8 @@ function backupSchedule() {
 }
 async function serveBackup(req, res, id) {
   const a = userFromBearer(req);
-  if (!a || !a.user || !isAdmin(a.user)) return sendJson(res, 403, { error: "Apenas ADMs." });
+  // o backup tem e-mails e senhas (criptografadas) de todo mundo: só o ADM Supremo baixa
+  if (!a || !a.user || !isOwnerUser(a.user)) return sendJson(res, 403, { error: "Só o ADM Supremo pode baixar backups." });
   const buf = await backupGet(id);
   if (!buf) return sendJson(res, 404, { error: "Backup não encontrado." });
   res.writeHead(200, { "content-type": "application/gzip", "content-length": buf.length, "content-disposition": `attachment; filename="${id}.json.gz"`, "cache-control": "no-store" });
@@ -765,12 +813,43 @@ io.use((socket, next) => {
   // app de PC antigo (NEXORA) foi desativado: só conecta o app novo ou o navegador
   const ua = String(socket.handshake.headers["user-agent"] || "");
   if (/\bNEXORA\/\d/.test(ua) && /Electron\//.test(ua)) return next(new Error("update"));
+  // modo manutenção: só a equipe entra
+  if (db.settings.maintenance && !isAdmin(user)) { const e = new Error("maintenance"); e.data = { text: db.settings.maintenance }; return next(e); }
+  // versão mínima do app (Android / PC): depois do prazo, o app antigo não entra mais
+  const upd = updateNeeded(appInfo(ua));
+  if (upd && upd.hard) { const e = new Error("update"); e.data = upd; return next(e); }
+  socket.data.outdated = upd || null;
   if (needsVerify(user)) return next(new Error("verify"));
   socket.data.uid = user.id;
   socket.data.tk = tokenKey(t);
   if (sess) { sess.last = Date.now(); if (!sess.dev) sess.dev = deviceOf(socket.handshake.headers["user-agent"]); }
   next();
 });
+
+/* ---------- versão dos apps (Android e PC) ---------- */
+const DOWNLOADS = {
+  android: "https://github.com/duduzinho5455-sketch/nexora/releases/download/android/Auryx-Nexos.apk",
+  desktop: "https://github.com/duduzinho5455-sketch/nexora/releases/latest/download/Auryx-Nexos-Setup.exe"
+};
+function appInfo(ua) {
+  ua = String(ua || "");
+  let m = /AuryxAndroid\/([\d.]+)/.exec(ua);
+  if (m) return { kind: "android", ver: m[1] };
+  m = /AuryxDesktop\/([\d.]+)/.exec(ua);
+  if (m) return { kind: "desktop", ver: m[1] };
+  if (/Electron\//.test(ua)) return { kind: "desktop", ver: "0" };   // app de PC antigo (não diz a versão)
+  return { kind: "web", ver: "" };
+}
+function verLt(a, b) {
+  const x = String(a).split(".").map(Number), y = String(b).split(".").map(Number);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d < 0; }
+  return false;
+}
+function updateNeeded(info) {
+  const m = db.settings.minApp;
+  if (!m || info.kind === "web" || !m[info.kind] || !verLt(info.ver, m[info.kind])) return null;
+  return { hard: Date.now() >= (m.since || 0), kind: info.kind, min: m[info.kind], ver: info.ver, url: DOWNLOADS[info.kind], since: m.since || 0 };
+}
 
 function emitToPeers(uid, ev, data) {
   const rooms = new Set(userServers(uid).map(s => "s:" + s.id));
@@ -800,6 +879,31 @@ function pushTo(uid, payload) {
       if (e && (e.statusCode === 404 || e.statusCode === 410)) { u.push = u.push.filter(x => x.endpoint !== sub.endpoint); save(); }
     });
   }
+}
+// notificação para TODAS as contas com push ligado (aviso geral da equipe); devolve quantos aparelhos
+function pushAll(payload) {
+  if (!webpush || !db.vapid) return 0;
+  const body = JSON.stringify({ icon: "/icons/icon-192.png", ...payload });
+  let n = 0;
+  for (const u of Object.values(db.users)) {
+    if (!Array.isArray(u.push) || !u.push.length || u.banned) continue;
+    for (const sub of u.push.slice()) {
+      n++;
+      webpush.sendNotification(sub, body, { TTL: 24 * 3600, urgency: "normal" }).catch(e => {
+        if (e && (e.statusCode === 404 || e.statusCode === 410)) { u.push = u.push.filter(x => x.endpoint !== sub.endpoint); save(); }
+      });
+    }
+  }
+  return n;
+}
+/* Métricas do painel: mensagens por minuto (memória) e um retrato a cada 5 min das últimas 24 h (banco) */
+const msgClock = [];
+function countMsg() { const now = Date.now(); msgClock.push(now); while (msgClock.length && msgClock[0] < now - 3600e3) msgClock.shift(); }
+function sampleMetrics() {
+  const now = Date.now();
+  db.metrics.push({ at: now, on: online.size, vc: voice.size, m: msgClock.filter(t => t > now - 300e3).length });
+  if (db.metrics.length > 288) db.metrics.splice(0, db.metrics.length - 288);
+  save();
 }
 function mentionedIn(text, memberIds) {
   const t = String(text || "").toLowerCase();
@@ -857,7 +961,7 @@ setInterval(pollSteam, 60000).unref();
 const VOICE_GRACE = 60000;
 /* Versão do app: muda a cada atualização do site. O app compara e se atualiza sozinho. */
 const APP_VER = (() => { try { return crypto.createHash("sha1").update(fs.readFileSync(path.join(__dirname, "public", "app.js"))).update(fs.readFileSync(path.join(__dirname, "public", "style.css"))).digest("hex").slice(0, 10); } catch { return String(Date.now()); } })();
-const NEWS_OLD = `🚀 A Auryx Nexavória foi atualizada!
+const NEWS_OLD = `🚀 A Auryx Nexos foi atualizada!
 
 Novidades: cargos e permissões nos servidores, bot de música que toca a música inteira, voz mais confiável, transmissão de tela melhor (principalmente no celular), configurações reorganizadas e VIP renovado.
 
@@ -866,7 +970,7 @@ const newsSent = new Set();
 /* ---------- pedidos do VIP: visão e avisos ---------- */
 function orderView(o, full) {
   const u = db.users[o.uid], f = db.files[o.receipt];
-  const v = { id: o.id, uid: o.uid, tier: o.tier, plan: PLANS[o.tier].name, amount: o.amount, status: o.status, created: o.created, updated: o.updated, reason: o.reason || "", note: o.note || "", decidedBy: o.by ? (db.users[o.by] || {}).username || "?" : "", decidedAt: o.decided || 0 };
+  const v = { id: o.id, uid: o.uid, tier: o.tier, plan: PLANS[o.tier].name + (cycleOf(o.cycle) === "q" ? " Trimestral" : ""), cycle: cycleOf(o.cycle), amount: o.amount, status: o.status, created: o.created, updated: o.updated, reason: o.reason || "", note: o.note || "", decidedBy: o.by ? (db.users[o.by] || {}).username || "?" : "", decidedAt: o.decided || 0 };
   v.user = u ? pubUser(u) : null;
   v.receipt = f ? { id: o.receipt, n: f.n, t: f.t, s: f.s } : null;
   if (full && u) v.userEmail = u.email || "";
@@ -1031,6 +1135,7 @@ const TEMPLATES = {
   study: [["boas-vindas", "text"], ["geral", "text"], ["duvidas", "text", "Pergunte sem medo"], ["materiais", "text", "Links, resumos e arquivos"], ["Sala de estudos", "voice"], ["Foco total", "voice"]],
   community: [["avisos", "text", "Novidades da comunidade"], ["boas-vindas", "text"], ["geral", "text"], ["sugestoes", "text"], ["Palco", "voice"], ["Bate-papo", "voice"]]
 };
+const cleanEmoji = e => { e = str(e, 16); return !e || /[<>&"'`\s]/.test(e) || /^[\x20-\x7e]+$/.test(e) ? "" : e; };
 function cleanChannelName(name, type) {
   if (type === "voice") return str(name, 32).replace(/\s+/g, " ");
   return str(name, 32).toLowerCase().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_-]/gu, "").replace(/-{2,}/g, "-");
@@ -1042,7 +1147,7 @@ function cleanChannelName(name, type) {
 /* ------------------------------------------------------------------ */
 const AI = require("./ai");
 const AI_ID = "aury";
-const AI_LIMIT = { plus: 40, pro: 120, max: 300 };          // mensagens por dia no bate-papo VIP
+const AI_LIMIT = { plus: 60, pro: 200, max: 500 };          // mensagens por dia no bate-papo VIP
 const AI_TICKET_DAY = 25;                                   // respostas por dia em cada atendimento
 const aiBusy = new Set();
 const brl = c => "R$ " + (c / 100).toFixed(2).replace(".", ",");
@@ -1054,17 +1159,17 @@ const ORDER_STATUS = {
   rejected: "RECUSADO pela equipe",
   expired: "EXPIRADO — ficou 7 dias sem resposta; se o Pix caiu, um ADM ainda pode aprovar"
 };
-const AI_BASE = `Você é a Aury, assistente com IA da Auryx Nexavória, uma plataforma brasileira de comunidade: servidores com canais de texto, salas de voz com transmissão de tela e câmera, chat dentro da call, atividades na call (ouvir juntos, lousa, jogo da velha), jogos dentro do app (como o Bunker 9), mensagens e chamadas privadas, sobreposição de jogo no app de PC e planos VIP (Plus, Pro e Max). Funciona no app para Windows, no app para Android e no navegador (https://nexora-ujw6.onrender.com — o site com os downloads fica em /site).
+const AI_BASE = `Você é a Aury, assistente com IA da Auryx Nexos, uma plataforma brasileira de comunidade: servidores com canais de texto, salas de voz com transmissão de tela e câmera, chat dentro da call, atividades na call (ouvir juntos, lousa, jogo da velha), jogos dentro do app (como o Bunker 9), mensagens e chamadas privadas, sobreposição de jogo no app de PC e planos VIP (Plus, Pro e Max). Funciona no app para Windows, no app para Android e no navegador (https://nexora-ujw6.onrender.com — o site com os downloads fica em /site).
 Fale sempre em português do Brasil, num tom leve, simpático e direto, com frases curtas. No máximo um emoji por mensagem. Pode usar **negrito** e listas simples.
 Nunca peça senha, código de verificação, dados de cartão, CPF ou dados bancários; se alguém oferecer, diga para não enviar.
 Não invente funções que o app não tem. Se não souber algo, diga que não sabe.`;
 function aiPlansText() {
-  return Object.values(PLANS).map(p => `- ${p.name}: ${brl(p.price)} por ${PLAN_DAYS} dias. Benefícios: ${p.benefits.join("; ")}.`).join("\n");
+  return Object.values(PLANS).map(p => `- ${p.name}: ${brl(p.price)} por ${PLAN_DAYS} dias (mensal) ou ${brl(p.price3)} por 90 dias (trimestral, sai mais barato). Benefícios: ${p.benefits.join("; ")}.`).join("\n");
 }
 const AI_TICKET_RULES = `Agora você está no ATENDIMENTO DE PAGAMENTO do VIP, falando com quem está comprando um plano.
 Planos:
 ${aiPlansText()}
-Como funciona a compra: na aba Premium a pessoa escolhe o plano, paga pelo link de cobrança Pix do Nubank, envia o comprovante e o pedido abre este atendimento. Um ADM confere se o valor caiu na conta e aprova; aí o plano é liberado na hora, por ${PLAN_DAYS} dias. A pessoa recebe uma notificação quando o pedido é decidido.
+Como funciona a compra: na aba Premium a pessoa escolhe o plano, paga pelo link de cobrança Pix do Nubank, envia o comprovante e o pedido abre este atendimento. Um ADM confere se o valor caiu na conta e aprova; aí o plano é liberado na hora, por ${PLAN_DAYS} dias (mensal) ou 90 dias (trimestral). A pessoa recebe uma notificação quando o pedido é decidido.
 Regras:
 - Você NÃO aprova, não recusa e não libera pagamento nem plano, e não promete prazo exato: só um ADM faz isso. Se perguntarem, explique que a equipe confere e responde aqui mesmo.
 - Só diga que o pagamento foi confirmado se o status do pedido for APROVADO.
@@ -1115,7 +1220,7 @@ async function aiTicketRun(o) {
     return { role: "user", content: `[Mensagem do ADM ${adm ? adm.username : "da equipe"}]: ${m.t || ""}${files}` };
   }));
   if (!history.length) return;
-  const status = `Pedido atual: plano ${PLANS[o.tier].name} (${brl(o.amount)}), feito por ${buyer ? buyer.username : "cliente"}. Status: ${ORDER_STATUS[o.status] || o.status}${o.status === "rejected" && o.reason ? ` (motivo: ${o.reason})` : ""}.`;
+  const status = `Pedido atual: plano ${PLANS[o.tier].name} ${CYCLES[cycleOf(o.cycle)].name.toLowerCase()} (${brl(o.amount)}), feito por ${buyer ? buyer.username : "cliente"}. Status: ${ORDER_STATUS[o.status] || o.status}${o.status === "rejected" && o.reason ? ` (motivo: ${o.reason})` : ""}.`;
   const typing = setInterval(() => io.to(["u:" + o.uid, "admins"]).emit("typing", { channelId: cid, userId: AI_ID }), 3500);
   io.to(["u:" + o.uid, "admins"]).emit("typing", { channelId: cid, userId: AI_ID });
   let m = null, lastSent = 0;
@@ -1205,8 +1310,10 @@ io.on("connection", socket => {
       now: Date.now(),
       voice: [...voice].filter(([, v]) => ids.has(v.sid)).map(([k, v]) => vView(k, v)),
       iceServers: ICE_SERVERS,
-      limits: { voice: VOICE_LIMIT },
-      ver: APP_VER
+      limits: { voice: VOICE_LIMIT, msg: MSG_MAX[rankOf(me())] },
+      ver: APP_VER,
+      announce: db.settings.announce || null,
+      outdated: socket.data.outdated || null
     });
     // app aberto numa versão antiga (não sabe se atualizar sozinho): avisa uma vez para recarregar
     if (!(socket.handshake.auth && socket.handshake.auth.v) && !newsSent.has(uid)) {
@@ -1217,7 +1324,10 @@ io.on("connection", socket => {
 
   // Limitadores simples por conexão
   const mk = (n, ms) => { const b = { t: 0, n: 0 }; return (cost = 1) => { const now = Date.now(); if (now - b.t > ms) { b.t = now; b.n = 0; } b.n += cost; return b.n <= n; }; };
-  const general = mk(60, 5000), chat = mk(6, 4000), signals = mk(400, 5000), typing = mk(3, 6000), passLimit = mk(5, 60000);
+  const general = mk(60, 5000), signals = mk(400, 5000), typing = mk(3, 6000), passLimit = mk(5, 60000);
+  // envio de mensagens: quem assina pode mandar mais seguidas (o limite acompanha o plano atual)
+  const chatB = { t: 0, n: 0 };
+  const chat = () => { const now = Date.now(); if (now - chatB.t > 4000) { chatB.t = now; chatB.n = 0; } chatB.n++; return chatB.n <= MSG_RATE[rankOf(me())]; };
 
   const on = (ev, fn) => socket.on(ev, async (data, ack) => {
     if (typeof ack !== "function") ack = () => {};
@@ -1287,7 +1397,7 @@ io.on("connection", socket => {
 
   on("send", ({ channelId, text, replyTo, nonce, files }) => {
     const { s, c, rooms, dm } = getTarget(channelId);
-    text = typeof text === "string" ? text.replace(/\r\n?/g, "\n").replace(/\n{4,}/g, "\n\n\n").trim().slice(0, 2000) : "";
+    text = typeof text === "string" ? text.replace(/\r\n?/g, "\n").replace(/\n{4,}/g, "\n\n\n").trim().slice(0, MSG_MAX[rankOf(me())]) : "";
     const att = [];
     if (Array.isArray(files)) for (const fid of files.slice(0, 10)) {
       const f = typeof fid === "string" ? db.files[fid] : null;
@@ -1310,6 +1420,7 @@ io.on("connection", socket => {
       }
     }
     list.push(m);
+    countMsg();
     if (list.length > HISTORY_KEEP) list.splice(0, list.length - HISTORY_KEEP);
     save();
     io.to(rooms).emit("msg", { channelId: c.id, serverId: s ? s.id : null, m, nonce: str(nonce, 40) });
@@ -1334,7 +1445,7 @@ io.on("connection", socket => {
   on("edit", ({ channelId, id, text }) => {
     const { c, m, rooms } = findMsg(channelId, id);
     if (m.a !== uid) fail("Você só pode editar suas mensagens.");
-    text = typeof text === "string" ? text.replace(/\r\n?/g, "\n").trim().slice(0, 2000) : "";
+    text = typeof text === "string" ? text.replace(/\r\n?/g, "\n").trim().slice(0, MSG_MAX[rankOf(me())]) : "";
     if (!text) fail("A mensagem está vazia.");
     if (text === m.t) return { ok: true };
     m.t = text; m.e = Date.now();
@@ -1406,7 +1517,7 @@ io.on("connection", socket => {
     return { id: s.id };
   });
 
-  on("server:update", ({ serverId, name, icon, color, description, isPublic }) => {
+  on("server:update", ({ serverId, name, icon, color, description, isPublic, banner, accent }) => {
     const s = getServer(serverId);
     needPerm(s, "server");
     if (name !== undefined) { const n = str(name, 40); if (n.length < 2) fail("Nome muito curto."); s.name = n; }
@@ -1414,6 +1525,9 @@ io.on("connection", socket => {
     if (color !== undefined && isColor(color)) s.color = color;
     if (description !== undefined) s.description = str(description, 200);
     if (isPublic !== undefined) s.public = !!isPublic;
+    // personalização: banner do servidor (imagem enviada) e cor temática aplicada no app de quem está dentro
+    if (banner !== undefined) { const b = cleanPic(banner); s.banner = b.startsWith("/f/") ? b : ""; }
+    if (accent !== undefined) s.accent = isColor(accent) ? accent : "";
     save();
     io.to("s:" + s.id).emit("server:update", { server: serverMeta(s) });
   });
@@ -1450,22 +1564,24 @@ io.on("connection", socket => {
     for (const p of list) if (!hasPerm(s, uid, p)) fail("Você não pode dar uma permissão que você não tem.");
     return list;
   };
-  on("role:save", ({ serverId, roleId, name, color, perms, hoist }) => {
+  on("role:save", ({ serverId, roleId, name, color, perms, hoist, icon }) => {
     const s = getServer(serverId);
     needPerm(s, "roles");
     s.roles = s.roles || [];
     name = str(name, 32).replace(/\s+/g, " ");
     if (!name) fail("Dê um nome ao cargo.");
     color = isColor(color) ? color : "#99aab5";
+    icon = str(icon, 16);
+    if (/[<>&"'`]/.test(icon) || /^[ -~]+$/.test(icon)) icon = "";   // só emoji
     if (roleId) {
       const i = s.roles.findIndex(r => r.id === roleId);
       if (i < 0) fail("Cargo não encontrado.");
       if (i >= topPos(s, uid)) fail("Você só pode editar cargos abaixo do seu.");
-      Object.assign(s.roles[i], { name, color, perms: cleanPerms(s, perms), hoist: !!hoist });
+      Object.assign(s.roles[i], { name, color, icon, perms: cleanPerms(s, perms), hoist: !!hoist });
       serverLog(s, "role:edit", "", { role: name });
     } else {
       if (s.roles.length >= MAX_ROLES) fail(`Máximo de ${MAX_ROLES} cargos por servidor.`);
-      s.roles.unshift({ id: newId(), name, color, perms: cleanPerms(s, perms), hoist: !!hoist });   // nasce no fim da lista
+      s.roles.unshift({ id: newId(), name, color, icon, perms: cleanPerms(s, perms), hoist: !!hoist });   // nasce no fim da lista
       serverLog(s, "role:create", "", { role: name });
     }
     save(); emitRoles(s);
@@ -1613,14 +1729,14 @@ io.on("connection", socket => {
   });
 
   /* ---------- Canais ---------- */
-  on("channel:create", ({ serverId, name, type, topic }) => {
+  on("channel:create", ({ serverId, name, type, topic, emoji, cat }) => {
     const s = getServer(serverId);
     needPerm(s, "channels");
     type = type === "voice" ? "voice" : "text";
     name = cleanChannelName(name, type);
     if (!name) fail("Dê um nome ao canal.");
     if (s.channels.length >= MAX_CHANNELS) fail("Limite de canais atingido.");
-    const c = { id: newId(), name, type, topic: type === "text" ? str(topic, 160) : "" };
+    const c = { id: newId(), name, type, topic: type === "text" ? str(topic, 160) : "", emoji: cleanEmoji(emoji), cat: str(cat, 30) };
     s.channels.push(c);
     chanIndex.set(c.id, s.id);
     save();
@@ -1628,11 +1744,13 @@ io.on("connection", socket => {
     return { id: c.id };
   });
 
-  on("channel:update", ({ channelId, name, topic }) => {
+  on("channel:update", ({ channelId, name, topic, emoji, cat }) => {
     const { s, c } = getChannel(channelId);
     needPerm(s, "channels");
     if (name !== undefined) { const n = cleanChannelName(name, c.type); if (!n) fail("Nome inválido."); c.name = n; }
     if (topic !== undefined && c.type === "text") c.topic = str(topic, 160);
+    if (emoji !== undefined) c.emoji = cleanEmoji(emoji);
+    if (cat !== undefined) c.cat = str(cat, 30).replace(/\s+/g, " ");
     save();
     io.to("s:" + s.id).emit("channel:update", { serverId: s.id, channel: chanView(c) });
   });
@@ -1662,17 +1780,36 @@ io.on("connection", socket => {
   });
 
   /* ---------- Perfil ---------- */
-  on("profile:update", async ({ color, avatar, about, status, steam, game, banner, theme, pron, cs, fx, pfx }) => {
+  on("profile:update", async ({ color, avatar, about, status, steam, game, banner, bannerStill, theme, pron, cs, fx, pfx, ring, accent }) => {
     const u = me();
     // benefícios Premium: o servidor confere o plano (limpar é sempre permitido)
     const r = rankOf(u);
     const need = (k, val) => { if (val && r < NEED[k]) fail(`Esse recurso faz parte do plano ${RANK_NAME[NEED[k]]}. Veja em Configurações › Planos.`); };
-    if (banner !== undefined) { const b = isColor(banner) ? banner : cleanPic(banner).startsWith("/f/") ? cleanPic(banner) : ""; need("banner", b); u.banner = b; }
+    // imagem enviada por esta conta: confere o tipo e o peso guardados no envio
+    const ownImg = (url, max) => {
+      const m = FILE_URL_RE.exec(url || ""), f = m && db.files[m[1]];
+      if (!f || f.o !== uid || !/^image\//.test(f.t)) fail("Envie uma imagem (PNG, JPG, WEBP ou GIF).");
+      if (f.s > max) fail(`Imagem pesada demais (máximo ${Math.round(max / 1048576)} MB).`);
+      return f;
+    };
+    if (banner !== undefined) {
+      const b = isColor(banner) ? banner : cleanPic(banner).startsWith("/f/") ? cleanPic(banner) : "";
+      need("banner", b);
+      let gif = false;
+      if (b.startsWith("/f/") && b !== u.banner) gif = ownImg(b, BANNER_GIF_MAX).t === "image/gif";
+      else if (b.startsWith("/f/")) gif = !!u.bannerStill;
+      u.banner = b;
+      // banner animado: guarda também o 1º quadro (aparece com "reduzir animações" ou se o GIF não carregar)
+      if (!gif) u.bannerStill = "";
+      else if (bannerStill !== undefined) { const st = cleanPic(bannerStill); u.bannerStill = st.startsWith("/f/") && ownImg(st, 2 * 1048576) ? st : ""; }
+    }
+    if (ring !== undefined) { const v = RINGS[ring] ? ring : ""; if (v && r < RINGS[v]) fail(`Essa moldura faz parte do plano ${RANK_NAME[RINGS[v]]}.`); u.ring = v; }
+    if (accent !== undefined) { const a = Array.isArray(accent) && accent.length === 2 && accent.every(isColor) ? accent : null; need("accent", a); u.accent = a; }
     if (theme !== undefined) { const t = Array.isArray(theme) && theme.length === 2 && theme.every(isColor) ? theme : null; need("theme", t); u.theme = t; }
     if (pron !== undefined) u.pron = str(pron, 24);
     if (cs !== undefined) { const t = str(cs && cs.t, 60), e = str(cs && cs.e, 16); need("cs", t || e); u.cs = t || e ? { t, e } : null; }
     if (fx !== undefined) { const v = ["", "grad", "glow", "rainbow"].includes(fx) ? fx : ""; need("fx", v); u.fx = v; }
-    if (pfx !== undefined) { const v = ["", "aurora", "stars", "fire", "neon"].includes(pfx) ? pfx : ""; need("pfx", v); u.pfx = v; }
+    if (pfx !== undefined) { const v = PFXS.includes(pfx) ? pfx : ""; need("pfx", v); u.pfx = v; }
     if (avatar !== undefined && typeof avatar === "string" && avatar.startsWith("/f/")) need("avatarFile", true);
     if (steam !== undefined) {
       const sid = await resolveSteam(steam);
@@ -1686,11 +1823,14 @@ io.on("connection", socket => {
     save();
     emitToPeers(uid, "user:update", { user: pubUser(u) });
     io.to("u:" + uid).emit("user:update", { user: pubUser(u), statusPref: u.status });
+    if (accent !== undefined || ring !== undefined) io.to("u:" + uid).emit("me:update", { me: meView(u) });
     if (steam) pollSteam();
   });
 
   /* ---------- planos, pedidos Pix e atendimento ---------- */
   const requireAdmin = () => { const u = me(); if (!isAdmin(u)) fail("Apenas ADMs podem fazer isso."); return u; };
+  // ações críticas: só o ADM Supremo (dono do app)
+  const requireSupreme = () => { const u = me(); if (!isOwnerUser(u)) fail("Só o ADM Supremo pode fazer isso."); return u; };
   const ticketMsg = (o, authorId, kind, text, files) => {
     const cid = "t." + o.id;
     const list = db.messages[cid] || (db.messages[cid] = []);
@@ -1753,7 +1893,9 @@ io.on("connection", socket => {
   on("plans:get", () => {
     const u = me();
     return {
-      plans: Object.values(PLANS).map(p => ({ tier: p.tier, name: p.name, price: p.price, link: p.link, benefits: p.benefits, rank: p.rank })),
+      // link de cobrança de cada ciclo (o ADM Supremo pode trocar no painel); sem link, o app mostra a chave Pix
+      plans: Object.values(PLANS).map(p => ({ tier: p.tier, name: p.name, price: p.price, price3: p.price3, link: payLink(p, "m"), link3: payLink(p, "q"), benefits: p.benefits, rank: p.rank })),
+      pixKey: db.settings.pixKey || "",
       mine: planOf(u) ? { tier: u.plan.tier, until: u.plan.until, since: u.plan.since || 0 } : null,
       last: !planOf(u) && u.plan && u.plan.until ? { tier: u.plan.tier, until: u.plan.until } : null,
       log: (u.planLog || []).slice(-20).reverse().map(x => ({ ...x, name: (PLANS[x.tier] || {}).name || x.tier })),
@@ -1762,10 +1904,11 @@ io.on("connection", socket => {
     };
   });
 
-  on("order:create", ({ tier, receipt, note }) => {
-    const u = me();
+  on("order:create", ({ tier, receipt, note, cycle }) => {
     const p = PLANS[tier];
     if (!p) fail("Plano inválido.");
+    cycle = cycleOf(cycle);
+    const price = priceOf(p, cycle);
     const f = typeof receipt === "string" ? db.files[receipt] : null;
     if (!f || f.o !== uid || !f.p) fail("Envie o comprovante do pagamento antes de continuar.");
     if (f.u) fail("Esse comprovante já foi usado em outro pedido.");
@@ -1773,9 +1916,9 @@ io.on("connection", socket => {
     const open = Object.values(db.orders).filter(o => o.uid === uid && (o.status === "pending" || o.status === "review"));
     if (open.length >= 3) fail("Você já tem pedidos em análise. Aguarde a resposta da equipe.");
     f.u = 1;
-    const o = { id: newId(), uid, tier, amount: p.price, status: "pending", receipt, note: str(note, 500), created: Date.now(), updated: Date.now() };
+    const o = { id: newId(), uid, tier, cycle, amount: price, status: "pending", receipt, note: str(note, 500), created: Date.now(), updated: Date.now() };
     db.orders[o.id] = o;
-    ticketMsg(o, uid, "", `Pedido do plano ${p.name} (R$ ${(p.price / 100).toFixed(2).replace(".", ",")}). Segue o comprovante do Pix.${o.note ? "\n\n" + o.note : ""}`, [{ id: receipt, n: f.n, t: f.t, s: f.s }]);
+    ticketMsg(o, uid, "", `Pedido do plano ${p.name} ${CYCLES[cycle].name.toLowerCase()} — ${CYCLES[cycle].days} dias (${brl(price)}). Segue o comprovante do Pix.${o.note ? "\n\n" + o.note : ""}`, [{ id: receipt, n: f.n, t: f.t, s: f.s }]);
     ticketMsg(o, uid, "ocreate", "");
     save();
     pushOrder(o);
@@ -1818,7 +1961,7 @@ io.on("connection", socket => {
     const u = db.users[o.uid];
     if (!u) fail("O usuário não existe mais.");
     o.status = "approved"; o.by = uid; o.decided = o.updated = Date.now();
-    grantPlan(u, o.tier, PLAN_DAYS, o.id);
+    grantPlan(u, o.tier, CYCLES[cycleOf(o.cycle)].days, o.id);
     audit("order:approve", o.uid, { order: o.id, tier: o.tier, amount: o.amount });
     ticketMsg(o, uid, "oapprove", PLANS[o.tier].name);
     pushTo(o.uid, { title: "Pagamento aprovado! 🎉", body: `Seu plano ${PLANS[o.tier].name} foi liberado.`, url: "/?abrir=premium", tag: "order:" + o.id });
@@ -1923,7 +2066,8 @@ io.on("connection", socket => {
     const adm = requireAdmin();
     const u = db.users[userId];
     if (!u) fail("Usuário não encontrado.");
-    if (isAdmin(u)) fail("Não dá para suspender um ADM.");
+    if (isOwnerUser(u)) fail("O ADM Supremo não pode ser suspenso.");
+    if (isAdmin(u)) fail(isOwnerUser(adm) ? "Tire o cargo de ADM dessa pessoa antes de suspender." : "Não dá para suspender um ADM.");
     if (u.id === adm.id) fail("Você não pode suspender a si mesmo.");
     reason = str(reason, 300);
     u.banned = { at: Date.now(), by: uid, reason };
@@ -1936,7 +2080,8 @@ io.on("connection", socket => {
     const adm = requireAdmin();
     const u = db.users[userId];
     if (!u) fail("Usuário não encontrado.");
-    if (isAdmin(u) && u.id !== adm.id) fail("Não dá para trocar a senha de outro ADM.");
+    if (isOwnerUser(u) && u.id !== adm.id) fail("Ninguém troca a senha do ADM Supremo.");
+    if (isAdmin(u) && u.id !== adm.id && !isOwnerUser(adm)) fail("Não dá para trocar a senha de outro ADM.");
     password = typeof password === "string" ? password : "";
     if (password.length < 8 || password.length > 128 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) fail("A nova senha precisa ter 8+ caracteres, com letras e números.");
     u.salt = crypto.randomBytes(16).toString("hex");
@@ -1977,7 +2122,12 @@ io.on("connection", socket => {
       msgs, msgsDay, subs, pending: orders.filter(o => o.status === "pending" || o.status === "review").length,
       revenueMonth: paid.filter(o => (o.decided || o.updated) >= monthStart.getTime()).reduce((a, o) => a + o.amount, 0), revenueTotal: paid.reduce((a, o) => a + o.amount, 0), paidCount: paid.length,
       ai: AI.configured(), aiName: AI.provider(), mail: MAIL_ON, turn: !!process.env.TURN_URLS, db: pg ? "PostgreSQL" : "arquivo", lastBackup: bl[0] ? bl[0].at : 0,
-      uptime: Math.round(process.uptime()), mem: Math.round(process.memoryUsage().rss / 1048576)
+      uptime: Math.round(process.uptime()), mem: Math.round(process.memoryUsage().rss / 1048576),
+      // tempo real
+      sockets: io.engine.clientsCount, msgsMin: msgClock.filter(t => t > now - 60e3).length, msgsHour: msgClock.filter(t => t > now - 3600e3).length,
+      series: db.metrics.slice(-288), supreme: isOwnerUser(me()), admins: [...ADMIN_SET].length,
+      settings: { maintenance: !!db.settings.maintenance, regOpen: db.settings.regOpen !== false, minApp: db.settings.minApp, announce: db.settings.announce ? db.settings.announce.title : "" },
+      apps: [...io.sockets.sockets.values()].reduce((a, k) => { const t = appInfo(k.handshake.headers["user-agent"]).kind; a[t] = (a[t] || 0) + 1; return a; }, {})
     };
   });
   on("admin:user", ({ userId }) => {
@@ -2018,29 +2168,113 @@ io.on("connection", socket => {
     return { ok: true };
   });
   on("admin:backups", async () => {
-    requireAdmin();
+    requireSupreme();
     const list = await backupList();
     return { list, running: backupState.running, mail: backupState.lastMail, every: BACKUP_EVERY, keep: BACKUP_KEEP };
   });
   on("admin:backup:now", async () => {
-    requireAdmin();
+    requireSupreme();
     const b = await backupNow("manual");
     audit("backup:now", "", { size: b.size });
     save();
     return { backup: b };
   });
-  on("admin:broadcast", ({ text }) => {
+  on("admin:broadcast", ({ text, title, keep, push }) => {
     requireAdmin();
-    text = str(text, 500);
+    text = str(text, 1500);
+    title = str(title, 80);
     if (text.length < 3) fail("Escreva o aviso.");
-    io.emit("announce", { text, by: me().username, at: Date.now() });
-    audit("broadcast", uid, { reason: text });
+    // fixar (aparece também para quem entrar depois) e mandar notificação para todos: só o ADM Supremo
+    if ((keep || push) && !isOwnerUser(me())) fail("Só o ADM Supremo pode fixar o aviso ou mandar notificação para todos.");
+    const a = { id: newId(), title: title || "Aviso da equipe Auryx", text, by: me().username, at: Date.now() };
+    if (keep) { db.settings.announce = a; save(); }
+    io.emit("announce", a);
+    let sent = 0;
+    if (push) sent = pushAll({ title: a.title, body: text.slice(0, 180), url: "/", tag: "announce:" + a.id });
+    audit("broadcast", uid, { reason: (title ? title + ": " : "") + text.slice(0, 200), push: sent });
+    save();
+    return { ok: true, push: sent };
   });
 
-  on("admin:audit", () => {
+  /* --- ADM Supremo: equipe, sistema e desconexão geral --- */
+  const admList = () => [...ADMIN_SET].map(n => db.users[byName.get(n)]).filter(Boolean)
+    .map(u => ({ id: u.id, username: u.username, color: u.color, avatar: pubUser(u).avatar, supreme: isOwnerUser(u), env: ENV_ADMINS.includes(u.username.toLowerCase()), online: online.has(u.id) }));
+  on("admin:admins", () => { requireAdmin(); return { admins: admList() }; });
+  on("admin:admin:set", ({ userId, on: give }) => {
+    requireSupreme();
+    const u = db.users[userId];
+    if (!u) fail("Usuário não encontrado.");
+    if (isOwnerUser(u)) fail("O ADM Supremo é sempre ADM.");
+    if (!give && ENV_ADMINS.includes(u.username.toLowerCase())) fail("Esse ADM vem da configuração do servidor (ADMIN_USERS no Render). Tire de lá.");
+    if (give && u.banned) fail("Reative a conta antes.");
+    db.admins = db.admins.filter(x => x !== u.id);
+    if (give) db.admins.push(u.id);
+    refreshAdmins();
+    if (give) io.in("u:" + u.id).socketsJoin("admins"); else io.in("u:" + u.id).socketsLeave("admins");
+    io.to("u:" + u.id).emit("me:update", { me: meView(u) });
+    emitToPeers(u.id, "user:update", { user: pubUser(u) });
+    audit(give ? "admin:add" : "admin:remove", u.id, {});
+    save();
+    return { admins: admList() };
+  });
+  const settingsView = () => ({ ...db.settings, links: { ...db.settings.links }, defaults: Object.fromEntries(Object.values(PLANS).flatMap(p => [[p.tier + "_m", p.link], [p.tier + "_q", ""]])), downloads: DOWNLOADS });
+  on("admin:settings", () => { requireSupreme(); return { settings: settingsView() }; });
+  on("admin:settings:save", ({ maintenance, regOpen, pixKey, links, minApp }) => {
+    requireSupreme();
+    const st = db.settings, changed = [];
+    if (maintenance !== undefined) { st.maintenance = str(maintenance, 300); changed.push("manutenção " + (st.maintenance ? "ligada" : "desligada")); }
+    if (regOpen !== undefined) { st.regOpen = !!regOpen; changed.push("cadastros " + (st.regOpen ? "abertos" : "fechados")); }
+    if (pixKey !== undefined) { st.pixKey = str(pixKey, 140); changed.push("chave Pix"); }
+    if (links && typeof links === "object") {
+      for (const p of Object.values(PLANS)) for (const c of Object.keys(CYCLES)) {
+        const k = p.tier + "_" + c;
+        if (links[k] === undefined) continue;
+        const v = str(links[k], 400);
+        if (v && !/^https:\/\/\S+$/.test(v)) fail("Os links de pagamento precisam começar com https://");
+        if (v) st.links[k] = v; else delete st.links[k];
+      }
+      changed.push("links de pagamento");
+    }
+    if (minApp !== undefined) {
+      const ok = v => !v || /^\d{1,3}(\.\d{1,4}){0,2}$/.test(v);
+      if (!minApp) st.minApp = null;
+      else {
+        const android = str(minApp.android, 20), desktop = str(minApp.desktop, 20);
+        if (!ok(android) || !ok(desktop)) fail("Versão inválida (ex.: 3.0.0).");
+        const grace = Math.max(0, Math.min(72 * 60, Math.round(+minApp.graceMin || 0)));
+        st.minApp = android || desktop ? { android, desktop, since: Date.now() + grace * 60e3 } : null;
+      }
+      changed.push("versão mínima do app");
+    }
+    save();
+    if (st.maintenance) for (const k of io.sockets.sockets.values()) { const u = db.users[k.data.uid]; if (u && !isAdmin(u)) { k.emit("maintenance", { text: st.maintenance }); setTimeout(() => k.disconnect(true), 400); } }
+    audit("settings", "", { reason: changed.join(", ") });
+    return { settings: settingsView() };
+  });
+  on("admin:announce:clear", () => {
+    requireSupreme();
+    db.settings.announce = null;
+    save();
+    io.emit("announce:clear", {});
+    audit("announce:clear", "", {});
+  });
+  // desconecta TODO MUNDO de todos os aparelhos (quem pediu continua conectado neste aparelho)
+  on("admin:logout:all", ({ confirm }) => {
+    requireSupreme();
+    if (str(confirm, 40).toUpperCase() !== "DESCONECTAR TODOS") fail("Digite DESCONECTAR TODOS para confirmar.");
+    const n = logoutEveryone(socket.data.tk);
+    audit("logout:all", "", { n });
+    save();
+    return { ended: n };
+  });
+
+  on("admin:audit", ({ q, action }) => {
     requireAdmin();
     const name = id => (db.users[id] || {}).username || ((db.games || []).find(g => g.id === id) || {}).name || "?";
-    return { entries: db.audit.slice(-300).reverse().map(e => ({ ...e, adminName: name(e.admin), targetName: name(e.target) })) };
+    const k = str(q, 60).toLowerCase(), act = str(action, 40);
+    const all = db.audit.map(e => ({ ...e, adminName: name(e.admin), targetName: name(e.target) }));
+    const list = all.filter(e => (!act || e.action.split(":")[0] === act) && (!k || [e.adminName, e.targetName, JSON.stringify(e.details || {})].join(" ").toLowerCase().includes(k)));
+    return { entries: list.slice(-400).reverse(), total: all.length };
   });
 
   /* ---------- catálogo de jogos ---------- */
@@ -2102,7 +2336,7 @@ io.on("connection", socket => {
     if (mineF[other.id] === "out") fail("Pedido já enviado. Aguarde a resposta.");
     if (Object.keys(mineF).length >= 500) fail("Limite de amigos atingido.");
     if (mineF[other.id] === "in") { setFriend(uid, other.id, "friend"); setFriend(other.id, uid, "friend"); }
-    else { setFriend(uid, other.id, "out"); setFriend(other.id, uid, "in"); pushTo(other.id, { title: "Novo pedido de amizade", body: `${me().username} quer ser seu amigo na Auryx Nexavória`, url: "/?abrir=amigos", tag: "friend:" + uid }); }
+    else { setFriend(uid, other.id, "out"); setFriend(other.id, uid, "in"); pushTo(other.id, { title: "Novo pedido de amizade", body: `${me().username} quer ser seu amigo na Auryx Nexos`, url: "/?abrir=amigos", tag: "friend:" + uid }); }
     save();
     return { state: friendsOf(me())[other.id] };
   });
@@ -2395,9 +2629,49 @@ io.on("connection", socket => {
 
 server.keepAliveTimeout = 65000;   // maior que o do balanceador do Render, evita erros 502
 server.headersTimeout = 66000;
+/* ------------------------------------------------------------------ */
+/* Migração da atualização "Auryx Nexos" — roda UMA vez no primeiro boot */
+/* depois do deploy: desconecta todo mundo, exige o app novo (Android/PC) */
+/* depois de 30 min, fixa o aviso do novo nome e manda notificação.      */
+/* ------------------------------------------------------------------ */
+const NEXOS_MIGRATION = "2026-11-auryx-nexos";
+const NEXOS_ANNOUNCE = {
+  title: "✨ Bem-vindo à Auryx Nexos!",
+  text: `A Auryx Nexavória agora se chama Auryx Nexos — mesmo app, mesmos amigos e servidores, com nome e visual novos.
+
+🔐 Por segurança, todo mundo foi desconectado nesta atualização: é só entrar de novo com seu usuário (ou e-mail) e senha.
+
+🚀 Novidades:
+• Planos trimestrais com desconto (VIP, Pro e Max)
+• Mensagens maiores e mais seguidas — ainda mais para assinantes
+• Aurys: no Pro e no Max você escolhe a cor do app inteiro
+• Banner animado em GIF, molduras e partículas no perfil
+• Assinantes em destaque na lista de membros e no chat
+• Servidores com banner, cor temática, cargos com ícone e categorias de canais
+• Menu do Android corrigido (o botão voltar fecha menus e janelas) e visual novo no PC
+
+📲 Usa o app de Android ou de PC? Baixe a versão nova pelo aviso que aparece no app — a antiga para de funcionar em breve.`
+};
+function runMigrations() {
+  if (db.migrations.includes(NEXOS_MIGRATION)) return;
+  const now = Date.now();
+  const ended = logoutEveryone(null);
+  db.settings.minApp = { android: "3.0.0", desktop: "3.0.0", since: now + 30 * 60e3 };
+  db.settings.announce = { id: "nexos-1", ...NEXOS_ANNOUNCE, by: "Equipe Auryx", at: now };
+  db.migrations.push(NEXOS_MIGRATION);
+  db.audit.push({ at: now, admin: "", action: "migration", target: "", details: { reason: `Auryx Nexos: ${ended} sessões encerradas, app novo exigido em 30 min, aviso fixado` } });
+  save();
+  const sent = pushAll({ title: NEXOS_ANNOUNCE.title, body: "A Auryx Nexavória agora é Auryx Nexos! Entre de novo para ver as novidades.", url: "/", tag: "nexos-1" });
+  console.log(`  Migração ${NEXOS_MIGRATION}: ${ended} sessões encerradas, ${sent} notificações enviadas.`);
+}
+
 loadDb().then(async () => {
   try { await backupInit(); backupSchedule(); } catch (e) { console.error("Backup indisponível:", e.message); }
+  // cópia de segurança antes de mexer em tudo (só na primeira vez)
+  if (!db.migrations.includes(NEXOS_MIGRATION)) { try { await backupNow("antes da atualização Nexos"); } catch (e) { console.error("Backup antes da migração:", e.message); } }
+  try { runMigrations(); } catch (e) { console.error("Migração falhou:", e); }
   setTimeout(vipSweep, 30e3); setInterval(vipSweep, 3600e3).unref();
+  setInterval(sampleMetrics, 300e3).unref();
   server.listen(PORT, HOST, () => {
     console.log(`\n  ${APP_NAME} rodando em http://localhost:${PORT}`);
     const admins = [...ADMIN_SET].map(n => (byName.has(n) ? n : n + " (essa conta não existe ainda)"));

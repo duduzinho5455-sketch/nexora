@@ -38,7 +38,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Auryx Nexavória para Android.
+ * Auryx Nexos para Android.
  * Abre o site numa tela própria e acrescenta o que o navegador do celular não faz:
  * transmitir a tela (MediaProjection), manter a chamada com a tela bloqueada e avisar de mensagens.
  */
@@ -85,7 +85,10 @@ public class MainActivity extends Activity {
         s.setDatabaseEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setAllowFileAccess(false);
-        s.setUserAgentString(s.getUserAgentString() + " AuryxAndroid/1.0");
+        // a versão do app vai no user-agent: o servidor usa para pedir a atualização quando sai um APK novo
+        String ver = "1.0";
+        try { ver = getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception ignored) {}
+        s.setUserAgentString(s.getUserAgentString() + " AuryxAndroid/" + ver);
         CookieManager.getInstance().setAcceptCookie(true);
         // o player do Spotify (dentro da página) precisa enxergar o login do Spotify
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);

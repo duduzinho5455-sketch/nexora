@@ -28,7 +28,7 @@ public class CallService extends Service {
         Notification n = new NotificationCompat.Builder(this, CH)
                 .setSmallIcon(R.drawable.ic_stat)
                 .setContentTitle("Em chamada")
-                .setContentText(title != null && !title.isEmpty() ? title : "Auryx Nexavória")
+                .setContentText(title != null && !title.isEmpty() ? title : "Auryx Nexos")
                 .setOngoing(true)
                 .setCategory(NotificationCompat.CATEGORY_CALL)
                 .setContentIntent(openPi)

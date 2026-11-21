@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title Auryx Nexavoria
+title Auryx Nexos
 cd /d "%~dp0"
 where node >nul 2>nul
 if errorlevel 1 (

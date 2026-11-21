@@ -1,4 +1,4 @@
-# Auryx Nexavória (NEXORA) — Fase 1: Auditoria
+# Auryx Nexos (NEXORA) — Fase 1: Auditoria
 
 Data: 14/11/2026 · Nenhum código foi alterado nesta fase.
 

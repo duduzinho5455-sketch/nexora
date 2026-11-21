@@ -1,4 +1,4 @@
-/* Auryx Nexavória — service worker
+/* Auryx Nexos — service worker
    Guarda só a "casca" do app (HTML, CSS, JS, ícones) para abrir rápido.
    Mensagens, login e voz sempre vão direto para o servidor. */
 const CACHE = "auryx-v12";
@@ -51,8 +51,8 @@ self.addEventListener("fetch", e => {
 /* Notificações push: chegam mesmo com o app fechado */
 self.addEventListener("push", e => {
   let d = {};
-  try { d = e.data ? e.data.json() : {}; } catch { d = { title: "Auryx Nexavória", body: e.data ? e.data.text() : "" }; }
-  e.waitUntil(self.registration.showNotification(d.title || "Auryx Nexavória", {
+  try { d = e.data ? e.data.json() : {}; } catch { d = { title: "Auryx Nexos", body: e.data ? e.data.text() : "" }; }
+  e.waitUntil(self.registration.showNotification(d.title || "Auryx Nexos", {
     body: d.body || "", icon: d.icon || "/icons/icon-192.png", badge: "/icons/icon-192.png",
     tag: d.tag || undefined, renotify: !!d.tag, data: { url: d.url || "/" }, vibrate: [80, 40, 80]
   }));

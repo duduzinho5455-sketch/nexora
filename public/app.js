@@ -1,5 +1,5 @@
 /* =====================================================================
-   Auryx Nexavória — cliente
+   Auryx Nexos — cliente
    Sem frameworks: renderização com delegação de eventos e agendamento
    por requestAnimationFrame. Voz/vídeo/tela via WebRTC em malha P2P.
    ===================================================================== */
@@ -98,12 +98,12 @@ const P = {
 const ic = (n, c = "") => `<svg class="ic ${c}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ""}</svg>`;
 // cada logo ganha um id de degradê próprio (um logo escondido não "apaga" os outros)
 let logoN = 0;
-const LOGO = () => { const id = "axg" + (++logoN); return `<svg viewBox="0 0 48 48" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><path d="M11 37 24 11l13 26M16.5 28h15" fill="none" stroke="url(#${id})" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`; };
+const LOGO = () => { const id = "axg" + (++logoN); return `<svg viewBox="0 0 48 48" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7a63ff"/><stop offset="1" stop-color="#22c7f0"/></linearGradient></defs><path d="M12.5 37.5 24 10.5l11.5 27" fill="none" stroke="url(#${id})" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 23v10M20.6 26v4.2M27.4 26v4.2" fill="none" stroke="url(#${id})" stroke-width="2.4" stroke-linecap="round"/></svg>`; };
 
 const DESKTOP = window.nexoraDesktop || null;
 const ANDROID = window.AuryxAndroid || null;   // ponte do app Android (tela nativa, chamada em segundo plano, avisos)
-const ANDROID_URL = "https://github.com/duduzinho5455-sketch/nexora/releases/download/android/Auryx-Nexavoria.apk";
-const DESKTOP_URL = "https://github.com/duduzinho5455-sketch/nexora/releases/latest/download/Auryx-Nexavoria-Setup.exe";
+const ANDROID_URL = "https://github.com/duduzinho5455-sketch/nexora/releases/download/android/Auryx-Nexos.apk";
+const DESKTOP_URL = "https://github.com/duduzinho5455-sketch/nexora/releases/latest/download/Auryx-Nexos-Setup.exe";
 let installPrompt = null;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPrompt = e; });
 window.addEventListener("appinstalled", () => { installPrompt = null; });
@@ -220,30 +220,40 @@ function avatar(u, size = 40, status = false, attrs = "") {
   const name = u.username || "?";
   const inner = IS_IMG(u.avatar) ? `<img src="${esc(u.avatar)}" alt="" decoding="async">`
     : u.avatar ? `<span class="av-emoji">${esc(u.avatar)}</span>` : esc(([...name][0] || "?").toUpperCase());
-  return `<span class="av" style="--c:${esc(u.color || "#555")};--s:${size}px" ${attrs}>${inner}${status ? `<i class="st st-${esc(u.status || "offline")}"></i>` : ""}</span>`;
+  // moldura animada (Pro/Max): só em avatares de tamanho médio para cima, para não pesar em listas grandes
+  const ring = u.ring && size >= 30 ? ` frame fr-${esc(u.ring)}` : "";
+  const t = u.theme || [u.color || "#7c5cff", "#22d3ee"];
+  return `<span class="av${ring}" style="--c:${esc(u.color || "#555")};--s:${size}px${ring ? `;--n1:${esc(t[0])};--n2:${esc(t[1])}` : ""}" ${attrs}>${inner}${status ? `<i class="st st-${esc(u.status || "offline")}"></i>` : ""}</span>`;
 }
 /* Perfil Turbo: nome com efeito, status personalizado e insígnias */
 function nameHTML(u) {
   const t = u.theme || [u.color || "#7c5cff", "#22d3ee"];
-  return `<span class="nm${u.fx ? " fx-" + esc(u.fx) : ""}" style="--n1:${esc(t[0])};--n2:${esc(t[1])}">${esc(u.username)}</span>`;
+  // assinantes: nome na cor do perfil (sem efeito) para se destacar no chat e na lista
+  return `<span class="nm${u.fx ? " fx-" + esc(u.fx) : ""}${u.plan && !u.fx ? " nm-vip" : ""}" style="--n1:${esc(t[0])};--n2:${esc(t[1])}">${esc(u.username)}</span>`;
 }
+const staffTag = u => (u.staff === "owner" ? `<span class="staff-tag supreme" data-tip="Fundador e ADM Supremo da Auryx Nexos">ADM</span>` : u.staff === "adm" ? `<span class="staff-tag" data-tip="Equipe da Auryx Nexos">ADM</span>` : "");
 const csText = u => (u.cs ? `${u.cs.e ? esc(u.cs.e) + " " : ""}${esc(u.cs.t || "")}` : "");
 function badges(u) {
   const b = [];
   if (u.plan) b.push([{ plus: "💠", pro: "💎", max: "👑" }[u.plan] || "💠", `Assinante ${PLAN_NAME[u.plan] || ""}`]);
-  if (u.created && u.created < Date.UTC(2027, 0, 1)) b.push(["⭐", "Fundador — chegou no começo da Auryx Nexavória"]);
+  if (u.created && u.created < Date.UTC(2027, 0, 1)) b.push(["⭐", "Fundador — chegou no começo da Auryx Nexos"]);
   if ([...S.servers.values()].some(s => s.ownerId === u.id)) b.push(["🏰", "Dono de servidor"]);
   if (u.steam) b.push(["🎮", "Steam conectada"]);
   return b.length ? `<div class="badges">${b.map(([e, t]) => `<span data-tip="${esc(t)}">${e}</span>`).join("")}</div>` : "";
 }
 function bannerStyle(u) {
-  if (u.banner && u.banner.startsWith("/f/")) return `background-image:url('${esc(u.banner)}');background-size:cover;background-position:center`;
+  // banner em GIF: com "reduzir animações" mostra o 1º quadro (e ele também fica por baixo, enquanto o GIF carrega)
+  if (u.banner && u.banner.startsWith("/f/")) {
+    const still = u.bannerStill && u.bannerStill.startsWith("/f/") ? u.bannerStill : "";
+    const img = still && S.settings.reduceMotion ? `url('${esc(still)}')` : still ? `url('${esc(u.banner)}'), url('${esc(still)}')` : `url('${esc(u.banner)}')`;
+    return `background-image:${img};background-size:cover;background-position:center`;
+  }
   const t = u.theme || [u.banner && u.banner.startsWith("#") ? u.banner : u.color || "#7c5cff", null];
   return `background:linear-gradient(135deg, ${esc(t[0])}, ${esc(t[1] || `color-mix(in srgb, ${t[0]} 30%, #000)`)})`;
 }
 function uploadBlob(file, kind) {
   return new Promise((resolve, reject) => {
-    if (LOCAL) return reject(new Error("Disponível na versão online da Auryx Nexavória."));
+    if (LOCAL) return reject(new Error("Disponível na versão online da Auryx Nexos."));
     if (file.size > [8, 15, 25, 50][kind === "receipt" ? 0 : myRank()] * 1024 * 1024) return reject(new Error("Arquivo muito grande para o seu plano."));
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/upload");
@@ -405,6 +415,7 @@ function renderSide() {
 
   if (!(S.view === "chat" || S.view === "stage") || !s) {
     head.className = "side-head";
+    head.style.cssText = "";
     delete head.dataset.act;
     if (S.view === "premium" || S.view === "admin" || (S.view === "chat" && isTicket(S.channelId))) {
       const adm = S.me.admin && S.view !== "premium";
@@ -454,24 +465,37 @@ function renderSide() {
     return;
   }
 
-  head.className = "side-head clickable";
+  // servidor personalizado: banner (imagem) ou faixa na cor temática no topo da lista de canais
+  head.className = "side-head clickable" + (s.banner ? " banner has-img" : s.accent ? " banner" : "");
+  head.style.cssText = s.banner ? `--c:${esc(s.accent || s.color || "#7c5cff")};--bimg:url('${esc(s.banner)}')` : s.accent ? `--c:${esc(s.accent)}` : "";
   head.dataset.act = "server-menu";
   head.innerHTML = `<span class="title">${esc(s.name)}</span>${ic("chevron", "chev")}`;
   const owner = canDo(s, "channels");
   const tools = id => (owner ? `<span class="ch-tools"><i data-act="ch-settings" data-id="${id}" data-tip="Editar canal">${ic("settings", "sm")}</i></span>` : "");
-  const text = s.channels.filter(c => c.type === "text"), voiceCh = s.channels.filter(c => c.type === "voice");
-  let h = `<div class="cat"><span>Canais de texto</span>${owner ? `<button data-act="new-channel" data-type="text" data-tip="Criar canal">${ic("plus", "sm")}</button>` : ""}</div>`;
-  h += text.map(c => {
+  const chIcon = (c, def) => (c.emoji ? `<span class="ch-emo">${esc(c.emoji)}</span>` : ic(def));
+  const textRow = c => {
     const m = S.mentions.get(c.id) || 0;
-    return `<div class="ch${S.view === "chat" && c.id === S.channelId ? " on" : ""}${isUnread(c) ? " unread" : ""}" data-act="open-ch" data-id="${c.id}" role="button" tabindex="0">${ic("hash")}<span class="ch-name">${esc(c.name)}</span>${m ? `<b class="badge">${m}</b>` : ""}${tools(c.id)}</div>`;
-  }).join("");
-  h += `<div class="cat"><span>Salas de voz</span>${owner ? `<button data-act="new-channel" data-type="voice" data-tip="Criar sala de voz">${ic("plus", "sm")}</button>` : ""}</div>`;
-  h += voiceCh.map(c => {
+    return `<div class="ch${S.view === "chat" && c.id === S.channelId ? " on" : ""}${isUnread(c) ? " unread" : ""}" data-act="open-ch" data-id="${c.id}" role="button" tabindex="0">${chIcon(c, "hash")}<span class="ch-name">${esc(c.name)}</span>${m ? `<b class="badge">${m}</b>` : ""}${tools(c.id)}</div>`;
+  };
+  const voiceRow = c => {
     const people = [...S.voice.values()].filter(v => v.channelId === c.id).sort((a, b) => a.at - b.at);
     const live = people.some(p => p.screen);
     const act = S.acts.get(c.id);
-    return `<div class="ch${S.view === "stage" && c.id === S.channelId ? " on" : ""}${live ? " live" : ""}" data-act="open-ch" data-id="${c.id}" role="button" tabindex="0">${ic("volume")}<span class="ch-name">${esc(c.name)}</span>${act ? `<span class="act-dot" data-tip="${esc(ACT_NAMES[act] || "Atividade")}">${ic({ yt: "music", sp: "headphones", board: "brush", ttt: "grid3" }[act] || "rocket", "xs")}</span>` : ""}${people.length ? `<span class="count">${people.length}/${S.voiceLimit}</span>` : ""}${tools(c.id)}</div>${people.length ? `<div class="vc-users">${people.map(vcUser).join("")}</div>` : ""}`;
-  }).join("");
+    return `<div class="ch${S.view === "stage" && c.id === S.channelId ? " on" : ""}${live ? " live" : ""}" data-act="open-ch" data-id="${c.id}" role="button" tabindex="0">${chIcon(c, "volume")}<span class="ch-name">${esc(c.name)}</span>${act ? `<span class="act-dot" data-tip="${esc(ACT_NAMES[act] || "Atividade")}">${ic({ yt: "music", sp: "headphones", board: "brush", ttt: "grid3" }[act] || "rocket", "xs")}</span>` : ""}${people.length ? `<span class="count">${people.length}/${S.voiceLimit}</span>` : ""}${tools(c.id)}</div>${people.length ? `<div class="vc-users">${people.map(vcUser).join("")}</div>` : ""}`;
+  };
+  const row = c => (c.type === "voice" ? voiceRow(c) : textRow(c));
+  // canais sem categoria ficam nos grupos padrão; as categorias criadas pelo dono vêm depois, na ordem dos canais
+  const text = s.channels.filter(c => c.type === "text" && !c.cat), voiceCh = s.channels.filter(c => c.type === "voice" && !c.cat);
+  const cats = [...new Set(s.channels.map(c => c.cat).filter(Boolean))];
+  const collapsed = store.get("catFold", {});
+  const catHead = (name, key, add) => `<div class="cat${collapsed[key] ? " folded" : ""}" data-act="cat-fold" data-key="${esc(key)}" role="button" tabindex="0"><span>${ic("chevron", "xs")}${esc(name)}</span>${add || ""}</div>`;
+  let h = "";
+  if (text.length || !cats.length) h += catHead("Canais de texto", s.id + ":t", owner ? `<button data-act="new-channel" data-type="text" data-tip="Criar canal">${ic("plus", "sm")}</button>` : "") + (collapsed[s.id + ":t"] ? text.filter(c => c.id === S.channelId).map(textRow).join("") : text.map(textRow).join(""));
+  if (voiceCh.length || !cats.length) h += catHead("Salas de voz", s.id + ":v", owner ? `<button data-act="new-channel" data-type="voice" data-tip="Criar sala de voz">${ic("plus", "sm")}</button>` : "") + (collapsed[s.id + ":v"] ? voiceCh.filter(c => c.id === S.channelId || [...S.voice.values()].some(v => v.channelId === c.id)).map(voiceRow).join("") : voiceCh.map(voiceRow).join(""));
+  for (const cat of cats) {
+    const key = s.id + ":c:" + cat, list = s.channels.filter(c => c.cat === cat);
+    h += catHead(cat, key, owner ? `<button data-act="new-channel" data-type="text" data-cat="${esc(cat)}" data-tip="Criar canal em ${esc(cat)}">${ic("plus", "sm")}</button>` : "") + (collapsed[key] ? list.filter(c => c.id === S.channelId).map(row).join("") : list.map(row).join(""));
+  }
   body.innerHTML = h;
 }
 
@@ -567,7 +591,7 @@ function onServerRoles({ serverId, roles, memberRoles }) {
   const p = document.querySelector(".settings-wrap [data-roles-root]");
   if (p && p._redraw) p._redraw();
 }
-const roleChip = r => `<span class="role-chip" style="--rc:${esc(r.color)}"><i></i>${esc(r.name)}</span>`;
+const roleChip = r => `<span class="role-chip" style="--rc:${esc(r.color)}"><i></i>${r.icon ? esc(r.icon) + " " : ""}${esc(r.name)}</span>`;
 
 function rolesSection(s, sid) {
   return {
@@ -583,23 +607,27 @@ function rolesSection(s, sid) {
           const r = editing === "new" ? { name: "", color: "#7c5cff", perms: [], hoist: true } : roles.find(x => x.id === editing);
           if (!r) { editing = null; draw(); return; }
           root.innerHTML = `<button class="btn ghost sm" data-back>← Voltar aos cargos</button>
-            <div class="role-edit"><div class="role-prev">${roleChip({ name: r.name || "Novo cargo", color: r.color })}</div>
+            <div class="role-edit"><div class="role-prev">${roleChip({ name: r.name || "Novo cargo", color: r.color, icon: r.icon })}</div>
             <label class="field"><span>Nome do cargo</span><input data-rname maxlength="32" value="${esc(r.name)}" placeholder="Ex.: Moderador, VIP, Amigos"></label>
             <span class="label">Cor</span><div class="swatches" style="margin:8px 0 16px">${ROLE_COLORS.map(c => `<button type="button" class="swatch${c === r.color ? " on" : ""}" style="--c:${c}" data-rcolor="${c}"></button>`).join("")}<label class="swatch custom" data-tip="Outra cor" style="--c:${esc(r.color)}"><input type="color" data-rcustom value="${esc(r.color)}"></label></div>
+            <span class="label">Ícone do cargo</span><div class="row-btns" style="margin:8px 0 16px"><button type="button" class="btn emo-pick" data-ricon>${r.icon ? esc(r.icon) : "＋"}</button>${r.icon ? `<button type="button" class="btn sm ghost" data-ricon-clear>Tirar ícone</button>` : ""}<small class="hint">Aparece ao lado do nome no chat e na lista de membros</small></div>
             <div class="toggle-row"><span><b>Mostrar separado na lista de membros</b><small>Quem tem esse cargo aparece num grupo próprio</small></span><label class="switch"><input type="checkbox" data-rhoist ${r.hoist ? "checked" : ""}><i></i></label></div>
             <span class="label" style="display:block;margin-top:16px">Permissões</span>
             <div class="perm-list">${PERM_INFO.map(([k, t, d]) => { const mine = canDo(srv, k); return `<label class="perm${mine ? "" : " locked"}" ${mine ? "" : 'data-tip="Você não tem essa permissão para poder dar"'}><span><b>${t}</b><small>${d}</small></span><label class="switch"><input type="checkbox" data-perm="${k}" ${r.perms.includes(k) ? "checked" : ""} ${mine ? "" : "disabled"}><i></i></label></label>`; }).join("")}</div>
             <div class="modal-foot" style="justify-content:space-between">${editing !== "new" ? `<button class="btn danger" data-rdel>Apagar cargo</button>` : "<span></span>"}<button class="btn primary" data-rsave>${editing === "new" ? "Criar cargo" : "Salvar"}</button></div></div>`;
-          const prev = () => { root.querySelector(".role-prev").innerHTML = roleChip({ name: root.querySelector("[data-rname]").value || "Novo cargo", color: r.color }); };
+          const prev = () => { root.querySelector(".role-prev").innerHTML = roleChip({ name: root.querySelector("[data-rname]").value || "Novo cargo", color: r.color, icon: r.icon }); };
           root.querySelector("[data-rname]").addEventListener("input", prev);
           root.querySelector("[data-rcustom]").addEventListener("input", e => { r.color = e.target.value; $$("[data-rcolor]", root).forEach(b => b.classList.remove("on")); prev(); });
           root.onclick = async e => {
             if (e.target.closest("[data-back]")) { editing = null; draw(); return; }
             const c = e.target.closest("[data-rcolor]");
             if (c) { r.color = c.dataset.rcolor; $$("[data-rcolor]", root).forEach(b => b.classList.toggle("on", b === c)); prev(); return; }
+            const ri = e.target.closest("[data-ricon]");
+            if (ri) { emojiPicker(ri, v => { r.icon = v; ri.textContent = v; prev(); }); return; }
+            if (e.target.closest("[data-ricon-clear]")) { r.icon = ""; root.querySelector("[data-ricon]").textContent = "＋"; prev(); return; }
             if (e.target.closest("[data-rsave]")) {
               const perms = $$("[data-perm]", root).filter(x => x.checked).map(x => x.dataset.perm);
-              const res = await emit("role:save", { serverId: sid, roleId: editing === "new" ? undefined : editing, name: root.querySelector("[data-rname]").value, color: r.color, perms, hoist: root.querySelector("[data-rhoist]").checked });
+              const res = await emit("role:save", { serverId: sid, roleId: editing === "new" ? undefined : editing, name: root.querySelector("[data-rname]").value, color: r.color, icon: r.icon || "", perms, hoist: root.querySelector("[data-rhoist]").checked });
               if (res.error) { toast(res.error, "error"); return; }
               toast("Cargo salvo.", "ok"); editing = null; setTimeout(draw, 150);
             }
@@ -739,7 +767,8 @@ function renderMembers() {
   const show = S.view === "chat" && s;
   app.classList.toggle("no-members", !(show && S.showMembers));
   if (!show) { el.innerHTML = ""; app.classList.remove("show-members"); return; }
-  const all = s.members.map(user).sort((a, b) => a.username.localeCompare(b.username, "pt-BR"));
+  // assinantes primeiro (Max, Pro, VIP) e com destaque; depois por nome
+  const all = s.members.map(user).sort((a, b) => (PLAN_RANK[b.plan] || 0) - (PLAN_RANK[a.plan] || 0) || a.username.localeCompare(b.username, "pt-BR"));
   const on = all.filter(u => u.status !== "offline"), off = all.filter(u => u.status === "offline");
   const row = u => {
     const v = S.voice.get(u.id);
@@ -747,7 +776,9 @@ function renderMembers() {
       : u.game ? `<small class="playing">${ic("gamepad", "xs")} Jogando <b>${esc(u.game.name)}</b></small>`
       : u.cs ? `<small>${csText(u)}</small>`
       : u.about ? `<small>${esc(u.about)}</small>` : "";
-    return `<div class="member${u.status === "offline" ? " off" : ""}${V.speaking.has(u.id) ? " speaking" : ""}" data-act="profile" data-uid="${u.id}" data-voice-user="${u.id}">${avatar(u, 34, true)}<div class="who"><b>${nameHTML(u)}${u.id === s.ownerId ? `<span data-tip="Dono do servidor">${ic("crown", "xs")}</span>` : ""}</b>${sub}</div></div>`;
+    const rc = s.roles ? roleColor(s, u.id) : "";
+    const ricon = s.roles ? userRoles(s, u.id).map(r => r.icon).find(Boolean) : "";
+    return `<div class="member${u.status === "offline" ? " off" : ""}${V.speaking.has(u.id) ? " speaking" : ""}${u.plan ? " vip vip-" + esc(u.plan) : ""}" data-act="profile" data-uid="${u.id}" data-voice-user="${u.id}"${rc && !u.plan ? ` style="--rc:${esc(rc)}"` : ""}>${avatar(u, 34, true)}<div class="who"><b>${nameHTML(u)}${ricon ? `<span class="role-ico">${esc(ricon)}</span>` : ""}${u.plan ? `<span class="plan-chip" data-tip="Assinante ${esc(PLAN_NAME[u.plan])}">${{ plus: "💠", pro: "💎", max: "👑" }[u.plan]}</span>` : ""}${staffTag(u)}${u.id === s.ownerId ? `<span data-tip="Dono do servidor">${ic("crown", "xs")}</span>` : ""}</b>${sub}</div></div>`;
   };
   const hoisted = sRoles(s).filter(r => r.hoist);
   const groupOf = u => hoisted.find(r => userRoles(s, u.id).includes(r));
@@ -785,7 +816,7 @@ function renderVoicePanel() {
 function renderTitle() {
   let m = 0, u = false;
   for (const s of S.servers.values()) { const r = serverUnread(s); m += r.mentions; u = u || r.unread; }
-  document.title = (m ? `(${m}) ` : u ? "• " : "") + "Auryx Nexavória";
+  document.title = (m ? `(${m}) ` : u ? "• " : "") + "Auryx Nexos";
 }
 
 /* ------------------------------------------------------------------ */
@@ -804,6 +835,7 @@ function setView(view) {
   }
   $("#app").classList.remove("drawer", "show-members");
   closeMention();
+  setTimeout(applyAccent, 0);   // a cor temática acompanha o servidor aberto
 }
 function goHome() {
   setView("home");
@@ -865,7 +897,7 @@ function onOrderUpdate(o) {
 async function loadPlans() {
   const r = await emit("plans:get", {});
   if (r.error) { toast(r.error, "error"); return false; }
-  S.plans = r.plans;
+  S.plans = r.plans; S.pixKey = r.pixKey || "";
   S.planMine = r.mine; S.planLast = r.last || null; S.planLog = r.log || [];
   for (const o of r.orders) S.orders.set(o.id, o);
   return true;
@@ -875,7 +907,7 @@ async function goPremium() {
   S.serverId = null; S.channelId = null;
   $("#premiumView").innerHTML = `<div class="page"><div class="hero"><h1>Carregando planos…</h1></div></div>`;
   renderAll(); updateMini();
-  if (LOCAL) { $("#premiumView").innerHTML = `<div class="page"><div class="empty">${ic("gem")}<p>Os planos Premium funcionam na versão online da Auryx Nexavória.</p></div></div>`; return; }
+  if (LOCAL) { $("#premiumView").innerHTML = `<div class="page"><div class="empty">${ic("gem")}<p>Os planos Premium funcionam na versão online da Auryx Nexos.</p></div></div>`; return; }
   if (await loadPlans()) renderPremium();
 }
 function renderPremium() {
@@ -893,19 +925,23 @@ function renderPremium() {
         <div class="sub-bar"><i style="width:${pct}%"></i></div>
         <div class="sub-dates"><span>Ativada em <b>${mine.since ? fmtDate(mine.since) : "—"}</b></span><span>Vence em <b>${fmtDate(mine.until)}</b></span></div>
         ${left <= 3 ? `<div class="sub-warn">${ic("info", "sm")} Vence logo! Renove para não perder os benefícios — os dias novos somam aos que faltam.</div>` : ""}
-        <div class="sub-acts"><button class="btn primary" data-act="buy-plan" data-tier="${esc(mine.tier)}">${ic("gem", "sm")}Renovar +30 dias</button><small>Sem cobrança automática: o plano só renova quando você paga. Para cancelar, é só não renovar.</small></div></div>`
+        <div class="sub-acts"><button class="btn primary" data-act="buy-plan" data-tier="${esc(mine.tier)}" data-cycle="m">${ic("gem", "sm")}Renovar +30 dias</button><button class="btn" data-act="buy-plan" data-tier="${esc(mine.tier)}" data-cycle="q">+90 dias (trimestral)</button><small>Sem cobrança automática: o plano só renova quando você paga. Para cancelar, é só não renovar.</small></div></div>`
     : `<div class="sub-card sub-none"><div class="sub-top"><span class="sub-emo">✨</span><div><small>Sua assinatura</small><b>${last ? `${esc(PLAN_NAME[last.tier] || "")} <span class="ost st-bad">vencida em ${fmtDate(last.until)}</span>` : "Você ainda não assina"}</b></div></div><p>${last ? "Seus benefícios estão pausados, mas nada foi apagado: renove e tudo volta como estava." : "Escolha um plano abaixo. A partir de <b>R$ 5,99 por mês</b>, sem fidelidade."}</p></div>`;
   root.innerHTML = `<div class="page premium">
-    <div class="hero prem-hero"><h1>${ic("gem", "lg")} Auryx VIP</h1><p>Apoie a Auryx Nexavória e ganhe insígnia, perfil turbinado, a Aury (IA) e arquivos maiores. Pagamento por Pix, sem cartão e sem renovação automática.</p></div>
+    <div class="hero prem-hero"><h1>${ic("gem", "lg")} Auryx VIP</h1><p>Apoie a Auryx Nexos e ganhe insígnia, perfil turbinado, a Aury (IA) e arquivos maiores. Pagamento por Pix, sem cartão e sem renovação automática.</p></div>
     ${pending ? `<div class="prem-alert">${ic("info")}<span>Você tem um pedido <b>${esc(pending.plan)}</b> ${statusTag(pending.status)}. A equipe confere o Pix e responde no atendimento.</span><button class="btn sm" data-act="open-ticket" data-id="${pending.id}">Abrir atendimento</button></div>` : ""}
     ${sub}
+    <div class="cycle-pick" role="tablist"><button class="${S.cycle !== "q" ? "on" : ""}" data-act="plan-cycle" data-c="m">Mensal</button><button class="${S.cycle === "q" ? "on" : ""}" data-act="plan-cycle" data-c="q">Trimestral <span class="save-tag">economize até ${Math.max(...S.plans.map(p => p.price3 ? Math.round((1 - p.price3 / (p.price * 3)) * 100) : 0))}%</span></button></div>
     <div class="plans">${S.plans.map(p => {
-      const active = mine && mine.tier === p.tier, feat = p.tier === "plus";
+      const q = S.cycle === "q" && p.price3, active = mine && mine.tier === p.tier, feat = p.tier === "plus";
+      const days = q ? 90 : 30, price = q ? p.price3 : p.price;
+      const off = q ? Math.round((1 - p.price3 / (p.price * 3)) * 100) : 0;
       const change = mine && !active ? `<small class="plan-note">Os dias que faltam do seu plano atual viram dias deste, pelo valor.</small>` : "";
       return `<div class="plan plan-${p.tier}${feat ? " featured" : ""}${active ? " current" : ""}">${feat ? `<span class="plan-flag">Oficial · mais escolhido</span>` : ""}${active ? `<span class="plan-flag cur">Seu plano</span>` : ""}
-        <div class="plan-emo">${EMO[p.tier] || "💠"}</div><h3>${esc(p.name)}</h3><div class="price"><b>${fmtMoney(p.price)}</b><small>/mês</small></div>
+        <div class="plan-emo">${EMO[p.tier] || "💠"}</div><h3>${esc(p.name)}</h3><div class="price"><b>${fmtMoney(price)}</b><small>${q ? "/3 meses" : "/mês"}</small></div>
+        ${q ? `<div class="price-sub"><s>${fmtMoney(p.price * 3)}</s> <span class="save-tag">-${off}%</span> · ${fmtMoney(Math.round(p.price3 / 3))}/mês</div>` : `<div class="price-sub">ou ${fmtMoney(p.price3)} no trimestral</div>`}
         <ul>${p.benefits.map(b => `<li>${ic("check", "sm")}${esc(b)}</li>`).join("")}</ul>
-        <button class="btn ${feat || active ? "primary" : ""} big" data-act="buy-plan" data-tier="${p.tier}">${active ? "Renovar +30 dias" : `Assinar ${esc(p.name)}`}</button>${change}</div>`;
+        <button class="btn ${feat || active ? "primary" : ""} big" data-act="buy-plan" data-tier="${p.tier}" data-cycle="${q ? "q" : "m"}">${active ? `Renovar +${days} dias` : `Assinar ${esc(p.name)}${q ? " · 3 meses" : ""}`}</button>${change}</div>`;
     }).join("")}</div>
     <div class="section-title">${ic("receipt", "sm")} Pagamentos</div>
     ${myOrders.length ? `<div class="orders">${myOrders.map(o => `<div class="order-row"><div class="or-main"><b>Plano ${esc(o.plan)}</b><small>${fmtMoney(o.amount)} · ${fmtDate(o.created)}${o.status === "rejected" && o.reason ? ` · Motivo: ${esc(o.reason)}` : ""}${o.status === "expired" ? " · ficou 7 dias sem resposta — chame no atendimento se você pagou" : ""}${o.decidedBy ? ` · por ${esc(o.decidedBy)}` : ""}</small></div>${statusTag(o.status)}<button class="btn sm" data-act="open-ticket" data-id="${o.id}">${ic("message", "sm")}Atendimento</button></div>`).join("")}</div>` : `<div class="empty" style="padding:24px">${ic("receipt")}<p>Nenhum pagamento ainda.</p></div>`}
@@ -920,18 +956,27 @@ function loadQr() {
   qrLib = new Promise((res, rej) => { const s = document.createElement("script"); s.src = "/vendor/qrcode/qrcode.js"; s.onload = res; s.onerror = () => { qrLib = null; rej(new Error("qr")); }; document.head.append(s); });
   return qrLib;
 }
-function buyModal(tier) {
-  const p = S.plans.find(x => x.tier === tier);
-  if (!p) return;
+function buyModal(tier, cycle = "m") {
+  const base = S.plans.find(x => x.tier === tier);
+  if (!base) return;
+  // trimestral: mesmo fluxo, com o valor e o link do ciclo de 3 meses; sem link, paga pela chave Pix da equipe
+  const q = cycle === "q" && !!base.price3;
+  const p = { ...base, price: q ? base.price3 : base.price, link: q ? base.link3 : base.link };
+  const pix = !p.link && S.pixKey ? S.pixKey : "";
+  if (!p.link && !pix) { toast("O pagamento deste plano ainda não foi configurado pela equipe. Tente o mensal ou fale com um ADM.", "warn", 6000); return; }
   let receipt = null, step = 1, sending = false;
   modal({
-    title: `Assinar ${esc(p.name)}`, sub: `${fmtMoney(p.price)} por 30 dias`, cls: "wide",
+    title: `Assinar ${esc(p.name)}${q ? " · Trimestral" : ""}`, sub: `${fmtMoney(p.price)} por ${q ? "90 dias (3 meses)" : "30 dias"}`, cls: "wide",
     body: `<div class="buy"></div>`,
     onMount(m, close) {
       const box = m.querySelector(".buy");
       let draw = () => {
         box.innerHTML = `<div class="steps-bar">${["Pagar", "Comprovante", "Pronto"].map((s, i) => `<span class="${i + 1 === step ? "on" : i + 1 < step ? "done" : ""}"><b>${i + 1 < step ? "✓" : i + 1}</b>${s}</span>`).join("")}</div>` +
-          (step === 1 ? `<div class="pay-box"><div class="pay-amount">${fmtMoney(p.price)}</div><p>Pague <b>exatamente esse valor</b> pelo Pix no link oficial de cobrança. Ele abre no seu navegador ou no app do banco.</p>
+          (step === 1 && pix ? `<div class="pay-box"><div class="pay-amount">${fmtMoney(p.price)}</div><p>Pague <b>exatamente esse valor</b> pelo Pix usando a chave abaixo (no app do seu banco: Pix › Pagar › Chave).</p>
+              <div class="pix-key"><code>${esc(pix)}</code><button class="btn sm" type="button" data-copypix>${ic("copy", "sm")}Copiar chave</button></div>
+              <small>Depois de pagar, volte aqui e clique em <b>Já paguei</b>.</small></div>
+              <div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" data-next>Já paguei →</button></div>`
+          : step === 1 ? `<div class="pay-box"><div class="pay-amount">${fmtMoney(p.price)}</div><p>Pague <b>exatamente esse valor</b> pelo Pix no link oficial de cobrança. Ele abre no seu navegador ou no app do banco.</p>
               <div class="pay-qr"><div class="qr-box" data-qr><small>Gerando QR Code…</small></div><div class="qr-side"><b>No celular</b><small>Aponte a câmera para o QR Code: abre a cobrança oficial do Nubank, onde dá para pagar pelo app do seu banco (QR ou Pix copia e cola).</small><b>Neste aparelho</b><a class="btn primary" href="${esc(p.link)}" target="_blank" rel="noopener noreferrer" data-paylink>${ic("arrowRight", "sm")}Abrir cobrança Pix</a><button class="btn sm" type="button" data-copylink>${ic("copy", "sm")}Copiar link de pagamento</button></div></div>
               <small>Depois de pagar, volte aqui e clique em <b>Já paguei</b>.</small></div>
               <div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" data-next>Já paguei →</button></div>`
@@ -951,9 +996,10 @@ function buyModal(tier) {
         }).catch(() => { box.innerHTML = "<small>Não deu para gerar o QR. Use o botão ao lado.</small>"; });
       };
       const draw0 = draw;
-      draw = () => { draw0(); if (step === 1) drawQr(); };
+      draw = () => { draw0(); if (step === 1 && !pix) drawQr(); };
       draw();
       m.addEventListener("click", e => {
+        if (e.target.closest("[data-copypix]")) { navigator.clipboard.writeText(pix).then(() => toast("Chave Pix copiada.", "ok")).catch(() => {}); return; }
         if (e.target.closest("[data-copylink]")) { navigator.clipboard.writeText(p.link).then(() => toast("Link de pagamento copiado.", "ok")).catch(() => {}); return; }
         if (e.target.closest("[data-next]")) { step = 2; draw(); }
         if (e.target.closest("[data-back]")) { step = 1; draw(); }
@@ -974,7 +1020,7 @@ function buyModal(tier) {
       m.addEventListener("click", async e => {
         if (!e.target.closest("[data-send]") || sending || !receipt || !receipt.id) return;
         sending = true; draw();
-        const r = await emit("order:create", { tier, receipt: receipt.id, note: (m.querySelector("[data-note]") || {}).value || "" });
+        const r = await emit("order:create", { tier, cycle: q ? "q" : "m", receipt: receipt.id, note: (m.querySelector("[data-note]") || {}).value || "" });
         sending = false;
         if (r.error) { toast(r.error, "error"); draw(); return; }
         S.orders.set(r.order.id, r.order);
@@ -1002,9 +1048,12 @@ async function goAdmin() {
 async function renderAdmin(soft) {
   const root = $("#adminView");
   if (!root || !S.me.admin) return;
+  const sup = !!S.me.supreme;
+  if (!sup && (S.adminTab === "system" || S.adminTab === "backup")) S.adminTab = "dash";
   const tab = S.adminTab;
-  const tabs = [["dash", "Visão geral"], ["orders", "Solicitações"], ["users", "Usuários e planos"], ["servers", "Servidores"], ["games", "Jogos"], ["backup", "Backups"], ["audit", "Histórico"]];
-  const head = `<div class="page admin"><div class="hero adm-hero"><h1>${ic("shield", "lg")} Painel ADM</h1><p>Confira no extrato do banco se o Pix caiu antes de aprovar. Toda decisão fica registrada com o seu nome.</p><button class="btn adm-announce" data-act="admin-broadcast">📢 Aviso geral</button></div><div class="tabs-row">${tabs.map(([k, n]) => `<button class="tab${k === tab ? " on" : ""}" data-act="admin-tab" data-tab="${k}">${n}</button>`).join("")}</div><div class="adm-body"></div></div>`;
+  clearInterval(S.admLive); S.admLive = null;
+  const tabs = [["dash", "Visão geral"], ["orders", "Solicitações"], ["users", "Usuários e planos"], ["servers", "Servidores"], ["team", "Equipe"], ["games", "Jogos"], sup && ["system", "⚙️ Sistema"], sup && ["backup", "Backups"], ["audit", "Histórico"]].filter(Boolean);
+  const head = `<div class="page admin"><div class="hero adm-hero"><h1>${ic("shield", "lg")} Painel ADM ${sup ? `<span class="supreme-tag">ADM Supremo</span>` : ""}</h1><p>${sup ? "Acesso total: equipe, sistema, versão do app, desconexão geral e backups." : "Confira no extrato do banco se o Pix caiu antes de aprovar. Toda decisão fica registrada com o seu nome."}</p><button class="btn adm-announce" data-act="admin-broadcast">📢 Aviso geral</button></div><div class="tabs-row">${tabs.map(([k, n]) => `<button class="tab${k === tab ? " on" : ""}" data-act="admin-tab" data-tab="${k}">${n}</button>`).join("")}</div><div class="adm-body"></div></div>`;
   if (!soft || !root.querySelector(".adm-body")) root.innerHTML = head;
   else root.querySelectorAll(".tabs-row .tab").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
   const body = root.querySelector(".adm-body");
@@ -1014,7 +1063,11 @@ async function renderAdmin(soft) {
     const card = (ic_, v, t, sub, cls = "") => `<div class="dash-card ${cls}"><span class="dash-ic">${ic(ic_)}</span><b>${v}</b><small>${t}</small>${sub ? `<em>${sub}</em>` : ""}</div>`;
     const dur = s => s < 3600 ? Math.round(s / 60) + " min" : s < 86400 ? Math.round(s / 3600) + " h" : Math.round(s / 86400) + " dias";
     const ok = (b, t) => `<span class="ost ${b ? "st-ok" : "st-bad"}">${t}</span>`;
-    body.innerHTML = `<div class="dash-grid">
+    const ap = r.apps || {};
+    body.innerHTML = `<div class="live-row"><span class="live-dot"></span><b>Ao vivo</b><span data-live>${r.online} online · ${r.sockets} conexões · ${r.msgsMin} msg/min · ${r.msgsHour} msg na última hora</span><small>Site ${ap.web || 0} · Android ${ap.android || 0} · PC ${ap.desktop || 0}</small></div>
+    ${(r.series || []).length > 1 ? `<div class="spark-wrap"><div><span class="label">Online — últimas 24 h</span>${sparkline(r.series.map(x => x.on), "var(--green)")}</div><div><span class="label">Mensagens a cada 5 min</span>${sparkline(r.series.map(x => x.m), "var(--accent)")}</div></div>` : `<p class="hint" style="margin:0 0 14px">Os gráficos aparecem depois de alguns minutos com o servidor ligado (um ponto a cada 5 min).</p>`}
+    ${r.settings && (r.settings.maintenance || !r.settings.regOpen || r.settings.minApp) ? `<div class="prem-alert">${ic("info")}<span>${[r.settings.maintenance && "🛠️ Modo manutenção ligado", !r.settings.regOpen && "🚫 Cadastros fechados", r.settings.minApp && `📲 App mínimo: Android ${esc(r.settings.minApp.android || "—")} · PC ${esc(r.settings.minApp.desktop || "—")}${r.settings.minApp.since > Date.now() ? ` (exigido em ${Math.ceil((r.settings.minApp.since - Date.now()) / 60000)} min)` : " (exigido)"}`].filter(Boolean).join(" · ")}</span>${sup ? `<button class="btn sm" data-act="admin-tab" data-tab="system">Sistema</button>` : ""}</div>` : ""}
+    <div class="dash-grid">
       ${card("users", r.users, "Contas", `+${r.newDay} hoje · +${r.newWeek} na semana`)}
       ${card("signal", r.online, "Online agora", `${r.voiceNow} em call · ${r.rooms} salas`, "green")}
       ${card("message", r.msgsDay, "Mensagens nas últimas 24 h", `${r.msgs} guardadas no total`)}
@@ -1032,6 +1085,44 @@ async function renderAdmin(soft) {
       <div><b>Aury (IA)</b>${ok(r.ai, r.ai ? (r.aiName || "ligada") : "sem chave")}</div>
       <div><b>Servidor TURN (voz em 4G)</b>${ok(r.turn, r.turn ? "ligado" : "não configurado")}</div>
       <div><b>Servidor ligado há</b><span class="ost st-rev">${dur(r.uptime)} · ${r.mem} MB</span></div>
+    </div>`;
+    // números ao vivo: atualiza sozinho a cada 5 s enquanto a aba está aberta
+    S.admLive = setInterval(async () => {
+      if (S.view !== "admin" || S.adminTab !== "dash" || document.hidden) return;
+      const x = await emit("admin:stats", {});
+      const el = $("#adminView [data-live]");
+      if (!x.error && el) el.textContent = `${x.online} online · ${x.sockets} conexões · ${x.msgsMin} msg/min · ${x.msgsHour} msg na última hora`;
+    }, 5000);
+  } else if (tab === "team") {
+    const r = await emit("admin:admins", {});
+    if (r.error) { body.innerHTML = esc(r.error); return; }
+    body.innerHTML = `<p class="hint" style="margin-top:0">${sup ? "Você é o <b>ADM Supremo</b>: só você nomeia ou tira ADMs, mexe no Sistema, baixa backups e desconecta todo mundo. Para nomear alguém, abra <b>Usuários e planos</b> e clique em <b>Tornar ADM</b>." : "A equipe que modera a Auryx Nexos. Só o ADM Supremo nomeia ou tira ADMs."}</p>` +
+      r.admins.map(a => `<div class="adm-user">${avatar(a, 36)}<div class="who"><b>${esc(a.username)} ${a.supreme ? `<span class="supreme-tag">ADM Supremo</span>` : `<span class="ost st-rev">ADM</span>`}</b><small>${a.online ? "🟢 online agora" : "offline"}${a.env ? " · definido no Render (ADMIN_USERS)" : ""}</small></div><div class="ao-acts">${sup && !a.supreme && !a.env ? `<button class="btn sm danger" data-act="admin-adm-set" data-uid="${a.id}" data-on="0" data-name="${esc(a.username)}">Tirar ADM</button>` : ""}</div></div>`).join("");
+  } else if (tab === "system") {
+    const r = await emit("admin:settings", {});
+    if (r.error) { body.innerHTML = esc(r.error); return; }
+    const st = r.settings, mi = st.minApp || {};
+    const linkRow = (tier, c, name) => `<label class="field"><span>${name}</span><input data-link="${tier}_${c}" placeholder="${esc(st.defaults[tier + "_" + c] || "sem link — usa a chave Pix")}" value="${esc(st.links[tier + "_" + c] || "")}"></label>`;
+    body.innerHTML = `<div class="sys-grid">
+      <div class="sys-card"><h3>🛠️ Acesso</h3>
+        <div class="toggle-row"><span><b>Cadastros abertos</b><small>Desligue para ninguém novo criar conta</small></span><label class="switch"><input type="checkbox" data-sys="regOpen" ${st.regOpen !== false ? "checked" : ""}><i></i></label></div>
+        <label class="field" style="margin-top:12px"><span>Modo manutenção (só a equipe entra)</span><input data-sys="maintenance" maxlength="300" placeholder="Vazio = desligado. Ex.: Voltamos às 22h!" value="${esc(st.maintenance || "")}"></label>
+        <button class="btn primary" data-act="sys-save" data-part="access">Salvar acesso</button></div>
+      <div class="sys-card"><h3>📲 Versão mínima do app</h3>
+        <p class="hint">Apps de Android/PC mais antigos que isso recebem o aviso para atualizar e, passado o prazo, só entram baixando a versão nova. O site sempre usa a versão mais nova.</p>
+        <div class="row-2"><label class="field"><span>Android</span><input data-min="android" placeholder="ex.: 3.0.0" value="${esc(mi.android || "")}"></label><label class="field"><span>PC (Windows)</span><input data-min="desktop" placeholder="ex.: 3.0.0" value="${esc(mi.desktop || "")}"></label></div>
+        <label class="field"><span>Prazo para atualizar (minutos)</span><input data-min="grace" type="number" min="0" max="4320" value="${mi.since && mi.since > Date.now() ? Math.ceil((mi.since - Date.now()) / 60000) : 0}"></label>
+        <small class="hint" style="display:block;margin:-6px 0 12px">${mi.android || mi.desktop ? (mi.since > Date.now() ? `Exigido a partir de ${new Date(mi.since).toLocaleString("pt-BR")}.` : "Já está sendo exigido.") : "Nenhuma versão mínima no momento."}</small>
+        <div class="row-btns"><button class="btn primary" data-act="sys-save" data-part="min">Salvar versão</button><button class="btn ghost" data-act="sys-save" data-part="min-off">Não exigir</button></div></div>
+      <div class="sys-card"><h3>💸 Pagamentos</h3>
+        <label class="field"><span>Chave Pix (usada quando o plano não tem link)</span><input data-sys="pixKey" maxlength="140" placeholder="e-mail, telefone, CPF/CNPJ ou chave aleatória" value="${esc(st.pixKey || "")}"></label>
+        <details><summary>Links de cobrança por plano</summary>${["plus", "pro", "max"].map(t => linkRow(t, "m", `${PLAN_NAME[t]} · mensal`) + linkRow(t, "q", `${PLAN_NAME[t]} · trimestral`)).join("")}</details>
+        <button class="btn primary" data-act="sys-save" data-part="pay">Salvar pagamentos</button></div>
+      <div class="sys-card danger-card"><h3>📢 Aviso fixado</h3>
+        ${st.announce ? `<p><b>${esc(st.announce.title)}</b><br><small class="hint">por ${esc(st.announce.by || "?")} em ${new Date(st.announce.at).toLocaleString("pt-BR")} — aparece uma vez para cada pessoa ao entrar.</small></p><button class="btn" data-act="sys-ann-clear">Tirar o aviso fixado</button>` : `<p class="hint">Nenhum aviso fixado. Use <b>📢 Aviso geral</b> com a opção "fixar".</p>`}
+        <h3 style="margin-top:20px">🔐 Desconexão geral</h3>
+        <p class="hint">Encerra a sessão de <b>todas as contas em todos os aparelhos</b> (menos este). Todo mundo precisa entrar de novo.</p>
+        <button class="btn danger" data-act="sys-logout-all">Desconectar todo mundo</button></div>
     </div>`;
   } else if (tab === "orders") {
     const r = await emit("order:list", { status: S.adminFilter });
@@ -1053,7 +1144,7 @@ async function renderAdmin(soft) {
     const list = body.querySelector("[data-ulist]");
     const r = await emit("admin:users", { q: S.adminQ || "" });
     if (r.error) { list.innerHTML = esc(r.error); return; }
-    list.innerHTML = r.users.map(u => `<div class="adm-user">${avatar(u, 36)}<div class="who" data-act="admin-user" data-uid="${u.id}" role="button" tabindex="0" style="cursor:pointer" data-tip="Ver ficha completa"><b>${esc(u.username)}${u.admin ? ` <span class="ost st-rev">ADM</span>` : ""}</b><small>${esc(u.email || "sem e-mail")}${u.email && !u.emailVerified ? " (não confirmado)" : ""}</small></div><div>${u.plan ? `<span class="ost st-ok">${esc(PLAN_NAME[u.plan])}</span><small style="display:block;color:var(--muted)">até ${fmtDate(u.until)}</small>` : `<small style="color:var(--muted)">sem plano</small>`}</div><div class="ao-acts">${u.banned ? `<span class="ost st-bad" data-tip="${esc(u.banned.reason || "sem motivo")}">Suspensa</span>` : ""}${u.admin ? "" : `<button class="btn sm" data-act="admin-pass" data-uid="${u.id}" data-name="${esc(u.username)}">🔑 Senha</button>`}<button class="btn sm" data-act="admin-grant" data-uid="${u.id}" data-name="${esc(u.username)}">Dar plano</button>${u.plan ? `<button class="btn sm danger" data-act="admin-revoke" data-uid="${u.id}" data-name="${esc(u.username)}">Revogar</button>` : ""}${u.admin ? "" : u.banned ? `<button class="btn sm green" data-act="admin-unban" data-uid="${u.id}" data-name="${esc(u.username)}">Reativar conta</button>` : `<button class="btn sm danger" data-act="admin-ban" data-uid="${u.id}" data-name="${esc(u.username)}">Suspender</button>`}</div></div>`).join("") || `<p style="color:var(--muted)">Ninguém encontrado.</p>`;
+    list.innerHTML = r.users.map(u => `<div class="adm-user">${avatar(u, 36)}<div class="who" data-act="admin-user" data-uid="${u.id}" role="button" tabindex="0" style="cursor:pointer" data-tip="Ver ficha completa"><b>${esc(u.username)}${u.admin ? ` <span class="ost st-rev">ADM</span>` : ""}</b><small>${esc(u.email || "sem e-mail")}${u.email && !u.emailVerified ? " (não confirmado)" : ""}</small></div><div>${u.plan ? `<span class="ost st-ok">${esc(PLAN_NAME[u.plan])}</span><small style="display:block;color:var(--muted)">até ${fmtDate(u.until)}</small>` : `<small style="color:var(--muted)">sem plano</small>`}</div><div class="ao-acts">${u.banned ? `<span class="ost st-bad" data-tip="${esc(u.banned.reason || "sem motivo")}">Suspensa</span>` : ""}${u.admin ? "" : `<button class="btn sm" data-act="admin-pass" data-uid="${u.id}" data-name="${esc(u.username)}">🔑 Senha</button>`}${sup && !u.admin && !u.banned ? `<button class="btn sm" data-act="admin-adm-set" data-uid="${u.id}" data-on="1" data-name="${esc(u.username)}">🛡️ Tornar ADM</button>` : ""}<button class="btn sm" data-act="admin-grant" data-uid="${u.id}" data-name="${esc(u.username)}">Dar plano</button>${u.plan ? `<button class="btn sm danger" data-act="admin-revoke" data-uid="${u.id}" data-name="${esc(u.username)}">Revogar</button>` : ""}${u.admin ? "" : u.banned ? `<button class="btn sm green" data-act="admin-unban" data-uid="${u.id}" data-name="${esc(u.username)}">Reativar conta</button>` : `<button class="btn sm danger" data-act="admin-ban" data-uid="${u.id}" data-name="${esc(u.username)}">Suspender</button>`}</div></div>`).join("") || `<p style="color:var(--muted)">Ninguém encontrado.</p>`;
   } else if (tab === "servers") {
     const f = S.adminSrvF || "active";
     body.innerHTML = `<div class="adm-games-head"><div class="chips"><button class="chip${f === "active" ? " on" : ""}" data-act="admin-srv-f" data-f="active">Ativos</button><button class="chip${f === "blocked" ? " on" : ""}" data-act="admin-srv-f" data-f="blocked">🔒 Bloqueados <b data-bcount></b></button></div><form class="add-box" data-ssearch style="flex:1;max-width:380px"><input placeholder="Buscar servidor ou dono" value="${esc(S.adminSrvQ || "")}"><button class="btn primary">Buscar</button></form></div><div data-slist><p style="color:var(--muted)">Carregando…</p></div>`;
@@ -1077,10 +1168,11 @@ async function renderAdmin(soft) {
       (r.list.length ? r.list.map(b => `<div class="adm-user"><span class="ag-ico">${ic("receipt")}</span><div class="who"><b>${new Date(b.at).toLocaleString("pt-BR")}</b><small>${b.reason === "manual" ? "Feito na mão" : "Automático"} · ${fmtSize(b.size)}</small></div><div class="ao-acts"><button class="btn sm" data-act="admin-backup-dl" data-id="${esc(b.id)}">${ic("download", "sm")}Baixar</button></div></div>`).join("")
         : `<div class="empty">${ic("receipt")}<p>Nenhum backup ainda. O primeiro é feito alguns minutos depois que o servidor liga — ou clique em <b>Fazer backup agora</b>.</p></div>`);
   } else {
-    const r = await emit("admin:audit", {});
+    const r = await emit("admin:audit", { q: S.auditQ || "", action: S.auditA || "" });
     if (r.error) { body.innerHTML = esc(r.error); return; }
-    const NAMES = { "order:approve": "Aprovou pedido", "order:reject": "Recusou pedido", "order:review": "Pôs em análise", "plan:grant": "Deu plano", "plan:revoke": "Revogou plano", "game:save": "Salvou jogo", "game:delete": "Removeu jogo", "server:block": "Bloqueou servidor de", "server:unblock": "Desbloqueou servidor de", "server:delete": "Excluiu servidor de", "user:ban": "Suspendeu", "user:unban": "Reativou", "broadcast": "Enviou aviso geral", "backup:now": "Fez backup do banco", "user:setpass": "Trocou a senha de", "user:logout": "Desconectou de tudo", "user:verify": "Confirmou o e-mail de" };
-    body.innerHTML = r.entries.length ? `<div class="audit">${r.entries.map(e => `<div class="au-row"><small>${new Date(e.at).toLocaleString("pt-BR")}</small><b>${esc(e.adminName)}</b><span>${esc(NAMES[e.action] || e.action)}</span><span>→ ${esc(e.targetName === "?" && e.details.game ? e.details.game : e.targetName)}</span><small>${esc([e.details.tier, e.details.days ? e.details.days + " dias" : "", e.details.amount ? fmtMoney(e.details.amount) : "", e.details.server ? "“" + e.details.server + "”" : "", e.details.reason].filter(Boolean).join(" · "))}</small></div>`).join("")}</div>` : `<div class="empty">${ic("shield")}<p>Nenhuma ação registrada ainda.</p></div>`;
+    const NAMES = { "order:approve": "Aprovou pedido", "order:reject": "Recusou pedido", "order:review": "Pôs em análise", "plan:grant": "Deu plano", "plan:revoke": "Revogou plano", "game:save": "Salvou jogo", "game:delete": "Removeu jogo", "server:block": "Bloqueou servidor de", "server:unblock": "Desbloqueou servidor de", "server:delete": "Excluiu servidor de", "user:ban": "Suspendeu", "user:unban": "Reativou", "broadcast": "Enviou aviso geral", "backup:now": "Fez backup do banco", "user:setpass": "Trocou a senha de", "user:logout": "Desconectou de tudo", "user:verify": "Confirmou o e-mail de", "admin:add": "Tornou ADM", "admin:remove": "Tirou o ADM de", "settings": "Mudou o sistema", "logout:all": "Desconectou todo mundo", "announce:clear": "Tirou o aviso fixado", "migration": "Atualização automática" };
+    const ACTS = [["", "Tudo"], ["order", "Pedidos"], ["plan", "Planos"], ["user", "Contas"], ["server", "Servidores"], ["admin", "Equipe"], ["settings", "Sistema"], ["broadcast", "Avisos"], ["game", "Jogos"]];
+    body.innerHTML = `<div class="adm-games-head"><div class="chips">${ACTS.map(([k, n]) => `<button class="chip${(S.auditA || "") === k ? " on" : ""}" data-act="audit-a" data-a="${k}">${n}</button>`).join("")}</div><form class="add-box" data-asearch style="flex:1;max-width:340px"><input placeholder="Buscar por nome, motivo…" value="${esc(S.auditQ || "")}"><button class="btn primary">Buscar</button></form></div><small class="hint" style="display:block;margin:-4px 0 10px">${r.entries.length} de ${r.total} registros</small>` + (r.entries.length ? `<div class="audit">${r.entries.map(e => `<div class="au-row"><small>${new Date(e.at).toLocaleString("pt-BR")}</small><b>${esc(e.adminName)}</b><span>${esc(NAMES[e.action] || e.action)}</span><span>→ ${esc(e.targetName === "?" && e.details && e.details.game ? e.details.game : e.targetName)}</span><small>${esc([(e.details || {}).tier, e.details && e.details.days ? e.details.days + " dias" : "", e.details.amount ? fmtMoney(e.details.amount) : "", e.details.server ? "“" + e.details.server + "”" : "", e.details.reason].filter(Boolean).join(" · "))}</small></div>`).join("")}</div>` : `<div class="empty">${ic("shield")}<p>Nenhuma ação encontrada.</p></div>`);
   }
 }
 /* --- chamada privada (conversa ou grupo) --- */
@@ -1209,21 +1301,72 @@ function adminSetPass(uid, name) {
   });
 }
 function adminBroadcast() {
+  const sup = !!S.me.supreme;
   modal({
-    title: "📢 Aviso geral", sub: "Aparece na tela de todo mundo que está online agora",
-    body: `<label class="field"><span>Mensagem</span><textarea data-t maxlength="500" placeholder="Ex.: Manutenção hoje às 22h, o app pode cair por 5 minutos."></textarea></label><div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" data-go>Enviar para todos</button></div>`,
+    title: "📢 Aviso geral", sub: sup ? "Para todo mundo — online agora, e também quem entrar depois se você fixar" : "Aparece na tela de todo mundo que está online agora",
+    body: `<label class="field"><span>Título</span><input data-ti maxlength="80" placeholder="Aviso da equipe Auryx"></label>
+      <label class="field"><span>Mensagem</span><textarea data-t maxlength="1500" rows="5" placeholder="Ex.: Manutenção hoje às 22h, o app pode cair por 5 minutos."></textarea></label>
+      ${sup ? `<div class="toggle-row"><span><b>Fixar o aviso</b><small>Quem entrar depois também vê (uma vez por pessoa)</small></span><label class="switch"><input type="checkbox" data-keep><i></i></label></div>
+      <div class="toggle-row"><span><b>Mandar notificação</b><small>Chega até com o app fechado, para quem ligou as notificações</small></span><label class="switch"><input type="checkbox" data-push><i></i></label></div>` : ""}
+      <div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" data-go>Enviar para todos</button></div>`,
     onMount(m, close) {
       m.querySelector("[data-go]").onclick = async () => {
-        const r = await emit("admin:broadcast", { text: m.querySelector("[data-t]").value.trim() });
+        const r = await emit("admin:broadcast", { title: m.querySelector("[data-ti]").value.trim(), text: m.querySelector("[data-t]").value.trim(), keep: !!m.querySelector("[data-keep]")?.checked, push: !!m.querySelector("[data-push]")?.checked });
         if (r.error) { toast(r.error, "error"); return; }
-        close(); toast("Aviso enviado para todos online.", "ok");
+        close(); toast(`Aviso enviado${r.push ? ` · ${r.push} notificações` : ""}.`, "ok");
       };
     }
   });
 }
-function showAnnounce({ text, by }) {
+/* gráfico de linha pequeno (SVG) para o painel */
+function sparkline(vals, color) {
+  const w = 320, h = 64, max = Math.max(1, ...vals), n = vals.length;
+  const pts = vals.map((v, i) => `${((i / Math.max(1, n - 1)) * w).toFixed(1)},${(h - 4 - (v / max) * (h - 10)).toFixed(1)}`).join(" ");
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="máximo ${max}"><polyline points="0,${h} ${pts} ${w},${h}" fill="${color}" fill-opacity=".12" stroke="none"/><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg><small class="spark-meta">agora ${vals[n - 1]} · pico ${max}</small>`;
+}
+function showAnnounce({ id, title, text, by }) {
   try { sfx("mention"); } catch {}
-  modal({ title: "📢 Aviso da equipe Auryx", sub: by ? `por ${esc(by)}` : "", body: `<p style="white-space:pre-wrap;color:var(--text)">${esc(text)}</p><div class="modal-foot"><button class="btn primary" data-close>Entendi</button></div>` });
+  if (id && S.me) store.set("ann:" + S.me.id + ":" + id, 1);
+  if (id && S.me) store.set("news", NEWS_ID);   // o aviso já traz as novidades
+  modal({ title: esc(title || "📢 Aviso da equipe Auryx"), sub: by ? `por ${esc(by)}` : "", cls: "announce-modal",
+    body: `<div class="ann-logo" data-logo></div><p class="ann-text">${esc(text)}</p><div class="modal-foot"><button class="btn primary" data-close>Entendi</button></div>`,
+    onMount(m) { const l = m.querySelector("[data-logo]"); if (l) l.innerHTML = LOGO(); } });
+}
+/* limite de caracteres por mensagem (aumenta com o plano) */
+function applyLimits(max) {
+  if (max) S.msgMax = max;
+  else if (S.me && S.me.msgMax) S.msgMax = S.me.msgMax;
+  const inp = $("#input");
+  if (inp && S.msgMax) inp.maxLength = S.msgMax;
+}
+/* app de Android/PC desatualizado: aviso (no prazo) e tela de bloqueio (depois do prazo) */
+const appKindName = k => (k === "android" ? "Android" : "PC (Windows)");
+function showOutdated(o) {
+  if (!o || !o.url) return;
+  const left = o.since ? Math.max(0, Math.ceil((o.since - Date.now()) / 60000)) : 0;
+  modal({
+    title: "📲 Atualize o app", sub: `Auryx Nexos para ${appKindName(o.kind)}`,
+    body: `<p style="color:var(--text-2)">Saiu a versão nova do app (${esc(o.min)} ou mais nova). ${left ? `A versão que você usa para de funcionar em <b>${left} min</b>.` : ""} Baixe e instale por cima — suas conversas e servidores continuam todos lá.</p>
+      <div class="modal-foot"><button class="btn ghost" data-close>Depois</button><a class="btn primary" href="${esc(o.url)}" target="_blank" rel="noopener">${ic("download", "sm")}Baixar a versão nova</a></div>`
+  });
+}
+function showUpdateRequired(o) {
+  hideBoot();
+  $("#app").classList.add("hidden");
+  $("#auth").classList.add("hidden");
+  let el = $("#blockScreen");
+  if (!el) { el = document.createElement("div"); el.id = "blockScreen"; el.className = "block-screen"; document.body.append(el); }
+  el.innerHTML = `<div class="block-card"><div class="block-logo" data-logo>${LOGO()}</div><h1>Atualize a Auryx Nexos</h1>
+    <p>O app mudou de nome e ganhou uma versão nova. Esta versão ${o.ver && o.ver !== "0" ? `(${esc(o.ver)}) ` : ""}do app para ${esc(appKindName(o.kind))} não é mais aceita.</p>
+    <a class="btn primary big" href="${esc(o.url || "/site")}" target="_blank" rel="noopener">${ic("download", "sm")}Baixar o app novo</a>
+    <small>Depois de instalar, abra o app e entre com seu usuário e senha. Também dá para usar pelo navegador: <a href="${esc(location.origin)}" target="_blank" rel="noopener">${esc(location.host)}</a></small></div>`;
+}
+function showMaintenance(text) {
+  hideBoot();
+  $("#app").classList.add("hidden");
+  let el = $("#blockScreen");
+  if (!el) { el = document.createElement("div"); el.id = "blockScreen"; el.className = "block-screen"; document.body.append(el); }
+  el.innerHTML = `<div class="block-card"><div class="block-logo">${LOGO()}</div><h1>Em manutenção 🛠️</h1><p>${esc(text || "A Auryx Nexos está em manutenção. Volte daqui a pouco!")}</p><button class="btn primary" onclick="location.reload()">Tentar de novo</button></div>`;
 }
 
 /* aviso (uma vez por aparelho) para quem é administrador */
@@ -1231,7 +1374,7 @@ function adminWelcome() {
   store.set("admOk:" + S.me.id, true);
   modal({
     title: "🛡️ Você é administrador", sub: `Bem-vindo, ${esc(S.me.username)}!`,
-    body: `<p style="color:var(--text-2)">Sua conta é <b>ADM da Auryx Nexavória</b>. Você pode aprovar pagamentos Pix, dar ou revogar planos, cadastrar jogos e ver o histórico — tudo pelo <b>Painel ADM</b> (o escudo na barra da esquerda).</p>
+    body: `<p style="color:var(--text-2)">Sua conta é <b>ADM da Auryx Nexos</b>. Você pode aprovar pagamentos Pix, dar ou revogar planos, cadastrar jogos e ver o histórico — tudo pelo <b>Painel ADM</b> (o escudo na barra da esquerda).</p>
       <div class="modal-foot"><button class="btn ghost" data-close>Depois</button><button class="btn primary" data-go>${ic("shield", "sm")}Abrir Painel ADM</button></div>`,
     onMount(m, close) { m.querySelector("[data-go]").onclick = () => { close(); goAdmin(); }; }
   });
@@ -1257,7 +1400,7 @@ async function loadGames(force) {
 /* ------------------------------------------------------------------ */
 /* Aury — IA exclusiva dos assinantes VIP (e atendente do pagamento)   */
 /* ------------------------------------------------------------------ */
-const AURY = { id: "aury", username: "Aury (IA)", color: "#8b5cf6", avatar: "🤖", status: "online", about: "Assistente com inteligência artificial da Auryx Nexavória.", created: 0, bot: true };
+const AURY = { id: "aury", username: "Aury (IA)", color: "#8b5cf6", avatar: "🤖", status: "online", about: "Assistente com inteligência artificial da Auryx Nexos.", created: 0, bot: true };
 const AIS = { loaded: false, on: false, tier: "", limit: 0, used: 0, msgs: [], pending: null, busy: false };
 const AI_SUGGEST = ["Me dá ideias de nome para meu servidor de jogos", "Como transmito a tela do celular na call?", "Me ajuda a escrever as regras do meu servidor", "Me recomenda jogos para jogar com amigos"];
 async function goAI() {
@@ -1379,7 +1522,7 @@ function renderGamesView() {
   if (!root || !S.games) return;
   const cat = S.gameCat || "";
   root.innerHTML = `<div class="page games">
-    <div class="hero games-hero"><h1>${ic("gamepad", "lg")} Jogos</h1><p>Jogue direto na Auryx Nexavória — sozinho ou com a galera da call.</p></div>
+    <div class="hero games-hero"><h1>${ic("gamepad", "lg")} Jogos</h1><p>Jogue direto na Auryx Nexos — sozinho ou com a galera da call.</p></div>
     <div class="games-bar"><label class="games-search">${ic("search", "sm")}<input data-gq type="search" placeholder="Buscar jogo" value="${esc(S.gameQ || "")}" maxlength="40" aria-label="Buscar jogo"></label>
       <div class="chips">${["", ...gameCats()].map(c => `<button class="chip${cat === c ? " on" : ""}" data-act="games-cat" data-cat="${esc(c)}">${esc(c || "Todos")}</button>`).join("")}</div></div>
     <div data-ggrid>${gamesGrid()}</div>
@@ -1661,7 +1804,7 @@ function renderFriends() {
   const tabs = [["online", "Online"], ["all", "Todos"], ["pending", `Pendentes${inCount ? ` <b class="badge">${inCount}</b>` : ""}`], ["add", "Adicionar amigo"]];
   let body = "";
   if (tab === "add") {
-    body = `<div class="add-friend"><h2>Adicionar amigo</h2><p>Você pode adicionar amigos pelo nome de usuário da Auryx Nexavória.</p>
+    body = `<div class="add-friend"><h2>Adicionar amigo</h2><p>Você pode adicionar amigos pelo nome de usuário da Auryx Nexos.</p>
       <form class="add-box" id="addFriendForm"><input id="addFriendInput" placeholder="Digite o nome de usuário" maxlength="24" autocomplete="off" spellcheck="false"><button class="btn primary">Enviar pedido</button></form></div>
       <div class="section-title">Sugestões dos seus servidores</div>` +
       ([...S.users.values()].filter(u => u.id !== S.me.id && !S.friends.has(u.id)).slice(0, 12).map(u => `<div class="friend-row">${avatar(u, 38, true, `data-act="profile" data-uid="${u.id}"`)}<div class="who"><b>${esc(u.username)}</b><small>${esc(u.about || STATUS[u.status])}</small></div><div class="acts"><button class="btn sm" data-act="add-friend" data-uid="${u.id}">${ic("userPlus", "sm")}Adicionar</button></div></div>`).join("") || `<p style="color:var(--muted)">Entre em servidores para ver sugestões.</p>`);
@@ -1771,7 +1914,7 @@ function msgHTML(m, prev, isNew) {
   const u = user(m.a), s = srv(), mine = S.me && m.a === S.me.id;
   const cont = prev && !prev.sys && prev.a === m.a && !m.re && m.ts - prev.ts < 420000 && sameDay(prev.ts, m.ts);
   const { html, images, jumbo } = renderText(m.t);
-  const cls = ["msg", cont && "cont", isNew && "new", m.pending && "pending", m.failed && "failed", mentionsMe(m) && "mention"].filter(Boolean).join(" ");
+  const cls = ["msg", cont && "cont", isNew && "new", m.pending && "pending", m.failed && "failed", mentionsMe(m) && "mention", u.plan && "vip vip-" + u.plan].filter(Boolean).join(" ");
   let h = `<div class="${cls}" data-id="${esc(m.id)}">`;
   if (m.re) {
     const ru = user(m.re.a);
@@ -1780,7 +1923,7 @@ function msgHTML(m, prev, isNew) {
   h += cont ? `<time class="msg-side-time" title="${esc(fmtFull(m.ts))}">${fmtTime(m.ts)}</time>` : avatar(u, 40, false, `data-act="profile" data-uid="${esc(u.id)}"`);
   h += `<div class="msg-body">`;
   if (!cont) {
-    h += `<div class="msg-head"><span class="msg-author" data-act="profile" data-uid="${esc(u.id)}" style="color:${esc((s && roleColor(s, u.id)) || u.color)}">${nameHTML(u)}</span>${s ? userRoles(s, u.id).slice(0, 1).map(r => `<span class="msg-role" style="--rc:${esc(r.color)}">${esc(r.name)}</span>`).join("") : ""}${s && s.ownerId === u.id ? `<span class="owner-tag" data-tip="Dono do servidor">${ic("crown")}</span>` : ""}<time title="${esc(fmtFull(m.ts))}">${fmtStamp(m.ts)}</time></div>`;
+    h += `<div class="msg-head"><span class="msg-author" data-act="profile" data-uid="${esc(u.id)}" style="color:${esc((s && roleColor(s, u.id)) || u.color)}">${nameHTML(u)}</span>${u.plan ? `<span class="plan-chip" data-tip="Assinante ${esc(PLAN_NAME[u.plan])}">${{ plus: "💠", pro: "💎", max: "👑" }[u.plan]}</span>` : ""}${staffTag(u)}${s ? userRoles(s, u.id).slice(0, 1).map(r => `<span class="msg-role" style="--rc:${esc(r.color)}">${r.icon ? esc(r.icon) + " " : ""}${esc(r.name)}</span>`).join("") : ""}${s && s.ownerId === u.id ? `<span class="owner-tag" data-tip="Dono do servidor">${ic("crown")}</span>` : ""}<time title="${esc(fmtFull(m.ts))}">${fmtStamp(m.ts)}</time></div>`;
   }
   h += `<div class="msg-text${jumbo ? " jumbo" : ""}">${html}${m.e ? `<span class="edited" title="${esc(fmtFull(m.e))}">(editado)</span>` : ""}</div>`;
   h += filesHTML(m);
@@ -1865,7 +2008,7 @@ function filesHTML(m) {
   }).join("")}</div>`;
 }
 function addFiles(list) {
-  if (LOCAL) { toast("Enviar arquivos funciona na versão online da Auryx Nexavória.", "warn"); return; }
+  if (LOCAL) { toast("Enviar arquivos funciona na versão online da Auryx Nexos.", "warn"); return; }
   if (S.view !== "chat" || !S.channelId) return;
   for (const f of [...list]) {
     if (S.uploads.filter(u => u.cid === S.channelId).length >= 10) { toast("No máximo 10 arquivos por mensagem.", "warn"); break; }
@@ -2408,7 +2551,7 @@ function localSocket(token) {
         return;
       }
       case "friend:request": case "friend:accept": case "friend:remove": case "dm:open":
-        fail("Amigos e mensagens privadas funcionam na versão online da Auryx Nexavória.");
+        fail("Amigos e mensagens privadas funcionam na versão online da Auryx Nexos.");
         return;
       default: return { ok: true };
     }
@@ -2431,12 +2574,15 @@ function emit(ev, data) {
   });
 }
 function connect() {
-  const sock = LOCAL ? localSocket(S.token) : io({ auth: { token: S.token, v: 2 }, transports: ["websocket", "polling"], reconnectionDelayMax: 6000 });
+  const sock = LOCAL ? localSocket(S.token) : io({ auth: { token: S.token, v: 3 }, transports: ["websocket", "polling"], reconnectionDelayMax: 6000 });
   S.socket = sock;
   sock.on("connect_error", err => {
-    if (err && err.message === "auth") { store.del("token"); S.token = null; sock.disconnect(); showAuth("Sua sessão expirou. Entre novamente."); return; }
+    if (err && err.message === "auth") { store.del("token"); S.token = null; sock.disconnect(); showAuth(Date.now() < Date.UTC(2027, 0, 15) ? "A Auryx Nexavória agora é Auryx Nexos! ✨ Por segurança, entre de novo." : "Sua sessão expirou. Entre novamente."); return; }
     if (err && err.message === "banned") { store.del("token"); S.token = null; sock.disconnect(); showAuth(`Sua conta foi suspensa pela equipe da Auryx.${err.data && err.data.reason ? " Motivo: " + err.data.reason : ""}`); return; }
     if (err && err.message === "verify") { sock.disconnect(); showAuth(); setAuthMode("verify", "Confirme seu e-mail para entrar. Digite o código que enviamos (ou peça outro)."); return; }
+    // app de Android/PC antigo depois do prazo: só entra baixando a versão nova
+    if (err && err.message === "update") { sock.disconnect(); showUpdateRequired(err.data || {}); return; }
+    if (err && err.message === "maintenance") { sock.disconnect(); showMaintenance(err.data && err.data.text); return; }
     if (S.ready) $("#connBar").classList.remove("hidden");
   });
   sock.on("connect", () => { $("#connBar").classList.add("hidden"); sock.emit("vis", { hidden: document.hidden }); });
@@ -2450,11 +2596,19 @@ function connect() {
     schedule("members", "side", "home");
   });
   sock.on("me:update", ({ me }) => {
+    const wasAdmin = S.me && S.me.admin;
     S.me = { ...S.me, ...me };
     S.users.set(me.id, { ...S.users.get(me.id), ...me });
+    applyAccent();
+    applyLimits();
+    $(".rail-item.admin").classList.toggle("hidden", !S.me.admin);
+    if (S.me.admin && !wasAdmin) toast("Agora você faz parte da equipe ADM da Auryx Nexos 🛡️", "ok", 5000);
+    if (!S.me.admin && wasAdmin && S.view === "admin") goHome();
     schedule("user", "members", "side", "rail", "top", "home");
     if (S.view === "premium") renderPremium();
   });
+  sock.on("announce:clear", () => {});
+  sock.on("maintenance", ({ text }) => { S.ready = false; showMaintenance(text); });
   sock.on("order:update", ({ order }) => onOrderUpdate(order));
   sock.on("order:new", ({ order }) => { if (S.me && S.me.admin) { sfx("mention"); toast(`Novo pedido: ${order.user ? order.user.username : "?"} — plano ${order.plan}`, "info", 5000); } });
   sock.on("announce", showAnnounce);
@@ -2489,7 +2643,8 @@ function connect() {
   });
   sock.on("user:update", ({ user: u, statusPref }) => {
     S.users.set(u.id, u);
-    if (S.me && u.id === S.me.id) { S.me = { ...u, statusPref: statusPref || S.me.statusPref }; schedule("user"); }
+    // mantém os campos só meus (ADM, e-mail, Aurys…) — antes eles sumiam até recarregar
+    if (S.me && u.id === S.me.id) { S.me = { ...S.me, ...u, statusPref: statusPref || S.me.statusPref }; schedule("user"); }
     schedule("members", "side", "home", "stage");
     if (S.view === "chat") rerenderVisible();
   });
@@ -2504,6 +2659,7 @@ function connect() {
     if (!s) return;
     Object.assign(s, server);
     renderAll();
+    applyAccent();
     if (S.view === "chat" && S.serverId === s.id) rerenderVisible();
   });
   sock.on("server:remove", ({ serverId, reason }) => {
@@ -2532,7 +2688,7 @@ function connect() {
   sock.on("channel:update", ({ serverId, channel }) => {
     const s = S.servers.get(serverId), c = s && s.channels.find(x => x.id === channel.id);
     if (!c) return;
-    Object.assign(c, { name: channel.name, topic: channel.topic });
+    Object.assign(c, { name: channel.name, topic: channel.topic, emoji: channel.emoji || "", cat: channel.cat || "" });
     schedule("side", "top");
     if (S.channelId === c.id && S.view === "chat") $("#input").placeholder = `Conversar em #${c.name}`;
   });
@@ -2604,7 +2760,12 @@ function connect() {
     else toast(`Seu ${n} venceu. Os benefícios foram pausados — nada foi apagado.`, "warn", 9000);
     if (S.view === "premium") loadPlans().then(renderPremium);
   });
-  sock.on("session:ended", () => { toast("Sua conta foi desconectada deste aparelho.", "warn", 6000); setTimeout(() => { teardownVoice(true); store.del("token"); location.reload(); }, 1500); });
+  sock.on("session:ended", d => {
+    const all = d && d.all;
+    toast(all ? "A equipe desconectou todo mundo para uma atualização. Entre de novo!" : "Sua conta foi desconectada deste aparelho.", "warn", 6000);
+    if (all) try { sessionStorage.setItem("nx:loggedOut", "1"); } catch {}
+    setTimeout(() => { teardownVoice(true); store.del("token"); location.reload(); }, 1500);
+  });
   sock.on("voice:kicked", ({ reason } = {}) => { teardownVoice(); if (reason) toast(reason, "warn", 5000); renderAll(); });
 }
 
@@ -2633,27 +2794,27 @@ function checkVersion(ver) {
   if (ver === S.appVer) return;
   const busy = V.channelId || (document.activeElement && /TEXTAREA|INPUT/.test(document.activeElement.tagName) && document.activeElement.value);
   if (busy) { showUpdateBar(); return; }
-  toast("Atualizando a Auryx Nexavória…", "info", 3000);
+  toast("Atualizando a Auryx Nexos…", "info", 3000);
   // apaga a cópia guardada do app para a recarga já vir com a versão nova
   const wipe = window.caches ? caches.keys().then(ks => Promise.all(ks.map(k => caches.delete(k)))).catch(() => {}) : Promise.resolve();
   wipe.then(() => setTimeout(() => location.reload(), 800));
 }
 /* Novidades: aparece uma vez para cada pessoa depois da atualização */
-const NEWS_ID = "2026-11-15a";
+const NEWS_ID = "2026-11-21-nexos";
 function showNews() {
   if (store.get("news") === NEWS_ID) return;
   store.set("news", NEWS_ID);
   const it = (e, t, d) => `<li><span class="nw-e">${e}</span><div><b>${t}</b><small>${d}</small></div></li>`;
   modal({
-    title: "🚀 Novidades da Auryx", sub: "O app acabou de ser atualizado",
+    title: "✨ Novidades da Auryx Nexos", sub: "Nome novo, visual novo e muita coisa nova",
     body: `<ul class="news">${[
-      it("🛡️", "Cargos nos servidores", "Crie cargos com cor e permissões (moderador, admin…), dê para os membros, bana e veja o registro do servidor."),
-      it("🎵", "Bot de música sem prévia", "Digite o nome da música e ela toca inteira. Link do Spotify? Ele acha a música inteira sozinho."),
-      it("🔊", "Voz mais confiável", "Se o navegador pausar o som, aparece um aviso para liberar; conexões que travam se refazem sozinhas."),
-      it("🖥️", "Transmissão de tela melhor", "Cada pessoa recebe na qualidade certa para a tela e a internet dela — muito melhor no celular — e menos atraso."),
-      it("⚙️", "Configurações reorganizadas", "Menu com ícones, seleções mais bonitas e a seção de Segurança."),
-      it("🎮", "Sobreposição de jogo (app de PC)", "Veja quem está na call e quem está falando por cima do jogo — continua no app de PC."),
-      it("💠", "VIP renovado", "Área da assinatura, QR Code do Pix e aviso antes de vencer.")
+      it("🅰️", "Agora somos Auryx Nexos", "Mesmo app, mesmos amigos e servidores — com nome, ícone e visual novos no PC."),
+      it("📅", "Planos trimestrais", "VIP, Pro e Max por 3 meses, mais barato que pagar mês a mês."),
+      it("💬", "Mensagens maiores", "Até 3.000 caracteres para todo mundo e até 10.000 no Max — e dá para mandar mais seguidas."),
+      it("🎨", "Aurys", "No Pro e no Max você escolhe a cor do app inteiro, em todos os seus aparelhos."),
+      it("🖼️", "Banner em GIF, molduras e partículas", "Perfis animados para quem assina, com moldura dourada e efeitos como galáxia e sakura no Max."),
+      it("🏰", "Servidores do seu jeito", "Banner, cor temática, cargos com ícone e categorias de canais que dobram."),
+      it("📱", "Android melhor", "O botão voltar fecha menus e janelas (antes fechava o app) e dá para abrir o menu deslizando da borda.")
     ].join("")}</ul><div class="modal-foot"><button class="btn primary" data-close>Bora!</button></div>`
   });
 }
@@ -2676,7 +2837,14 @@ function onReady(d) {
   const first = !S.ready;
   S.ready = true;
   showApp();
-  if (first && !LOCAL) setTimeout(showNews, 1200);
+  applyAccent();
+  applyLimits(d.limits && d.limits.msg);
+  // aviso fixado pela equipe (ex.: o novo nome Auryx Nexos): aparece uma vez por conta neste aparelho
+  const ann = d.announce;
+  const annNow = first && ann && !LOCAL && !store.get("ann:" + S.me.id + ":" + ann.id);
+  if (annNow) setTimeout(() => showAnnounce(ann), 900);
+  else if (first && !LOCAL) setTimeout(showNews, 1200);
+  if (d.outdated && !d.outdated.hard) setTimeout(() => showOutdated(d.outdated), 1500);
   if (!LOCAL) {
     // cookie HttpOnly para abrir comprovantes privados (sessões antigas não tinham)
     authApi("account/cookie", {}, true).catch(() => {});
@@ -2700,7 +2868,7 @@ function onReady(d) {
   if (S.openFriends) { S.openFriends = false; goFriends(); }
   if (S.openUrl) { const u = S.openUrl; S.openUrl = null; setTimeout(() => openFromUrl(u), 600); }
   if (first) setupPush(false);
-  if (first && S.me.admin && !store.get("admOk:" + S.me.id, false)) setTimeout(adminWelcome, 900);
+  if (first && !annNow && S.me.admin && !store.get("admOk:" + S.me.id, false)) setTimeout(adminWelcome, 900);
   if (S.pendingInvite) { const code = S.pendingInvite; S.pendingInvite = null; try { sessionStorage.removeItem("nx:invite"); } catch {} joinModal(code); }
 }
 
@@ -3227,7 +3395,7 @@ function rebalance() {
 async function startScreen(cfg) {
   const native = ANDROID && ANDROID.startScreen;
   if (!native && (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia)) {
-    toast(/Android/i.test(navigator.userAgent) ? "Para transmitir a tela no Android, use o app Auryx Nexavória para Android (Configurações › Baixar o app)." : "Seu navegador não permite compartilhar a tela.", "error", 6000);
+    toast(/Android/i.test(navigator.userAgent) ? "Para transmitir a tela no Android, use o app Auryx Nexos para Android (Configurações › Baixar o app)." : "Seu navegador não permite compartilhar a tela.", "error", 6000);
     return;
   }
   if (!V.channelId) { toast("Entre em uma sala de voz para transmitir.", "warn"); return; }
@@ -3391,7 +3559,7 @@ function callBackground(on) {
     const set = (a, f) => { try { navigator.mediaSession.setActionHandler(a, f); } catch {} };
     try {
       if (on) {
-        navigator.mediaSession.metadata = new MediaMetadata({ title: `Em chamada: ${c ? c.name : "sala de voz"}`, artist: s ? s.name : "Auryx Nexavória", album: "Auryx Nexavória", artwork: [{ src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" }] });
+        navigator.mediaSession.metadata = new MediaMetadata({ title: `Em chamada: ${c ? c.name : "sala de voz"}`, artist: s ? s.name : "Auryx Nexos", album: "Auryx Nexos", artwork: [{ src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" }] });
         navigator.mediaSession.playbackState = "playing";
         set("hangup", () => leaveVoice()); set("stop", () => leaveVoice());
         set("togglemicrophone", () => toggleMute()); set("pause", () => toggleMute()); set("play", () => toggleMute());
@@ -3441,7 +3609,7 @@ function showUpdateBar() {
   const el = document.createElement("div");
   el.id = "updBar";
   el.className = "upd-bar";
-  el.innerHTML = `${ic("sparkles", "sm")}<span>Nova versão da Auryx Nexavória disponível</span><button class="btn sm primary" type="button">Atualizar</button><button class="icon-btn" type="button" aria-label="Depois">${ic("x", "sm")}</button>`;
+  el.innerHTML = `${ic("sparkles", "sm")}<span>Nova versão da Auryx Nexos disponível</span><button class="btn sm primary" type="button">Atualizar</button><button class="icon-btn" type="button" aria-label="Depois">${ic("x", "sm")}</button>`;
   el.querySelector(".btn").onclick = () => { if (V.channelId && !confirm("Atualizar agora vai sair da chamada. Continuar?")) return; location.reload(); };
   el.querySelector(".icon-btn").onclick = () => el.remove();
   document.body.append(el);
@@ -3527,7 +3695,7 @@ function stopCam(silent) {
 /* ------------------------------------------------------------------ */
 /* Controle remoto e co-op pela tela                                   */
 /* O vídeo vai pelo WebRTC; mouse/teclado/controle vão por um canal de */
-/* dados direto entre os dois PCs. Quem transmite precisa da Auryx Nexavória    */
+/* dados direto entre os dois PCs. Quem transmite precisa da Auryx Nexos    */
 /* Agente aberto e aceitar o pedido — nada acontece sem permissão.     */
 /* ------------------------------------------------------------------ */
 const AG = { ws: null };
@@ -4806,7 +4974,7 @@ function profilePop(uid, anchor) {
   const steam = steamId ? `<div class="sec"><span class="label">Steam</span><div class="gl"><a href="https://steamcommunity.com/profiles/${steamId}" target="_blank" rel="noopener">${ic("steam", "xs")} Perfil Steam</a>${mine ? "" : `<a href="steam://friends/message/${steamId}">Conversar na Steam</a>`}</div></div>` : "";
   const acts = mine ? `<button class="btn sm" data-edit-profile>Editar perfil</button>`
     : `<button class="btn sm primary" data-dm>${ic("message", "sm")}Mensagem</button>${f === "friend" ? "" : f === "out" ? `<button class="btn sm" disabled>Pedido enviado</button>` : f === "in" ? `<button class="btn sm green" data-accept>Aceitar amizade</button>` : `<button class="btn sm" data-addf>${ic("userPlus", "sm")}Adicionar</button>`}${S.view === "chat" && !isDm(S.channelId) ? `<button class="btn sm ghost" data-mention>@</button>` : ""}`;
-  popover(anchor, `<div class="pb" style="${bannerStyle(u)}"></div><div class="pc">${avatar(u, 76, true)}${badges(u)}<h3>${nameHTML(u)}${u.pron ? `<small class="pron">${esc(u.pron)}</small>` : ""}</h3><div class="status-line"><i class="dot st-${esc(u.status)}"></i>${STATUS[u.status] || ""}${f === "friend" ? " · Amigo" : ""}</div>${u.cs ? `<div class="cs-bubble">${csText(u)}</div>` : ""}${game}${u.about ? `<div class="sec"><span class="label">Sobre mim</span>${esc(u.about)}</div>` : ""}${steam}<div class="sec"><span class="label">No Auryx Nexavória desde</span>${u.created ? new Date(u.created).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</div>${v ? `<div class="sec"><span class="label">Em chamada</span><a data-go-voice="${v.channelId}" style="cursor:pointer">${esc(chan(v.channelId)?.name || "Sala de voz")}</a>${v.screen ? ' <b class="live-tag">AO VIVO</b>' : ""}</div>` : ""}<div class="sec" style="display:flex;gap:8px;flex-wrap:wrap">${acts}</div></div>`, "profile-pop" + (u.pfx ? " pfx-" + u.pfx : ""), (el, close) => {
+  popover(anchor, `<div class="pb" style="${bannerStyle(u)}"></div><div class="pc">${avatar(u, 76, true)}${badges(u)}<h3>${nameHTML(u)}${u.pron ? `<small class="pron">${esc(u.pron)}</small>` : ""}</h3><div class="status-line"><i class="dot st-${esc(u.status)}"></i>${STATUS[u.status] || ""}${f === "friend" ? " · Amigo" : ""}</div>${u.cs ? `<div class="cs-bubble">${csText(u)}</div>` : ""}${game}${u.about ? `<div class="sec"><span class="label">Sobre mim</span>${esc(u.about)}</div>` : ""}${steam}<div class="sec"><span class="label">No Auryx Nexos desde</span>${u.created ? new Date(u.created).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</div>${v ? `<div class="sec"><span class="label">Em chamada</span><a data-go-voice="${v.channelId}" style="cursor:pointer">${esc(chan(v.channelId)?.name || "Sala de voz")}</a>${v.screen ? ' <b class="live-tag">AO VIVO</b>' : ""}</div>` : ""}<div class="sec" style="display:flex;gap:8px;flex-wrap:wrap">${acts}</div></div>`, "profile-pop" + (u.pfx ? " pfx-" + u.pfx : ""), (el, close) => {
     el.addEventListener("click", e => {
       if (e.target.closest("[data-mention]")) { close(); insertAtCaret(`@${u.username} `); }
       if (e.target.closest("[data-edit-profile]")) { close(); userSettings("account"); }
@@ -5004,12 +5172,22 @@ async function inviteModal(sid = S.serverId) {
         toast("Link novo gerado.", "ok");
       };
       const sh = m.querySelector("[data-share]");
-      if (sh) sh.onclick = () => navigator.share({ title: `Entre no ${s.name} na Auryx Nexavória`, url: link }).catch(() => {});
+      if (sh) sh.onclick = () => navigator.share({ title: `Entre no ${s.name} na Auryx Nexos`, url: link }).catch(() => {});
     }
   });
 }
-function channelModal(type = "text", sid = S.serverId) {
+// emoji do canal e categoria (organização visual da lista de canais)
+const serverCats = sid => [...new Set((S.servers.get(sid)?.channels || []).map(c => c.cat).filter(Boolean))];
+const chDecorFields = (sid, emoji, cat) => `<div class="ch-decor"><label class="field" style="flex:none"><span>Emoji</span><button type="button" class="btn emo-pick" data-emo>${emoji ? esc(emoji) : "＋"}</button></label>
+  <label class="field" style="flex:1"><span>Categoria (opcional)</span><input data-cat list="catList" maxlength="30" placeholder="Ex.: Geral, Jogos, Eventos" value="${esc(cat || "")}"><datalist id="catList">${serverCats(sid).map(c => `<option value="${esc(c)}">`).join("")}</datalist></label></div>`;
+function bindDecor(m, st) {
+  const b = m.querySelector("[data-emo]");
+  b.onclick = () => emojiPicker(b, e => { st.emoji = e; b.textContent = e; });
+  b.oncontextmenu = e => { e.preventDefault(); st.emoji = ""; b.textContent = "＋"; };
+}
+function channelModal(type = "text", sid = S.serverId, cat = "") {
   let t = type;
+  const deco = { emoji: "" };
   modal({
     title: "Criar canal", sub: `em ${esc(S.servers.get(sid)?.name || "")}`,
     body: `<span class="label">Tipo de canal</span>
@@ -5019,8 +5197,10 @@ function channelModal(type = "text", sid = S.serverId) {
       </div>
       <label class="field"><span>Nome do canal</span><input id="cName" maxlength="32" placeholder="${t === "text" ? "novo-canal" : "Nova sala"}" autofocus></label>
       <label class="field" data-topic ${t === "voice" ? 'style="display:none"' : ""}><span>Tópico (opcional)</span><input id="cTopic" maxlength="160" placeholder="Sobre o que se conversa aqui?"></label>
+      ${chDecorFields(sid, "", cat)}
       <div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" data-go>Criar canal</button></div>`,
     onMount(m, close) {
+      bindDecor(m, deco);
       m.addEventListener("change", e => {
         if (e.target.name !== "ct") return;
         t = e.target.value;
@@ -5033,7 +5213,7 @@ function channelModal(type = "text", sid = S.serverId) {
         const name = m.querySelector("#cName").value.trim();
         if (!name) { m.querySelector("#cName").focus(); return; }
         go.classList.add("loading");
-        const r = await emit("channel:create", { serverId: sid, name, type: t, topic: m.querySelector("#cTopic").value });
+        const r = await emit("channel:create", { serverId: sid, name, type: t, topic: m.querySelector("#cTopic").value, emoji: deco.emoji, cat: m.querySelector("[data-cat]").value });
         go.classList.remove("loading");
         if (r.error) { toast(r.error, "error"); return; }
         close();
@@ -5047,15 +5227,19 @@ function channelModal(type = "text", sid = S.serverId) {
 function channelSettings(cid) {
   const c = chan(cid);
   if (!c) return;
+  const deco = { emoji: c.emoji || "" };
+  const sid = serverOf(cid)?.id;
   modal({
     title: "Editar canal", sub: `${c.type === "text" ? "#" : "🔊 "}${esc(c.name)}`,
     body: `<label class="field"><span>Nome</span><input id="eName" maxlength="32" value="${esc(c.name)}"></label>
       ${c.type === "text" ? `<label class="field"><span>Tópico</span><textarea id="eTopic" maxlength="160" placeholder="Explique para que serve o canal">${esc(c.topic || "")}</textarea></label>` : ""}
+      ${chDecorFields(sid, c.emoji, c.cat)}<small class="hint" style="display:block;margin:-6px 0 14px">Clique com o botão direito no emoji para tirar.</small>
       <div class="danger-zone" style="margin-top:6px"><span><b>Excluir canal</b><small>${c.type === "text" ? "Todas as mensagens serão apagadas." : "Quem estiver na sala será desconectado."}</small></span><button class="btn danger sm" data-del>Excluir</button></div>
       <div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" data-go>Salvar</button></div>`,
     onMount(m, close) {
+      bindDecor(m, deco);
       m.querySelector("[data-go]").onclick = async () => {
-        const r = await emit("channel:update", { channelId: cid, name: m.querySelector("#eName").value, topic: m.querySelector("#eTopic")?.value });
+        const r = await emit("channel:update", { channelId: cid, name: m.querySelector("#eName").value, topic: m.querySelector("#eTopic")?.value, emoji: deco.emoji, cat: m.querySelector("[data-cat]").value });
         if (r.error) { toast(r.error, "error"); return; }
         close(); toast("Canal atualizado.", "ok");
       };
@@ -5183,10 +5367,20 @@ function settingsShell(sections, initial) {
 }
 const toggleRow = (id, title, sub, on) => `<div class="toggle-row"><span><b>${title}</b><small>${sub}</small></span><label class="switch"><input type="checkbox" data-set="${id}" ${on ? "checked" : ""}><i></i></label></div>`;
 function saveSettings() { store.set("settings", S.settings); applySettings(); }
+/* Cor de destaque em camadas: cor temática do servidor aberto > Aurys da conta (Pro/Max) > cor escolhida neste aparelho */
+function applyAccent() {
+  const root = document.documentElement, s = (S.view === "chat" || S.view === "stage") ? srv() : null;
+  const aur = S.me && S.me.accent;   // o servidor só manda se o plano libera
+  const a1 = (s && s.accent) || (aur && aur[0]) || S.settings.accent || "#7c5cff";
+  const a2 = (s && s.accent) ? `color-mix(in srgb, ${s.accent} 55%, #22d3ee)` : (aur && aur[1]) || "#22d3ee";
+  root.style.setProperty("--accent", a1);
+  root.style.setProperty("--accent-2", a2);
+  root.classList.toggle("aurys", !!aur);
+}
 function applySettings() {
   const st = S.settings, root = document.documentElement;
   root.dataset.theme = st.theme;
-  root.style.setProperty("--accent", st.accent);
+  applyAccent();
   root.classList.toggle("reduce-motion", !!st.reduceMotion);
   const meta = $('meta[name="theme-color"]');
   if (meta) meta.content = st.theme === "light" ? "#e4e6ef" : st.theme === "midnight" ? "#000000" : "#0b0c14";
@@ -5199,7 +5393,7 @@ function userSettings(initial) {
     { id: "turbo", name: "⚡ Perfil Turbo", render: () => `<div id="turboRoot"></div>`, mount: mountTurbo },
     { id: "plans", name: "💎 Planos e pagamentos", action: close => { close(); goPremium(); } },
     { id: "voice", name: "Voz e vídeo", render: renderVoiceSettings, mount: mountVoiceSettings },
-    { id: "stream", name: "Transmissão", render: () => `<p style="color:var(--muted);margin-top:-8px">Padrão usado ao entrar ao vivo. Você pode mudar durante a transmissão.</p><span class="label">Qualidade padrão</span><div class="qgrid" style="margin-top:8px">${Object.entries(QUALITY).map(([k, v]) => `<button type="button" class="qopt${k === S.settings.shareQuality ? " on" : ""}" data-q="${k}">${v.tag ? `<span class="tag">${v.tag}</span>` : ""}<b>${v.label}</b><small>${v.sub}</small></button>`).join("")}</div>${toggleRow("shareAudio", "Transmitir áudio por padrão", "Inclui o som da aba ou do sistema", S.settings.shareAudio)}<div class="hint" style="margin-top:16px">Como a Auryx Nexavória economiza recursos: a tela só é codificada para quem está assistindo, a taxa de bits se divide entre os espectadores, o codec é escolhido pelo modo (VP9 para texto nítido, H.264 com aceleração por hardware para movimento) e o áudio usa Opus com supressão de silêncio.</div>`, mount: p => { p.addEventListener("click", e => { const b = e.target.closest("[data-q]"); if (b) { S.settings.shareQuality = b.dataset.q; saveSettings(); $$("[data-q]", p).forEach(x => x.classList.toggle("on", x === b)); } }); bindToggles(p); } },
+    { id: "stream", name: "Transmissão", render: () => `<p style="color:var(--muted);margin-top:-8px">Padrão usado ao entrar ao vivo. Você pode mudar durante a transmissão.</p><span class="label">Qualidade padrão</span><div class="qgrid" style="margin-top:8px">${Object.entries(QUALITY).map(([k, v]) => `<button type="button" class="qopt${k === S.settings.shareQuality ? " on" : ""}" data-q="${k}">${v.tag ? `<span class="tag">${v.tag}</span>` : ""}<b>${v.label}</b><small>${v.sub}</small></button>`).join("")}</div>${toggleRow("shareAudio", "Transmitir áudio por padrão", "Inclui o som da aba ou do sistema", S.settings.shareAudio)}<div class="hint" style="margin-top:16px">Como a Auryx Nexos economiza recursos: a tela só é codificada para quem está assistindo, a taxa de bits se divide entre os espectadores, o codec é escolhido pelo modo (VP9 para texto nítido, H.264 com aceleração por hardware para movimento) e o áudio usa Opus com supressão de silêncio.</div>`, mount: p => { p.addEventListener("click", e => { const b = e.target.closest("[data-q]"); if (b) { S.settings.shareQuality = b.dataset.q; saveSettings(); $$("[data-q]", p).forEach(x => x.classList.toggle("on", x === b)); } }); bindToggles(p); } },
     { id: "app", name: "Baixar o app", render: renderAppDl, mount: mountAppDl },
     { id: "games", name: "Jogos e Steam", render: renderGames, mount: mountGames },
     { id: "overlay", name: "🎮 Sobreposição de jogo", render: renderOverlaySettings, mount: mountOverlaySettings },
@@ -5215,12 +5409,16 @@ function userSettings(initial) {
 /* Perfil Turbo: tudo liberado, com prévia ao vivo */
 function mountTurbo(p) {
   const me = S.me;
-  const d = { avatar: me.avatar || "", banner: me.banner || "", theme: me.theme || [me.color || "#7c5cff", "#22d3ee"], useTheme: !!me.theme, pron: me.pron || "", cs: { e: (me.cs && me.cs.e) || "", t: (me.cs && me.cs.t) || "" }, fx: me.fx || "", pfx: me.pfx || "" };
+  let saved = false;
+  const d = { avatar: me.avatar || "", banner: me.banner || "", bannerStill: me.bannerStill || "", theme: me.theme || [me.color || "#7c5cff", "#22d3ee"], useTheme: !!me.theme, pron: me.pron || "", cs: { e: (me.cs && me.cs.e) || "", t: (me.cs && me.cs.t) || "" }, fx: me.fx || "", pfx: me.pfx || "", ring: me.ringPref || "",
+    accent: me.accentSaved || [S.settings.accent || "#7c5cff", "#22d3ee"], useAccent: !!me.accentSaved };
   const root = p.querySelector("#turboRoot");
   const FX = [["", "Normal"], ["grad", "Degradê"], ["glow", "Brilho"], ["rainbow", "Arco-íris"]];
-  const PFX = [["", "Nenhum"], ["aurora", "Aurora"], ["stars", "Estrelas"], ["fire", "Fogo"], ["neon", "Neon"]];
+  const PFX = [["", "Nenhum"], ["aurora", "Aurora"], ["stars", "Estrelas"], ["fire", "Fogo"], ["neon", "Neon"], ["galaxy", "Galáxia"], ["sakura", "Sakura"], ["snow", "Neve"], ["hearts", "Corações"]];
+  const RINGS = [["", "Nenhuma", 0], ["spin", "Giratória", 2], ["pulse", "Pulsante", 2], ["rainbow", "Arco-íris", 2], ["gold", "Ouro", 3], ["aurora", "Aurora", 3]];
+  const AURYS = [["#7c5cff", "#22d3ee"], ["#ff4d8d", "#ffb86b"], ["#00c6a7", "#1e90ff"], ["#f59e0b", "#ef4444"], ["#a855f7", "#ec4899"], ["#22c55e", "#06b6d4"], ["#e11d48", "#7c3aed"], ["#64748b", "#e2e8f0"]];
   const preview = () => {
-    const u = { ...me, avatar: d.avatar, banner: d.banner, theme: d.useTheme ? d.theme : null, pron: d.pron, cs: d.cs.t || d.cs.e ? d.cs : null, fx: d.fx, pfx: d.pfx, status: me.statusPref === "invisible" ? "offline" : me.statusPref };
+    const u = { ...me, avatar: d.avatar, banner: d.banner, bannerStill: d.bannerStill, theme: d.useTheme ? d.theme : null, pron: d.pron, cs: d.cs.t || d.cs.e ? d.cs : null, fx: d.fx, pfx: d.pfx, ring: d.ring, status: me.statusPref === "invisible" ? "offline" : me.statusPref };
     return `<div class="popover profile-pop turbo-preview${d.pfx ? " pfx-" + d.pfx : ""}"><div class="pb" style="${bannerStyle(u)}"></div><div class="pc">${avatar(u, 76, true)}${badges(u)}<h3>${nameHTML(u)}${u.pron ? `<small class="pron">${esc(u.pron)}</small>` : ""}</h3><div class="status-line"><i class="dot st-${esc(u.status)}"></i>${STATUS[u.status] || ""}</div>${u.cs ? `<div class="cs-bubble">${csText(u)}</div>` : ""}${u.about ? `<div class="sec"><span class="label">Sobre mim</span>${esc(u.about)}</div>` : ""}</div></div>`;
   };
   const R = myRank(), PN = ["", "VIP", "Pro", "Max"];
@@ -5232,8 +5430,14 @@ function mountTurbo(p) {
         <div class="turbo-form">
           ${sec(2, `<span class="label">Avatar animado</span>
           <div class="row-btns"><button class="btn sm" data-up="avatar">${ic("image", "sm")}Enviar imagem ou GIF</button>${d.avatar ? `<button class="btn sm ghost" data-clear="avatar">Remover</button>` : ""}</div>
-          <span class="label">Banner</span>
-          <div class="row-btns"><button class="btn sm" data-up="banner">${ic("image", "sm")}Enviar banner</button>${d.banner ? `<button class="btn sm ghost" data-clear="banner">Remover</button>` : ""}</div>`)}
+          <span class="label">Banner (imagem ou GIF animado)</span>
+          <div class="row-btns"><button class="btn sm" data-up="banner">${ic("image", "sm")}Enviar banner</button>${d.banner ? `<button class="btn sm ghost" data-clear="banner">Remover</button>` : ""}</div>
+          <small class="hint" style="display:block;margin:-4px 0 12px">GIF de até 6 MB, de preferência 600×240. Quem usa "reduzir animações" vê o 1º quadro.</small>
+          <span class="label">Moldura do avatar</span>
+          <div class="chips">${RINGS.map(([k, n, need]) => `<button class="chip${d.ring === k ? " on" : ""}${need > R ? " locked-chip" : ""}" data-ring="${k}" ${need > R ? `data-tip="Plano ${PN[need]}"` : ""}>${n}${need > R ? " 🔒" : ""}</button>`).join("")}</div>`)}
+          ${sec(2, `<div class="toggle-row"><span><b>Aurys · cor do app inteiro</b><small>Botões, destaques e degradês na sua cor, em todos os seus aparelhos</small></span><label class="switch"><input type="checkbox" data-k="useAccent" ${d.useAccent ? "checked" : ""}><i></i></label></div>
+          <div ${d.useAccent ? "" : 'style="opacity:.4;pointer-events:none"'}><div class="aurys-presets">${AURYS.map(([a, b]) => `<button type="button" class="aurys-sw${d.accent[0] === a && d.accent[1] === b ? " on" : ""}" style="--a:${a};--b:${b}" data-aurys="${a},${b}"></button>`).join("")}</div>
+          <div class="row-btns"><label class="color-in">Principal<input type="color" data-k="a0" value="${esc(d.accent[0])}"></label><label class="color-in">Degradê<input type="color" data-k="a1" value="${esc(d.accent[1])}"></label></div></div>`)}
           ${sec(1, `<div class="toggle-row"><span><b>Cores do perfil</b><small>Degradê usado no banner e no efeito do nome</small></span><label class="switch"><input type="checkbox" data-k="useTheme" ${d.useTheme ? "checked" : ""}><i></i></label></div>
           <div class="row-btns" ${d.useTheme ? "" : 'style="opacity:.4;pointer-events:none"'}><label class="color-in">Cor 1<input type="color" data-k="t0" value="${esc(d.theme[0])}"></label><label class="color-in">Cor 2<input type="color" data-k="t1" value="${esc(d.theme[1])}"></label></div>`)}
           ${sec(2, `<span class="label">Efeito no nome</span>
@@ -5249,20 +5453,28 @@ function mountTurbo(p) {
   };
   const refreshPrev = () => { const pv = root.querySelector(".turbo-prev"); if (pv) pv.innerHTML = `<span class="label">Prévia</span>${preview()}`; };
   draw();
+  // prévia ao vivo da Aurys no app inteiro (volta ao normal se sair sem salvar)
+  const liveAccent = () => { const r = document.documentElement.style; if (d.useAccent) { r.setProperty("--accent", d.accent[0]); r.setProperty("--accent-2", d.accent[1]); } else applyAccent(); };
   root.addEventListener("input", e => {
     const k = e.target.dataset.k;
+    if (k === "a0" || k === "a1") { d.accent[+k[1]] = e.target.value; liveAccent(); return; }
     if (k === "t0" || k === "t1") d.theme[+k[1]] = e.target.value;
     else if (k === "cst") d.cs.t = e.target.value;
     else if (k === "pron") d.pron = e.target.value;
     else return;
     refreshPrev();
   });
-  root.addEventListener("change", e => { if (e.target.dataset.k === "useTheme") { d.useTheme = e.target.checked; draw(); } });
+  root.addEventListener("change", e => {
+    if (e.target.dataset.k === "useTheme") { d.useTheme = e.target.checked; draw(); }
+    if (e.target.dataset.k === "useAccent") { d.useAccent = e.target.checked; draw(); liveAccent(); }
+  });
   root.addEventListener("click", async e => {
     const t = e.target;
+    const au = t.closest("[data-aurys]"); if (au) { d.accent = au.dataset.aurys.split(","); draw(); liveAccent(); return; }
+    const rg = t.closest("[data-ring]"); if (rg) { const need = (RINGS.find(x => x[0] === rg.dataset.ring) || [0, 0, 0])[2]; if (need > R) { toast(`A moldura ${rg.textContent.replace(" 🔒", "")} é do plano ${PN[need]}.`, "info"); return; } d.ring = rg.dataset.ring; draw(); return; }
     const fx = t.closest("[data-fx]"); if (fx) { d.fx = fx.dataset.fx; draw(); return; }
     const pfx = t.closest("[data-pfx]"); if (pfx) { d.pfx = pfx.dataset.pfx; draw(); return; }
-    const cl = t.closest("[data-clear]"); if (cl) { d[cl.dataset.clear] = ""; draw(); return; }
+    const cl = t.closest("[data-clear]"); if (cl) { d[cl.dataset.clear] = ""; if (cl.dataset.clear === "banner") d.bannerStill = ""; draw(); return; }
     const em = t.closest("[data-cs-emoji]"); if (em) { emojiPicker(em, v => { d.cs.e = v; draw(); }); return; }
     const up = t.closest("[data-up]");
     if (up) {
@@ -5271,9 +5483,19 @@ function mountTurbo(p) {
       inp.onchange = async () => {
         const f = inp.files[0];
         if (!f) return;
+        const isBanner = up.dataset.up === "banner", gif = f.type === "image/gif";
+        if (!/^image\/(png|jpeg|webp|gif)$/.test(f.type)) { toast("Envie PNG, JPG, WEBP ou GIF.", "warn"); return; }
+        if (isBanner && gif && f.size > 6 * 1048576) { toast(`Esse GIF tem ${fmtSize(f.size)} — o banner aceita até 6 MB. Diminua ou corte o GIF.`, "warn", 6000); return; }
         up.classList.add("loading");
-        try { const r = await uploadBlob(f); d[up.dataset.up] = r.url; draw(); toast(f.type === "image/gif" ? "GIF enviado — seu avatar vai ficar animado! ✨" : "Imagem enviada.", "ok"); }
-        catch (err) { toast(err.message, "error"); up.classList.remove("loading"); }
+        try {
+          // banner animado: tira o 1º quadro (imagem leve) para quem prefere sem animação e enquanto o GIF carrega
+          const still = isBanner && gif ? await gifStill(f).catch(() => null) : null;
+          const r = await uploadBlob(f);
+          d[up.dataset.up] = r.url;
+          if (isBanner) d.bannerStill = still ? (await uploadBlob(still).catch(() => ({ url: "" }))).url : "";
+          draw();
+          toast(gif ? (isBanner ? "Banner animado enviado! ✨ Clique em Salvar." : "GIF enviado — seu avatar vai ficar animado! ✨") : "Imagem enviada.", "ok");
+        } catch (err) { toast(err.message, "error"); up.classList.remove("loading"); }
       };
       inp.click();
       return;
@@ -5282,11 +5504,27 @@ function mountTurbo(p) {
       // só envia o que o plano libera (o resto fica guardado como está)
       const data = { pron: d.pron };
       if (R >= 1) Object.assign(data, { theme: d.useTheme ? d.theme : null, cs: d.cs });
-      if (R >= 2) Object.assign(data, { avatar: d.avatar, banner: d.banner, fx: d.fx });
+      if (R >= 2) Object.assign(data, { avatar: d.avatar, banner: d.banner, bannerStill: d.bannerStill, fx: d.fx, ring: d.ring, accent: d.useAccent ? d.accent : null });
       if (R >= 3) data.pfx = d.pfx;
       const r = await emit("profile:update", data);
-      if (r.error) toast(r.error, "error"); else { toast("Perfil Turbo salvo! ⚡", "ok"); confetti(); }
+      if (r.error) toast(r.error, "error"); else { saved = true; toast("Perfil Turbo salvo! ⚡", "ok"); confetti(); }
     }
+  });
+  return () => { if (!saved) applyAccent(); };
+}
+/* 1º quadro de um GIF como PNG leve (fallback estático do banner animado) */
+function gifStill(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      const w = Math.min(img.naturalWidth || 600, 1200), h = Math.round(w * (img.naturalHeight || 240) / (img.naturalWidth || 600));
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
+      c.getContext("2d").drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      c.toBlob(b => (b ? resolve(new File([b], "banner-estatico.jpg", { type: "image/jpeg" })) : reject(new Error("still"))), "image/jpeg", 0.85);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("still")); };
+    img.src = url;
   });
 }
 function renderGames() {
@@ -5313,19 +5551,19 @@ async function installApp() {
     installPrompt.prompt();
     const r = await installPrompt.userChoice.catch(() => null);
     installPrompt = null;
-    if (r && r.outcome === "accepted") toast("Auryx Nexavória instalado! 🎉", "ok");
+    if (r && r.outcome === "accepted") toast("Auryx Nexos instalado! 🎉", "ok");
     return true;
   }
   return false;
 }
 function renderAppDl() {
   const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent), android = /Android/i.test(navigator.userAgent);
-  const pwaState = DESKTOP ? "Você já está usando o app de PC. 😎" : isStandalone() ? "✅ A Auryx Nexavória já está instalado neste aparelho." : installPrompt ? "" : ios ? "No iPhone/iPad: toque em <b>Compartilhar</b> ⬆️ e depois em <b>Adicionar à Tela de Início</b>." : android ? "No Android: toque no menu ⋮ do Chrome e em <b>Instalar app</b>." : "No Chrome ou Edge: clique no ícone de instalar ⊕ na barra de endereço (ou menu ⋮ › <b>Instalar Auryx Nexavória</b>).";
-  return `<p style="color:var(--muted);margin-top:-8px">Use a Auryx Nexavória como um app de verdade: janela própria, ícone na área de trabalho e notificações.</p>
+  const pwaState = DESKTOP ? "Você já está usando o app de PC. 😎" : isStandalone() ? "✅ A Auryx Nexos já está instalado neste aparelho." : installPrompt ? "" : ios ? "No iPhone/iPad: toque em <b>Compartilhar</b> ⬆️ e depois em <b>Adicionar à Tela de Início</b>." : android ? "No Android: toque no menu ⋮ do Chrome e em <b>Instalar app</b>." : "No Chrome ou Edge: clique no ícone de instalar ⊕ na barra de endereço (ou menu ⋮ › <b>Instalar Auryx Nexos</b>).";
+  return `<p style="color:var(--muted);margin-top:-8px">Use a Auryx Nexos como um app de verdade: janela própria, ícone na área de trabalho e notificações.</p>
     <div class="steps">
-      <div class="step"><b>${ic("monitor", "sm")}</b><div><b>App para Windows</b><small>Programa completo: seletor de tela próprio, fica na bandeja e já vem com o controle remoto embutido (não precisa do Agente Auryx).</small>${DESKTOP ? `<small style="color:var(--green)">✅ Instalado — você está nele agora.</small>` : `<a class="btn primary sm" href="${DESKTOP_URL}" target="_blank" rel="noopener">${ic("arrowDown", "sm")}Baixar Auryx-Nexavoria-Setup.exe</a><small>Se o Windows avisar "O Windows protegeu o computador", clique em <b>Mais informações › Executar assim mesmo</b>.</small>`}</div></div>
-      <div class="step"><b>${ic("gamepad", "sm")}</b><div><b>App para Android (APK)</b><small>Transmite a tela do celular, mantém a chamada com a tela bloqueada e avisa de mensagens.</small>${ANDROID ? `<small style="color:var(--green)">✅ Instalado — você está nele agora.</small>` : `<a class="btn primary sm" href="${ANDROID_URL}" target="_blank" rel="noopener">${ic("arrowDown", "sm")}Baixar Auryx-Nexavoria.apk</a><small>No Android, permita "instalar apps desconhecidos" para o navegador quando pedir. Não está na Play Store.</small>`}</div></div>
-      <div class="step"><b>${ic("users", "sm")}</b><div><b>Instalar pelo navegador (PC e celular)</b><small>Leve e sem baixar nada: vira um app com ícone, direto do site.</small>${installPrompt && !DESKTOP ? `<button class="btn primary sm" data-install>${ic("plus", "sm")}Instalar Auryx Nexavória</button>` : ""}${pwaState ? `<small>${pwaState}</small>` : ""}</div></div>
+      <div class="step"><b>${ic("monitor", "sm")}</b><div><b>App para Windows</b><small>Programa completo: seletor de tela próprio, fica na bandeja e já vem com o controle remoto embutido (não precisa do Agente Auryx).</small>${DESKTOP ? `<small style="color:var(--green)">✅ Instalado — você está nele agora.</small>` : `<a class="btn primary sm" href="${DESKTOP_URL}" target="_blank" rel="noopener">${ic("arrowDown", "sm")}Baixar Auryx-Nexos-Setup.exe</a><small>Se o Windows avisar "O Windows protegeu o computador", clique em <b>Mais informações › Executar assim mesmo</b>.</small>`}</div></div>
+      <div class="step"><b>${ic("gamepad", "sm")}</b><div><b>App para Android (APK)</b><small>Transmite a tela do celular, mantém a chamada com a tela bloqueada e avisa de mensagens.</small>${ANDROID ? `<small style="color:var(--green)">✅ Instalado — você está nele agora.</small>` : `<a class="btn primary sm" href="${ANDROID_URL}" target="_blank" rel="noopener">${ic("arrowDown", "sm")}Baixar Auryx-Nexos.apk</a><small>No Android, permita "instalar apps desconhecidos" para o navegador quando pedir. Não está na Play Store.</small>`}</div></div>
+      <div class="step"><b>${ic("users", "sm")}</b><div><b>Instalar pelo navegador (PC e celular)</b><small>Leve e sem baixar nada: vira um app com ícone, direto do site.</small>${installPrompt && !DESKTOP ? `<button class="btn primary sm" data-install>${ic("plus", "sm")}Instalar Auryx Nexos</button>` : ""}${pwaState ? `<small>${pwaState}</small>` : ""}</div></div>
     </div>`;
 }
 function mountAppDl(p, rerender) {
@@ -5335,10 +5573,10 @@ function mountAppDl(p, rerender) {
 function renderRemote() {
   const local = LOCAL || location.protocol === "file:";
   if (DESKTOP) return `<p style="color:var(--muted);margin-top:-8px">Deixe um amigo controlar seu PC (como AnyDesk) ou jogar com você em co-op local pela transmissão.</p>
-    <div class="steps"><div class="step"><b>✓</b><div><b>Já está pronto!</b><small>O app de PC tem o controle remoto embutido. Quando alguém clicar em ${ic("gamepad", "xs")} <b>Pedir controle</b> na sua transmissão, é só escolher <b>Co-op</b> ou <b>Controle total</b>.</small><small>Para jogos que rodam como administrador, abra a Auryx Nexavória como administrador também.</small></div></div></div>`;
+    <div class="steps"><div class="step"><b>✓</b><div><b>Já está pronto!</b><small>O app de PC tem o controle remoto embutido. Quando alguém clicar em ${ic("gamepad", "xs")} <b>Pedir controle</b> na sua transmissão, é só escolher <b>Co-op</b> ou <b>Controle total</b>.</small><small>Para jogos que rodam como administrador, abra a Auryx Nexos como administrador também.</small></div></div></div>`;
   return `<p style="color:var(--muted);margin-top:-8px">Deixe um amigo controlar seu PC (como AnyDesk) ou jogar com você em co-op local pela transmissão — como o Remote Play Together da Steam.</p>
     <div class="steps">
-      <div class="step"><b>1</b><div><b>Baixe o Agente Auryx</b><small>Um programinha do Windows que move o mouse e o teclado quando você permite. Não precisa instalar.</small>${local ? `<small style="color:var(--yellow)">Disponível na versão online da Auryx Nexavória.</small>` : `<a class="btn sm" href="/agente/Auryx-Agente.zip" download>${ic("arrowDown", "sm")}Baixar Auryx-Agente.zip</a>`}</div></div>
+      <div class="step"><b>1</b><div><b>Baixe o Agente Auryx</b><small>Um programinha do Windows que move o mouse e o teclado quando você permite. Não precisa instalar.</small>${local ? `<small style="color:var(--yellow)">Disponível na versão online da Auryx Nexos.</small>` : `<a class="btn sm" href="/agente/Auryx-Agente.zip" download>${ic("arrowDown", "sm")}Baixar Auryx-Agente.zip</a>`}</div></div>
       <div class="step"><b>2</b><div><b>Abra o agente</b><small>Descompacte e dê dois cliques em <span class="kbd">Auryx-Agente.bat</span>. Ele mostra um código de 6 números.</small></div></div>
       <div class="step"><b>3</b><div><b>Conecte aqui</b><div class="invite-box" style="margin-top:8px"><input id="agCode" inputmode="numeric" maxlength="6" placeholder="Código de 6 números" value="${esc(S.settings.agentCode || "")}"><button class="btn primary sm" data-ag>Conectar</button></div><small data-ag-status style="margin-top:6px;display:block">${agentOk() ? "✅ Agente conectado" : "Agente desconectado"}</small></div></div>
       <div class="step"><b>4</b><div><b>Transmita a tela e aceite</b><small>Quando alguém clicar em ${ic("gamepad", "xs")} <b>Pedir controle</b> na sua transmissão, você escolhe: <b>Co-op</b> (só teclado/controle) ou <b>Controle total</b> (mouse e teclado). Fechar a janela do agente corta tudo na hora.</small></div></div>
@@ -5368,7 +5606,7 @@ function bindToggles(p, extra) {
 }
 function renderAccount() {
   const me = S.me;
-  return `<div class="profile-card" style="--c:${esc(me.color)}"><div class="pb"></div><div class="pc"><span data-pick-avatar data-tip="Trocar avatar">${avatar({ ...me, status: me.statusPref === "invisible" ? "offline" : me.statusPref }, 92, true)}</span><div class="info"><b>${esc(me.username)}</b><small>No Auryx Nexavória desde ${new Date(me.created).toLocaleDateString("pt-BR")}</small></div><button class="btn sm" data-pick-avatar>Alterar avatar</button></div></div>
+  return `<div class="profile-card" style="--c:${esc(me.color)}"><div class="pb"></div><div class="pc"><span data-pick-avatar data-tip="Trocar avatar">${avatar({ ...me, status: me.statusPref === "invisible" ? "offline" : me.statusPref }, 92, true)}</span><div class="info"><b>${esc(me.username)}</b><small>No Auryx Nexos desde ${new Date(me.created).toLocaleDateString("pt-BR")}</small></div><button class="btn sm" data-pick-avatar>Alterar avatar</button></div></div>
     ${LOCAL ? "" : `<div class="email-box"><span>${ic("bell", "sm")}<b>E-mail</b>${me.email ? `<small>${esc(me.email)} ${me.emailVerified ? `<span class="ost st-ok">confirmado</span>` : `<span class="ost st-pend">não confirmado</span>`}</small>` : `<small>Nenhum e-mail — adicione para poder recuperar a senha.</small>`}</span><button class="btn sm" data-email>${me.email ? "Trocar e-mail" : "Adicionar e-mail"}</button></div>`}
     <span class="label">Cor do perfil</span>
     <div class="swatches" style="margin:8px 0 18px">${COLORS.map(c => `<button type="button" class="swatch${c === me.color ? " on" : ""}" style="--c:${c}" data-color="${c}"></button>`).join("")}</div>
@@ -5466,7 +5704,7 @@ function renderVoiceSettings() {
     <button class="btn sm" data-test>${ic("mic", "sm")}Testar microfone</button> <button class="btn sm" data-listen>${ic("headphones", "sm")}Ouvir a mim mesmo</button>
     <span class="label" style="display:block;margin-top:22px">Supressão de ruído</span>
     <div style="margin:8px 0 6px">
-      ${[["ai", "IA da Auryx Nexavória (recomendado)", "RNNoise: tira ventilador, teclado, cachorro, trânsito — deixa só a sua voz"], ["browser", "Padrão do navegador", "Mais leve, remove só ruído constante"], ["off", "Desligada", "Som cru do microfone (bom para música)"]].map(([k, t, d]) => `<label class="radio-card${nsMode() === k ? " on" : ""}"><span><b>${t}</b><small>${d}</small></span><input type="radio" name="nsm" value="${k}" ${nsMode() === k ? "checked" : ""}></label>`).join("")}
+      ${[["ai", "IA da Auryx Nexos (recomendado)", "RNNoise: tira ventilador, teclado, cachorro, trânsito — deixa só a sua voz"], ["browser", "Padrão do navegador", "Mais leve, remove só ruído constante"], ["off", "Desligada", "Som cru do microfone (bom para música)"]].map(([k, t, d]) => `<label class="radio-card${nsMode() === k ? " on" : ""}"><span><b>${t}</b><small>${d}</small></span><input type="radio" name="nsm" value="${k}" ${nsMode() === k ? "checked" : ""}></label>`).join("")}
     </div>
     <div>
       ${toggleRow("nsGate", "Portão inteligente", "Com a IA ligada: silencia seu microfone quando você não está falando", st.nsGate !== false)}
@@ -5570,28 +5808,56 @@ function mountLook(p, rerender) {
 function serverSettings(sid, initial) {
   const s = S.servers.get(sid);
   if (!s || !canManage(s)) return;
-  const st = { icon: s.icon, color: s.color };
+  const st = { icon: s.icon, color: s.color, banner: s.banner || "", accent: s.accent || "" };
   settingsShell([
     { label: s.name },
     canDo(s, "server") && {
       id: "overview", name: "Visão geral",
       render: () => `<div class="icon-pick"><div data-icon-prev data-tip="Trocar ícone"></div><div style="flex:1"><label class="field" style="margin:0"><span>Nome do servidor</span><input id="ssName" maxlength="40" value="${esc(s.name)}"></label></div></div>
         <span class="label">Cor</span><div class="swatches" style="margin:8px 0 18px">${COLORS.map(c => `<button type="button" class="swatch${c === st.color ? " on" : ""}" style="--c:${c}" data-color="${c}"></button>`).join("")}</div>
+        <span class="label">Banner do servidor</span>
+        <div class="srv-banner-prev" data-bprev></div>
+        <div class="row-btns" style="margin:8px 0 18px"><button type="button" class="btn sm" data-sbanner>${ic("image", "sm")}Enviar banner (imagem ou GIF)</button><button type="button" class="btn sm ghost" data-sbanner-clear>Remover</button></div>
+        <div class="toggle-row"><span><b>Cor temática</b><small>Botões e destaques do app mudam para esta cor enquanto alguém está no servidor</small></span><label class="switch"><input type="checkbox" id="ssAccentOn" ${st.accent ? "checked" : ""}><i></i></label></div>
+        <div class="row-btns" style="margin:-4px 0 18px" data-accrow ${st.accent ? "" : 'hidden'}><label class="color-in">Cor<input type="color" id="ssAccent" value="${esc(st.accent || st.color || "#7c5cff")}"></label></div>
         <label class="field"><span>Descrição</span><textarea id="ssDesc" maxlength="200" placeholder="Conte do que se trata o servidor">${esc(s.description || "")}</textarea></label>
         <div class="toggle-row"><span><b>Servidor público</b><small>Aparece em Explorar e qualquer pessoa pode entrar</small></span><label class="switch"><input type="checkbox" id="ssPublic" ${s.public ? "checked" : ""}><i></i></label></div>
         <div style="margin-top:18px;display:flex;gap:10px"><button class="btn primary" data-save>Salvar alterações</button><button class="btn" data-invite>${ic("userPlus", "sm")}Convidar pessoas</button></div>`,
       mount(p) {
         const prev = p.querySelector("[data-icon-prev]");
-        const draw = () => { prev.innerHTML = serverIcon({ name: p.querySelector("#ssName").value || s.name, icon: st.icon, color: st.color }); };
+        const bprev = p.querySelector("[data-bprev]");
+        const draw = () => {
+          prev.innerHTML = serverIcon({ name: p.querySelector("#ssName").value || s.name, icon: st.icon, color: st.color });
+          bprev.style.cssText = st.banner ? `background-image:url('${esc(st.banner)}')` : `background:linear-gradient(135deg, ${esc(st.accent || st.color)}, color-mix(in srgb, ${esc(st.accent || st.color)} 35%, #000))`;
+          bprev.innerHTML = `<b>${esc(p.querySelector("#ssName").value || s.name)}</b>`;
+        };
         draw();
         p.querySelector("#ssName").addEventListener("input", draw);
         prev.addEventListener("click", () => iconMenu(prev, v => { st.icon = v; draw(); }));
+        p.querySelector("#ssAccentOn").addEventListener("change", e => { st.accent = e.target.checked ? p.querySelector("#ssAccent").value : ""; p.querySelector("[data-accrow]").hidden = !e.target.checked; draw(); });
+        p.querySelector("#ssAccent").addEventListener("input", e => { st.accent = e.target.value; draw(); });
         p.addEventListener("click", async e => {
           const col = e.target.closest("[data-color]");
           if (col) { st.color = col.dataset.color; $$("[data-color]", p).forEach(b => b.classList.toggle("on", b === col)); draw(); }
+          if (e.target.closest("[data-sbanner-clear]")) { st.banner = ""; draw(); }
+          const sb = e.target.closest("[data-sbanner]");
+          if (sb) {
+            const inp = document.createElement("input");
+            inp.type = "file"; inp.accept = "image/png,image/jpeg,image/webp,image/gif";
+            inp.onchange = async () => {
+              const f = inp.files[0];
+              if (!f) return;
+              if (f.size > 6 * 1048576) { toast("O banner pode ter até 6 MB.", "warn"); return; }
+              sb.classList.add("loading");
+              try { st.banner = (await uploadBlob(f)).url; draw(); toast("Banner enviado — clique em Salvar alterações.", "ok"); }
+              catch (err) { toast(err.message, "error"); }
+              sb.classList.remove("loading");
+            };
+            inp.click();
+          }
           if (e.target.closest("[data-invite]")) inviteModal(sid);
           if (e.target.closest("[data-save]")) {
-            const r = await emit("server:update", { serverId: sid, name: p.querySelector("#ssName").value, icon: st.icon, color: st.color, description: p.querySelector("#ssDesc").value, isPublic: p.querySelector("#ssPublic").checked });
+            const r = await emit("server:update", { serverId: sid, name: p.querySelector("#ssName").value, icon: st.icon, color: st.color, description: p.querySelector("#ssDesc").value, isPublic: p.querySelector("#ssPublic").checked, banner: st.banner, accent: st.accent });
             if (r.error) toast(r.error, "error"); else toast("Servidor atualizado.", "ok");
           }
         });
@@ -5705,9 +5971,41 @@ const ACTIONS = {
   "get-app": () => userSettings("app"),
   premium: () => goPremium(),
   admin: () => goAdmin(),
-  "buy-plan": a => buyModal(a.dataset.tier),
+  "buy-plan": a => buyModal(a.dataset.tier, a.dataset.cycle || S.cycle || "m"),
+  "plan-cycle": a => { S.cycle = a.dataset.c; renderPremium(); },
   "open-ticket": a => openTicket(a.dataset.id),
   "admin-tab": a => { S.adminTab = a.dataset.tab; renderAdmin(true); },
+  "audit-a": a => { S.auditA = a.dataset.a; renderAdmin(true); },
+  "admin-adm-set": async a => {
+    const give = a.dataset.on === "1", name = a.dataset.name;
+    if (!(await confirmBox({ title: give ? "Tornar ADM" : "Tirar ADM", html: give ? `<b>${esc(name)}</b> vai poder aprovar pagamentos, dar planos, suspender contas e bloquear servidores. Só você (ADM Supremo) mexe no Sistema e na equipe.` : `<b>${esc(name)}</b> deixa de ser ADM na hora.`, ok: give ? "Tornar ADM" : "Tirar ADM", danger: !give }))) return;
+    const r = await emit("admin:admin:set", { userId: a.dataset.uid, on: give });
+    if (r.error) toast(r.error, "error"); else { toast(give ? `${name} agora é ADM. 🛡️` : `${name} não é mais ADM.`, "ok"); renderAdmin(true); }
+  },
+  "sys-save": async a => {
+    const root = $("#adminView"), part = a.dataset.part, data = {};
+    if (part === "access") { data.regOpen = root.querySelector('[data-sys="regOpen"]').checked; data.maintenance = root.querySelector('[data-sys="maintenance"]').value.trim(); }
+    if (part === "pay") { data.pixKey = root.querySelector('[data-sys="pixKey"]').value.trim(); data.links = Object.fromEntries($$("[data-link]", root).map(i => [i.dataset.link, i.value.trim()])); }
+    if (part === "min") data.minApp = { android: root.querySelector('[data-min="android"]').value.trim(), desktop: root.querySelector('[data-min="desktop"]').value.trim(), graceMin: +root.querySelector('[data-min="grace"]').value || 0 };
+    if (part === "min-off") data.minApp = null;
+    if (data.maintenance && !(await confirmBox({ title: "Ligar manutenção", html: "Todo mundo que não é ADM vai ser desconectado agora e só volta quando você desligar.", ok: "Ligar manutenção" }))) return;
+    const r = await emit("admin:settings:save", data);
+    if (r.error) toast(r.error, "error"); else { toast("Sistema atualizado.", "ok"); renderAdmin(true); }
+  },
+  "sys-ann-clear": async () => { const r = await emit("admin:announce:clear", {}); if (r.error) toast(r.error, "error"); else { toast("Aviso fixado removido.", "ok"); renderAdmin(true); } },
+  "sys-logout-all": () => {
+    modal({
+      title: "🔐 Desconectar todo mundo", sub: "Todas as contas, em todos os aparelhos (menos este)",
+      body: `<p style="color:var(--text-2)">Todo mundo vai precisar entrar de novo com usuário e senha. Chamadas em andamento caem. Use depois de uma atualização importante ou se suspeitar de invasão.</p><label class="field"><span>Para confirmar, digite DESCONECTAR TODOS</span><input data-c autocomplete="off"></label><div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn danger" data-go>Desconectar todos</button></div>`,
+      onMount(m, close) {
+        m.querySelector("[data-go]").onclick = async () => {
+          const r = await emit("admin:logout:all", { confirm: m.querySelector("[data-c]").value });
+          if (r.error) { toast(r.error, "error"); return; }
+          close(); toast(`${r.ended} sessões encerradas. Todo mundo vai precisar entrar de novo.`, "ok", 6000);
+        };
+      }
+    });
+  },
   "admin-user": a => adminUserCard(a.dataset.uid),
   "admin-filter": a => { S.adminFilter = a.dataset.f; renderAdmin(true); },
   games: () => goGames(),
@@ -5784,7 +6082,8 @@ const ACTIONS = {
   "server-menu": a => { const r = a.getBoundingClientRect(); serverMenu(S.serverId, { x: r.left + 10, y: r.bottom + 6 }); a.classList.add("open"); },
   "open-ch": a => openChannel(a.dataset.id),
   "ch-settings": a => channelSettings(a.dataset.id),
-  "new-channel": a => channelModal(a.dataset.type),
+  "new-channel": (a, e) => { e && e.stopPropagation(); channelModal(a.dataset.type, S.serverId, a.dataset.cat || ""); },
+  "cat-fold": a => { const f = store.get("catFold", {}); if (f[a.dataset.key]) delete f[a.dataset.key]; else f[a.dataset.key] = 1; store.set("catFold", f); renderSide(); },
   "join-voice": a => joinVoice(a.dataset.id),
   "dm-call": a => openDMCall(a.dataset.id, true),
   invite: () => inviteModal(),
@@ -5836,11 +6135,67 @@ const ACTIONS = {
   "mention-pick": a => pickMention(+a.dataset.i)
 };
 
+/* ------------------------------------------------------------------ */
+/* Navegação no celular (Android): botão voltar e gestos               */
+/* O app Android só sabe "voltar no histórico" — antes, sem histórico, */
+/* o voltar fechava o app mesmo com um menu ou janela aberta.          */
+/* Agora cada tela "fechável" ganha uma entrada no histórico:          */
+/*   janela/menu aberto → voltar fecha · no chat → voltar abre o menu  */
+/*   de canais · com o menu de canais aberto → voltar sai do app.      */
+/* ------------------------------------------------------------------ */
+const BACK = { armed: false, silent: false };
+const isPhone = () => innerWidth <= 760;
+const overlayOpen = () => !!($("#layer").children.length || document.querySelector("body > .menu, body > .popover, .lightbox") || $("#app").classList.contains("show-members"));
+function syncBack() {
+  if (!S.ready && !$("#layer").children.length) return;
+  const app = $("#app");
+  const want = isPhone() && !app.classList.contains("hidden") && (overlayOpen() || !app.classList.contains("drawer"));
+  if (want && !BACK.armed) { try { history.pushState({ ax: Date.now() }, ""); BACK.armed = true; } catch {} }
+  else if (!want && BACK.armed) { BACK.armed = false; BACK.silent = true; history.back(); }
+}
+function onBack() {
+  const app = $("#app");
+  if (closeTop()) return;
+  if (document.querySelector("body > .menu, body > .popover")) { closeMenus(); return; }
+  if (app.classList.contains("show-members")) { app.classList.remove("show-members"); return; }
+  if (!app.classList.contains("drawer")) { app.classList.add("drawer"); return; }
+}
+function setupMobileNav() {
+  window.addEventListener("popstate", () => {
+    BACK.armed = false;
+    if (BACK.silent) { BACK.silent = false; return; }
+    if (isPhone()) onBack();
+    setTimeout(syncBack, 30);
+  });
+  const later = debounce(syncBack, 60);
+  new MutationObserver(later).observe($("#app"), { attributes: true, attributeFilter: ["class"] });
+  new MutationObserver(later).observe($("#layer"), { childList: true });
+  new MutationObserver(later).observe(document.body, { childList: true });
+  window.addEventListener("resize", later, { passive: true });
+  // gesto: arrastar da borda esquerda abre o menu; arrastar para a esquerda fecha
+  let t0 = null;
+  document.addEventListener("touchstart", e => {
+    if (!isPhone() || e.touches.length !== 1 || $("#layer").children.length) { t0 = null; return; }
+    const p = e.touches[0], open = $("#app").classList.contains("drawer");
+    t0 = (open || p.clientX < 28) && !e.target.closest("input, textarea, .stage-grid, .board, canvas, iframe, .ttt") ? { x: p.clientX, y: p.clientY, open, at: Date.now() } : null;
+  }, { passive: true });
+  document.addEventListener("touchend", e => {
+    if (!t0) return;
+    const p = e.changedTouches[0], dx = p.clientX - t0.x, dy = Math.abs(p.clientY - t0.y), app = $("#app");
+    if (Date.now() - t0.at < 600 && dy < 60) {
+      if (!t0.open && dx > 60) app.classList.add("drawer");
+      else if (t0.open && dx < -60) app.classList.remove("drawer");
+    }
+    t0 = null;
+  }, { passive: true });
+}
 function wire() {
   wireControlInput();
   document.addEventListener("submit", e => {
     const ss = e.target.closest("[data-ssearch]");
     if (ss) { e.preventDefault(); S.adminSrvQ = ss.querySelector("input").value.trim(); renderAdmin(true); return; }
+    const as = e.target.closest("[data-asearch]");
+    if (as) { e.preventDefault(); S.auditQ = as.querySelector("input").value.trim(); renderAdmin(true); return; }
     const f = e.target.closest("[data-usearch]");
     if (!f) return;
     e.preventDefault();
@@ -5889,7 +6244,10 @@ function wire() {
     else if (ch) { e.preventDefault(); channelMenu(ch.dataset.id, at); }
     else if (msg) { e.preventDefault(); messageMenu(msg.dataset.id, at); }
   });
+  setupMobileNav();
   document.addEventListener("mouseover", e => {
+    // no celular o toque dispara "mouseover": a dica ficava presa na tela e o primeiro toque parecia não funcionar
+    if (!matchMedia("(hover: hover)").matches) return;
     const t = e.target.closest("[data-tip]");
     if (t === tipTarget) return;
     tipTarget = t;
@@ -6146,10 +6504,10 @@ function boot() {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
   }
   if (DESKTOP) document.documentElement.classList.add("desktop-app");
-  // App de PC antigo (NEXORA): bloqueado — só funciona depois de instalar o Auryx Nexavória novo
+  // App de PC antigo (NEXORA): bloqueado — só funciona depois de instalar o Auryx Nexos novo
   if (DESKTOP && /\bNEXORA\/\d/.test(navigator.userAgent)) {
     hideBoot();
-    document.body.innerHTML = `<div class="auth" style="position:fixed;inset:0;display:grid;place-items:center;background:#08090f"><div class="auth-card" style="text-align:center"><div class="brand"><span class="logo">${LOGO()}</span><h1>Auryx Nexavória</h1></div><p class="auth-sub">Este aplicativo (NEXORA) está desatualizado e foi desativado.</p><p style="color:var(--text-2)">Baixe e instale o app novo para continuar. Suas contas, servidores e mensagens continuam iguais.</p><a class="btn primary big" href="${DESKTOP_URL}" target="_blank" rel="noopener">Baixar Auryx Nexavória</a><p style="color:var(--muted);font-size:13px;margin-top:14px">Depois de instalar, pode desinstalar o NEXORA antigo em Configurações do Windows › Aplicativos.</p></div></div>`;
+    document.body.innerHTML = `<div class="auth" style="position:fixed;inset:0;display:grid;place-items:center;background:#08090f"><div class="auth-card" style="text-align:center"><div class="brand"><span class="logo">${LOGO()}</span><h1>Auryx Nexos</h1></div><p class="auth-sub">Este aplicativo (NEXORA) está desatualizado e foi desativado.</p><p style="color:var(--text-2)">Baixe e instale o app novo para continuar. Suas contas, servidores e mensagens continuam iguais.</p><a class="btn primary big" href="${DESKTOP_URL}" target="_blank" rel="noopener">Baixar Auryx Nexos</a><p style="color:var(--muted);font-size:13px;margin-top:14px">Depois de instalar, pode desinstalar o NEXORA antigo em Configurações do Windows › Aplicativos.</p></div></div>`;
     return;
   }
   $$(".seg button").forEach(b => (b.onclick = () => setAuthMode(b.dataset.mode)));

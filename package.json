@@ -2,7 +2,7 @@
   "name": "nexora",
   "version": "2.0.0",
   "private": true,
-  "description": "Auryx Nexavória — comunidade com chat, servidores, convites, voz e transmissão de tela",
+  "description": "Auryx Nexos — comunidade com chat, servidores, convites, voz e transmissão de tela",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

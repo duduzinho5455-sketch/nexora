@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "desktop/**"
+      - "public/icons/**"
       - "public/agente/**"
       - ".github/workflows/app-windows.yml"
   workflow_dispatch:
@@ -30,7 +31,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force agente | Out-Null
           Copy-Item ../public/agente/nexora-agente.ps1 agente/ -Force
-          npm version "1.0.${{ github.run_number }}" --no-git-tag-version --allow-same-version
+          npm version "3.0.${{ github.run_number }}" --no-git-tag-version --allow-same-version
 
       - name: Instalar dependências
         run: npm install --no-audit --no-fund
@@ -40,14 +41,20 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
+      - name: Copiar com o nome antigo
+        shell: pwsh
+        run: Copy-Item dist/Auryx-Nexos-Setup.exe dist/Auryx-Nexavoria-Setup.exe -Force   # links velhos também baixam o app novo
+
       - name: Publicar na página de Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: app-v1.0.${{ github.run_number }}
-          name: Auryx Nexavória para Windows 1.0.${{ github.run_number }}
+          tag_name: app-v3.0.${{ github.run_number }}
+          name: Auryx Nexos para Windows 3.0.${{ github.run_number }}
           body: |
-            Baixe **Auryx-Nexavoria-Setup.exe**, abra e pronto — o atalho aparece na área de trabalho.
+            Baixe **Auryx-Nexos-Setup.exe**, abra e pronto — o atalho aparece na área de trabalho.
             Se o Windows mostrar "O Windows protegeu o computador", clique em **Mais informações › Executar assim mesmo**
             (acontece porque o app ainda não tem assinatura digital paga).
-          files: desktop/dist/Auryx-Nexavoria-Setup.exe
+          files: |
+            desktop/dist/Auryx-Nexos-Setup.exe
+            desktop/dist/Auryx-Nexavoria-Setup.exe
           make_latest: true

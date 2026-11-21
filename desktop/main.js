@@ -1,6 +1,6 @@
 /**
- * Auryx Nexavória para Windows (Electron)
- * Abre a Auryx Nexavória numa janela própria, com seletor de tela, ícone na bandeja
+ * Auryx Nexos para Windows (Electron)
+ * Abre a Auryx Nexos numa janela própria, com seletor de tela, ícone na bandeja
  * e o Agente Auryx embutido (controle remoto sem baixar nada à parte).
  */
 "use strict";
@@ -16,6 +16,8 @@ const ICON = path.join(__dirname, "build", "icon.png");
 
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
 app.setAppUserModelId("com.nexora.app");
+// a versão do app vai no user-agent: o servidor usa para pedir a atualização quando sai um instalador novo
+app.userAgentFallback = `${app.userAgentFallback} AuryxDesktop/${app.getVersion()}`;
 
 let win = null, tray = null, quitting = false;
 let agent = null, agentCode = null;
@@ -24,7 +26,7 @@ let agent = null, agentCode = null;
 function createWindow() {
   win = new BrowserWindow({
     width: 1300, height: 820, minWidth: 940, minHeight: 560,
-    backgroundColor: "#08090f", title: "Auryx Nexavória", icon: ICON, show: false, autoHideMenuBar: true,
+    backgroundColor: "#08090f", title: "Auryx Nexos", icon: ICON, show: false, autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, sandbox: true, spellcheck: true, backgroundThrottling: false }
   });
   Menu.setApplicationMenu(null);
@@ -70,12 +72,12 @@ function showWindow() {
 /* ---------- bandeja ---------- */
 function createTray() {
   tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: 16, height: 16 }));
-  tray.setToolTip("Auryx Nexavória");
+  tray.setToolTip("Auryx Nexos");
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Abrir Auryx Nexavória", click: showWindow },
+    { label: "Abrir Auryx Nexos", click: showWindow },
     { label: "Recarregar", click: () => win && win.webContents.reload() },
     { type: "separator" },
-    { label: "Sair da Auryx Nexavória", click: () => { quitting = true; app.quit(); } }
+    { label: "Sair da Auryx Nexos", click: () => { quitting = true; app.quit(); } }
   ]));
   tray.on("click", showWindow);
 }

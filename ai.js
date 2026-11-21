@@ -1,5 +1,5 @@
 /**
- * Aury — a IA da Auryx Nexavória.
+ * Aury — a IA da Auryx Nexos.
  * Usada em dois lugares:
  *  1) Atendimento de pagamento: responde quem está comprando o VIP (tira dúvidas, explica
  *     o Pix e informa o status). Quem aprova pagamento é sempre um ADM.

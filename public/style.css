@@ -1,5 +1,5 @@
 /* =====================================================================
-   Auryx Nexavória — visual
+   Auryx Nexos — visual
    Animações só com transform/opacity (GPU), sem bibliotecas externas.
    ===================================================================== */
 :root {
@@ -1495,3 +1495,177 @@ select.input:hover, .field select:hover { border-color: color-mix(in srgb, var(-
 .qopt, .radio-card { transition: border-color .15s, background .15s, transform .15s var(--ease); }
 .qopt:hover, .radio-card:hover { transform: translateY(-1px); }
 .role-row .who b, .member-row .who b { display: block; }
+
+/* =====================================================================
+   Auryx Nexos — atualização (nov/2026)
+   ===================================================================== */
+
+/* ---------- celular / Android: toque, menu e barra do topo ---------- */
+html { -webkit-tap-highlight-color: transparent; }
+button, [role="button"], .ch, .dm-item, .member, .rail-item, a { touch-action: manipulation; }
+.top-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.top-actions { flex: none; }
+@media (max-width: 760px) {
+  .top { gap: 6px; padding: 0 6px 0 4px; }
+  .top .icon-btn { width: 40px; height: 40px; }
+  .top-actions { gap: 0; }
+  .ch { padding: 10px 8px; }
+  .dm-item, .member { padding-top: 8px; padding-bottom: 8px; }
+  .app.drawer .side { box-shadow: 12px 0 32px rgba(0, 0, 0, .45); }
+  .rail, .side { will-change: transform; overscroll-behavior: contain; }
+  .side-body { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .settings-nav { padding-right: 60px; scrollbar-width: none; }
+  .settings-nav::-webkit-scrollbar { display: none; }
+  .settings-nav button { flex: none; }
+  .tabs-row { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-left: -14px; margin-right: -14px; padding-left: 14px; padding-right: 14px; }
+  .tabs-row::-webkit-scrollbar { display: none; }
+  .tabs-row .tab { flex: none; }
+  .composer-wrap { padding: 0 8px 4px; }
+  .modal { max-height: calc(100dvh - 24px); }
+  .msg-actions { display: none; }
+  .msg:hover { background: transparent; }
+}
+
+/* ---------- logo novo, aviso e telas de bloqueio ---------- */
+.ann-logo, .block-logo { width: 64px; height: 64px; margin: 0 auto 12px; }
+.ann-text { white-space: pre-wrap; color: var(--text); line-height: 1.55; margin: 0; max-height: 52vh; overflow-y: auto; }
+.block-screen { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 16px; background: radial-gradient(900px 500px at 20% 0%, rgba(122, 99, 255, .22), transparent), radial-gradient(800px 500px at 100% 100%, rgba(34, 199, 240, .18), transparent), var(--bg-0); }
+.block-card { width: min(440px, 100%); text-align: center; background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 20px; padding: 30px 24px; box-shadow: var(--shadow); }
+.block-card h1 { margin: 0 0 8px; font-size: 24px; }
+.block-card p { color: var(--text-2); margin: 0 0 20px; }
+.block-card small { display: block; margin-top: 14px; color: var(--muted); }
+
+/* ---------- destaque para assinantes ---------- */
+.vip-plus { --vipc: #22d3ee; } .vip-pro { --vipc: #8b5cf6; } .vip-max { --vipc: #f59e0b; }
+.member.vip { background: linear-gradient(90deg, color-mix(in srgb, var(--vipc) 13%, transparent), transparent 75%); }
+.member.vip:hover { background: linear-gradient(90deg, color-mix(in srgb, var(--vipc) 22%, transparent), var(--hover) 80%); }
+.member.vip:not(.off) .av:not(.frame) { box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 3.5px var(--vipc); }
+.member.vip-max:not(.off) .av:not(.frame) { box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 3.5px var(--vipc), 0 0 14px -2px var(--vipc); }
+.member[style*="--rc"] .nm:not(.nm-vip):not([class*="fx-"]) { color: var(--rc); }
+.nm-vip { color: var(--n1); font-weight: 650; }
+[data-theme="light"] .nm-vip { filter: saturate(1.2) brightness(.85); }
+.plan-chip { font-size: 12px; line-height: 1; margin-left: 2px; }
+.role-ico { font-size: 12.5px; line-height: 1; }
+.staff-tag { display: inline-grid; place-items: center; height: 16px; padding: 0 5px; margin-left: 4px; border-radius: 4px; font-size: 9.5px; font-weight: 800; letter-spacing: .06em; background: var(--red); color: #fff; vertical-align: middle; }
+.staff-tag.supreme, .supreme-tag { background: linear-gradient(135deg, #f59e0b, #ef4444 60%, #8b5cf6); }
+.supreme-tag { display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: .05em; padding: 3px 8px; border-radius: 6px; color: #fff; vertical-align: middle; text-transform: uppercase; }
+.msg.vip { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--vipc) 75%, transparent); }
+.msg.vip-max:not(.cont) { background: linear-gradient(90deg, color-mix(in srgb, var(--vipc) 6%, transparent), transparent 40%); }
+
+/* ---------- molduras do avatar (Pro/Max) ---------- */
+.av.frame { isolation: isolate; }
+.av.frame::before {
+  content: ""; position: absolute; inset: calc(var(--s) * -.09 - 1px); border-radius: 50%; z-index: -1; pointer-events: none;
+  background: conic-gradient(from 0deg, var(--n1), var(--n2), var(--n1));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+}
+.av.fr-spin::before { animation: spin 3s linear infinite; }
+.av.fr-pulse::before { background: var(--n1); animation: frPulse 1.8s ease-in-out infinite; }
+.av.fr-rainbow::before { background: conic-gradient(#f87171, #fbbf24, #34d399, #22d3ee, #7c5cff, #f472b6, #f87171); animation: spin 2.4s linear infinite; }
+.av.fr-gold::before { background: conic-gradient(#fde68a, #f59e0b, #b45309, #fde68a, #fbbf24, #fde68a); animation: spin 5s linear infinite; filter: drop-shadow(0 0 4px #f59e0b); }
+.av.fr-aurora::before { background: conic-gradient(#7c5cff, #22d3ee, #34d399, #f472b6, #7c5cff); animation: spin 4s linear infinite; filter: drop-shadow(0 0 6px #22d3ee) drop-shadow(0 0 10px #7c5cff); }
+@keyframes frPulse { 50% { opacity: .35; transform: scale(1.08); } }
+
+/* ---------- partículas e efeitos do perfil (Max) ---------- */
+.pfx-galaxy, .pfx-sakura, .pfx-snow, .pfx-hearts { border-color: transparent; }
+.pfx-galaxy::before, .pfx-sakura::before, .pfx-snow::before, .pfx-hearts::before { content: ""; position: absolute; inset: -2px; z-index: -1; border-radius: inherit; background-size: 300% 300%; animation: aurora 7s ease infinite; }
+.pfx-galaxy::after, .pfx-sakura::after, .pfx-snow::after, .pfx-hearts::after { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--bg-0); margin: 2px; }
+.pfx-galaxy::before { background-image: linear-gradient(120deg, #1e1b4b, #7c3aed, #db2777, #0ea5e9, #1e1b4b); }
+.pfx-sakura::before { background-image: linear-gradient(120deg, #fbcfe8, #f472b6, #fda4af, #fbcfe8); }
+.pfx-snow::before { background-image: linear-gradient(120deg, #e0f2fe, #7dd3fc, #f8fafc, #e0f2fe); }
+.pfx-hearts::before { background-image: linear-gradient(120deg, #fb7185, #e11d48, #f472b6, #fb7185); }
+.pfx-galaxy .pb, .pfx-sakura .pb, .pfx-snow .pb, .pfx-hearts .pb { overflow: hidden; }
+.pfx-galaxy .pb::after, .pfx-snow .pb::after { content: ""; position: absolute; inset: 0; pointer-events: none; background-repeat: repeat; animation: pfall 7s linear infinite; }
+.pfx-snow .pb::after { background-image: radial-gradient(2px 2px at 20px 30px, #fff 60%, transparent 70%), radial-gradient(1.6px 1.6px at 70px 10px, #fff 60%, transparent 70%), radial-gradient(2.6px 2.6px at 120px 46px, #fff 60%, transparent 70%), radial-gradient(1.4px 1.4px at 160px 22px, #fff 60%, transparent 70%), radial-gradient(2px 2px at 95px 58px, #fff 60%, transparent 70%); background-size: 180px 64px; }
+.pfx-galaxy .pb::after { background-image: radial-gradient(1.4px 1.4px at 14px 18px, #fff 60%, transparent 70%), radial-gradient(1px 1px at 52px 44px, #c4b5fd 60%, transparent 70%), radial-gradient(1.8px 1.8px at 96px 12px, #fff 60%, transparent 70%), radial-gradient(1px 1px at 140px 52px, #f9a8d4 60%, transparent 70%), radial-gradient(1.2px 1.2px at 170px 30px, #7dd3fc 60%, transparent 70%); background-size: 190px 64px; animation: pdrift 14s linear infinite; }
+.pfx-sakura .pb::after, .pfx-hearts .pb::after { position: absolute; left: 0; right: 0; top: 0; white-space: pre; text-align: center; font-size: 14px; letter-spacing: 6px; pointer-events: none; animation: pdrop 4.5s linear infinite; }
+.pfx-sakura .pb::after { content: "🌸      🌸   🌸        🌸     🌸"; }
+.pfx-hearts .pb::after { content: "💖     💗        💖   💗      💖"; }
+@keyframes pfall { to { background-position: 30px 64px; } }
+@keyframes pdrift { to { background-position: -190px 0; } }
+@keyframes pdrop { from { transform: translateY(-22px); opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } to { transform: translateY(70px) rotate(8deg); opacity: 0; } }
+
+/* ---------- Perfil Turbo: Aurys e molduras ---------- */
+.aurys-presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 12px; }
+.aurys-sw { width: 36px; height: 36px; border-radius: 11px; background: linear-gradient(135deg, var(--a), var(--b)); border: 2px solid transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .15); transition: transform .15s var(--ease); }
+.aurys-sw:hover { transform: translateY(-2px); }
+.aurys-sw.on { border-color: var(--text); transform: scale(1.06); }
+.chip.locked-chip { opacity: .55; }
+html.aurys .rail { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 16%, var(--bg-0)), var(--bg-0) 45%, color-mix(in srgb, var(--accent-2) 10%, var(--bg-0))); }
+html.aurys .user-panel { background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 12%, var(--bg-0)), var(--bg-0)); }
+html.aurys .rail-item.home .srv-icon { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+
+/* ---------- servidores personalizados ---------- */
+.side-head.banner.has-img::before { background: var(--bimg) center / cover no-repeat, var(--c); }
+.side-head.banner.has-img { height: 120px; }
+.cat[data-act="cat-fold"] { cursor: pointer; user-select: none; }
+.cat[data-act="cat-fold"] > span { display: flex; align-items: center; gap: 4px; }
+.cat[data-act="cat-fold"] > span .ic { transition: transform .2s var(--ease); }
+.cat.folded > span .ic { transform: rotate(-90deg); }
+.cat[data-act="cat-fold"]:hover { color: var(--text-2); }
+.ch-emo { width: 20px; flex: none; text-align: center; font-size: 15px; line-height: 1; }
+.ch-decor { display: flex; gap: 12px; align-items: flex-end; }
+.emo-pick { min-width: 48px; font-size: 20px; padding: 0 10px; }
+.srv-banner-prev { height: 96px; margin-top: 8px; border-radius: 12px; background-size: cover; background-position: center; display: flex; align-items: flex-end; padding: 10px 14px; color: #fff; text-shadow: 0 1px 6px rgba(0, 0, 0, .8); border: 1px solid var(--line); }
+.srv-banner-prev b { font-size: 16px; }
+
+/* ---------- Premium: mensal x trimestral e chave Pix ---------- */
+.cycle-pick { display: inline-flex; gap: 4px; padding: 4px; margin-top: 22px; border-radius: 12px; background: var(--bg-1); border: 1px solid var(--line-2); max-width: 100%; }
+.cycle-pick button { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 9px; font-weight: 650; color: var(--muted); transition: background .15s, color .15s; }
+.cycle-pick button.on { background: var(--accent); color: #fff; box-shadow: 0 4px 14px -4px color-mix(in srgb, var(--accent) 70%, transparent); }
+.save-tag { display: inline-block; font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 99px; background: color-mix(in srgb, var(--green) 22%, transparent); color: var(--green); }
+.cycle-pick button.on .save-tag { background: rgba(255, 255, 255, .22); color: #fff; }
+.price-sub { margin-top: -6px; color: var(--muted); font-size: 13px; }
+.price-sub s { opacity: .7; }
+.pix-key { display: flex; gap: 8px; align-items: center; margin: 14px 0; padding: 10px 12px; border-radius: 10px; background: var(--bg-1); border: 1px dashed var(--line-2); }
+.pix-key code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
+.sub-acts { flex-wrap: wrap; }
+
+/* ---------- Painel ADM: ao vivo, gráficos e sistema ---------- */
+.live-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; margin-bottom: 14px; border-radius: 12px; background: var(--bg-1); border: 1px solid var(--line); font-size: 14px; }
+.live-row small { color: var(--muted); margin-left: auto; }
+.live-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 0 rgba(35, 209, 139, .6); animation: liveDot 1.8s infinite; }
+@keyframes liveDot { 70% { box-shadow: 0 0 0 8px transparent; } }
+.spark-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+.spark-wrap > div { padding: 12px 14px; border-radius: 12px; background: var(--bg-1); border: 1px solid var(--line); }
+.spark { display: block; width: 100%; height: 64px; margin-top: 6px; }
+.spark-meta { color: var(--muted); font-size: 12px; }
+.sys-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 14px; }
+.sys-card { padding: 18px; border-radius: 14px; background: var(--bg-1); border: 1px solid var(--line); min-width: 0; }
+.sys-card h3 { margin: 0 0 10px; font-size: 16px; }
+.sys-card .hint { color: var(--muted); font-size: 13px; }
+.sys-card details { margin: 0 0 14px; }
+.sys-card summary { cursor: pointer; color: var(--text-2); font-weight: 600; margin-bottom: 10px; }
+.sys-card.danger-card { border-color: color-mix(in srgb, var(--red) 35%, var(--line)); }
+.row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 640px) { .spark-wrap, .row-2 { grid-template-columns: 1fr; } .live-row small { margin-left: 0; } }
+
+/* ---------- PC: visual renovado (telas grandes) ---------- */
+@media (min-width: 1101px) {
+  .app { background: var(--bg-0); }
+  .side { margin: 8px 0; border: 1px solid var(--line); border-right: 0; border-radius: 16px 0 0 16px; overflow: hidden; }
+  .main { margin: 8px 0; border: 1px solid var(--line); overflow: hidden; }
+  .members { margin: 8px 8px 8px 0; border: 1px solid var(--line); border-left: 0; border-radius: 0 16px 16px 0; overflow-y: auto; }
+  .app.no-members .main { margin-right: 8px; border-radius: 0 16px 16px 0; }
+  .top { height: 56px; padding: 0 14px 0 20px; background: color-mix(in srgb, var(--bg-2) 88%, transparent); backdrop-filter: blur(12px); box-shadow: none; }
+  .side-head { height: 56px; }
+  .user-panel { margin: 6px; border-radius: 12px; border: 1px solid var(--line); }
+  .voice-panel { margin: 6px 6px 0; border-radius: 12px; border: 1px solid var(--line); }
+  .ch.on { background: color-mix(in srgb, var(--accent) 14%, var(--active)); }
+  .ch.on::after { content: ""; position: absolute; left: -8px; top: 7px; bottom: 7px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+  .rail { padding-top: 14px; gap: 10px; }
+  .msg { padding-left: 20px; padding-right: 64px; }
+  .msg-text { max-width: 980px; }
+  .msg:hover { background: color-mix(in srgb, var(--accent) 4%, rgba(0, 0, 0, .08)); }
+  .composer-wrap { padding: 0 20px 10px; }
+  .composer { border-radius: 14px; padding: 8px 8px 8px 10px; border-color: var(--line); box-shadow: 0 6px 24px -12px rgba(0, 0, 0, .5); }
+  .page { width: min(1180px, 100%); padding: 32px 32px 56px; }
+  .hero { border-radius: 22px; }
+  .members .cat { padding-top: 18px; }
+  .member { margin: 1px 6px; }
+}
+@media (min-width: 1500px) {
+  .app { grid-template-columns: 76px 280px minmax(0, 1fr) 272px; }
+  .app.no-members { grid-template-columns: 76px 280px minmax(0, 1fr) 0; }
+}

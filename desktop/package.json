@@ -1,9 +1,9 @@
 {
   "name": "nexora-desktop",
-  "productName": "Auryx Nexavória",
+  "productName": "Auryx Nexos",
   "version": "1.0.0",
-  "description": "Auryx Nexavória para Windows — chat, voz, tela e jogos com os amigos",
-  "author": "Auryx Nexavória",
+  "description": "Auryx Nexos para Windows — chat, voz, tela e jogos com os amigos",
+  "author": "Auryx Nexos",
   "license": "MIT",
   "main": "main.js",
   "private": true,
@@ -17,8 +17,8 @@
   },
   "build": {
     "appId": "com.nexora.app",
-    "productName": "Auryx Nexavória",
-    "artifactName": "Auryx-Nexavoria-Setup.${ext}",
+    "productName": "Auryx Nexos",
+    "artifactName": "Auryx-Nexos-Setup.${ext}",
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -49,7 +49,7 @@
       "perMachine": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Auryx Nexavória",
+      "shortcutName": "Auryx Nexos",
       "deleteAppDataOnUninstall": false
     }
   }

@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "android/**"
+      - "public/icons/**"
       - ".github/workflows/app-android.yml"
   workflow_dispatch:
 
@@ -52,23 +53,26 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           APP_VERSION_CODE: ${{ github.run_number }}
-          APP_VERSION_NAME: 1.0.${{ github.run_number }}
+          APP_VERSION_NAME: 3.0.${{ github.run_number }}
         run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: Conferir assinatura
         run: |
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
           "$APKSIGNER" verify --print-certs app/build/outputs/apk/release/app-release.apk | head -3
-          cp app/build/outputs/apk/release/app-release.apk ../Auryx-Nexavoria.apk
+          cp app/build/outputs/apk/release/app-release.apk ../Auryx-Nexos.apk
+          cp ../Auryx-Nexos.apk ../Auryx-Nexavoria.apk   # nome antigo: links velhos também baixam o app novo
 
       - name: Publicar o APK
         uses: softprops/action-gh-release@v2
         with:
           tag_name: android
-          name: Auryx Nexavória para Android
+          name: Auryx Nexos para Android
           make_latest: false
           body: |
-            Baixe **Auryx-Nexavoria.apk** no celular e abra para instalar.
+            Baixe **Auryx-Nexos.apk** no celular e abra para instalar.
             Se o Android pedir, permita "instalar apps desconhecidos" para o navegador.
-            Versão 1.0.${{ github.run_number }} — transmite a tela, mantém a chamada com a tela bloqueada e avisa de mensagens.
-          files: Auryx-Nexavoria.apk
+            Versão 3.0.${{ github.run_number }} — transmite a tela, mantém a chamada com a tela bloqueada e avisa de mensagens.
+          files: |
+            Auryx-Nexos.apk
+            Auryx-Nexavoria.apk

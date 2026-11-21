@@ -1,4 +1,4 @@
-/* Auryx Nexavória — supressão de ruído com IA (RNNoise) num AudioWorklet.
+/* Auryx Nexos — supressão de ruído com IA (RNNoise) num AudioWorklet.
    Roda numa thread de áudio separada: não trava a interface.
    RNNoise processa quadros de 480 amostras (10 ms a 48 kHz) e também
    devolve a chance de ter voz no quadro, que usamos como "portão" inteligente. */

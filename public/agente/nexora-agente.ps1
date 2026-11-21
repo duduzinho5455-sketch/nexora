@@ -1,6 +1,6 @@
 # Agente Auryx
-# Deixa um amigo controlar este PC (mouse e teclado) pelo Auryx Nexavoria - somente
-# enquanto esta janela estiver aberta e somente depois que VOCE aceitar no Auryx Nexavoria.
+# Deixa um amigo controlar este PC (mouse e teclado) pelo Auryx Nexos - somente
+# enquanto esta janela estiver aberta e somente depois que VOCE aceitar no Auryx Nexos.
 # Fechar esta janela corta o controle na hora.
 param([int]$Porta = 47800, [string]$Codigo = "", [switch]$Oculto)
 
@@ -62,7 +62,7 @@ Write-Host "  =========================================" -ForegroundColor Magent
 Write-Host ""
 Write-Host "  Seu codigo:  $codigo" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  1. No Auryx Nexavoria, abra Configuracoes > Controle remoto"
+Write-Host "  1. No Auryx Nexos, abra Configuracoes > Controle remoto"
 Write-Host "  2. Digite o codigo acima e clique em Conectar"
 Write-Host "  3. Quando alguem pedir controle, voce escolhe se aceita"
 Write-Host ""
@@ -85,7 +85,7 @@ while ($listener.IsListening) {
   }
   try { $ws = $ctx.AcceptWebSocketAsync([NullString]::Value).GetAwaiter().GetResult().WebSocket }
   catch { Write-Host ("  Falha ao conectar: " + $_.Exception.Message) -ForegroundColor Red; try { $ctx.Response.Close() } catch { }; continue }
-  Write-Host ("  Conectado ao Auryx Nexavoria (" + $ctx.Request.Headers["Origin"] + ")") -ForegroundColor Green
+  Write-Host ("  Conectado ao Auryx Nexos (" + $ctx.Request.Headers["Origin"] + ")") -ForegroundColor Green
   $buf = New-Object byte[] 8192
   $seg = New-Object System.ArraySegment[byte] -ArgumentList (,$buf)
   $teclas = @{}
@@ -118,5 +118,5 @@ while ($listener.IsListening) {
     foreach ($b in @($botoes.Keys)) { [NxInput]::Button([int]$b, $false) }
     try { $ws.Dispose() } catch { }
   }
-  Write-Host "  Desconectado do Auryx Nexavoria." -ForegroundColor Yellow
+  Write-Host "  Desconectado do Auryx Nexos." -ForegroundColor Yellow
 }
