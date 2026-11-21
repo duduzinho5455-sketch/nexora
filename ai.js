@@ -14,7 +14,26 @@
 "use strict";
 
 const MODEL = "claude-opus-5-5";
-const GEMINI_MODELS = [process.env.GEMINI_MODEL, "gemini-flash-latest", "gemini-2.5-flash"].filter(Boolean);
+const GEMINI_MODELS = [process.env.GEMINI_MODEL, "gemini-3.8-flash", "gemini-flash-latest"].filter(Boolean);
+// O Google aposenta modelos com frequência: se os nomes acima falharem, pergunta à API quais modelos
+// "flash" esta chave pode usar agora e tenta esses (a lista fica guardada por 6 h).
+let geminiFound = null, geminiFoundAt = 0;
+async function geminiDiscover() {
+  if (geminiFound && Date.now() - geminiFoundAt < 6 * 3600e3) return geminiFound;
+  try {
+    const res = await fetch(`${GEMINI_BASE}/v1beta/models?pageSize=200`, { headers: { "x-goog-api-key": process.env.GEMINI_API_KEY }, signal: AbortSignal.timeout(15000) });
+    const j = res.ok ? await res.json() : {};
+    const names = (j.models || [])
+      .filter(m => (m.supportedGenerationMethods || []).includes("generateContent") && /gemini/i.test(m.name) && !/embed|image|tts|audio|live|vision|thinking-exp/i.test(m.name))
+      .map(m => m.name.replace(/^models\//, ""));
+    // prefere "flash" (rápido e grátis), versão mais nova primeiro; "lite" e "pro" ficam por último
+    const score = n => (/flash/.test(n) ? 0 : 10) + (/lite/.test(n) ? 3 : 0) + (/preview|exp/.test(n) ? 1 : 0);
+    const ver = n => parseFloat((n.match(/gemini-(\d+(?:\.\d+)?)/) || [0, 0])[1]);
+    geminiFound = names.sort((a, b) => score(a) - score(b) || ver(b) - ver(a)).slice(0, 4);
+    geminiFoundAt = Date.now();
+  } catch { geminiFound = []; geminiFoundAt = Date.now() - 5.5 * 3600e3; }   // tenta de novo em 30 min
+  return geminiFound;
+}
 const GEMINI_BASE = (process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com").replace(/\/+$/, "");
 let client = null;
 
@@ -66,7 +85,14 @@ async function replyGemini({ system, messages, maxTokens, onText }) {
     generationConfig: { maxOutputTokens: maxTokens, temperature: 0.8 }
   };
   let lastErr = null;
-  for (const model of GEMINI_MODELS) {
+  const tried = new Set();
+  const models = [...GEMINI_MODELS];
+  for (let k = 0; k < models.length; k++) {
+    const model = models[k];
+    if (tried.has(model)) continue;
+    tried.add(model);
+    // acabaram os nomes conhecidos: descobre os modelos disponíveis na chave
+    if (k === models.length - 1) for (const m of await geminiDiscover()) if (!models.includes(m)) models.push(m);
     const res = await fetch(`${GEMINI_BASE}/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
