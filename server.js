@@ -1254,9 +1254,9 @@ async function aiChatRun(uid, replyId) {
   const u = db.users[uid], st = aiStore(uid), tier = aiTier(u);
   let chars = 0;
   const recent = [];
-  for (let i = st.msgs.length - 1; i >= 0 && recent.length < 40; i--) {
+  for (let i = st.msgs.length - 1; i >= 0 && recent.length < 20; i--) {   // histórico curto = resposta mais rápida
     chars += st.msgs[i].t.length;
-    if (chars > 60000 && recent.length) break;
+    if (chars > 16000 && recent.length) break;
     recent.unshift(st.msgs[i]);
   }
   const history = AI.tidy(recent.map(m => ({ role: m.r === "a" ? "assistant" : "user", content: m.t })));
@@ -1264,7 +1264,7 @@ async function aiChatRun(uid, replyId) {
   let last = 0;
   const r = await AI.reply({
     system: sys, messages: history, maxTokens: 2500,
-    onText: full => { if (Date.now() - last > 120) { last = Date.now(); io.to("u:" + uid).emit("ai:delta", { id: replyId, t: full }); } }
+    onText: full => { if (Date.now() - last > 60) { last = Date.now(); io.to("u:" + uid).emit("ai:delta", { id: replyId, t: full }); } }
   });
   const text = r.refused || !r.text ? "Desculpa, sobre isso eu não consigo ajudar. Quer falar de outra coisa? 🙂" : r.text;
   const m = { id: replyId, r: "a", t: text, ts: Date.now() };

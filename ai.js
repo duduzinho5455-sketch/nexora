@@ -17,7 +17,8 @@ const MODEL = "claude-opus-5-5";
 const GEMINI_MODELS = [process.env.GEMINI_MODEL, "gemini-3.8-flash", "gemini-flash-latest"].filter(Boolean);
 // O Google aposenta modelos com frequência: se os nomes acima falharem, pergunta à API quais modelos
 // "flash" esta chave pode usar agora e tenta esses (a lista fica guardada por 6 h).
-let geminiFound = null, geminiFoundAt = 0;
+let geminiFound = null, geminiFoundAt = 0, geminiGood = "";
+const noThinkCfg = new Set();   // modelos que não aceitam o ajuste de raciocínio
 async function geminiDiscover() {
   if (geminiFound && Date.now() - geminiFoundAt < 6 * 3600e3) return geminiFound;
   try {
@@ -86,19 +87,28 @@ async function replyGemini({ system, messages, maxTokens, onText }) {
   };
   let lastErr = null;
   const tried = new Set();
-  const models = [...GEMINI_MODELS];
+  // começa pelo último modelo que funcionou (não perde tempo com os aposentados)
+  const models = [...new Set([geminiGood, ...GEMINI_MODELS].filter(Boolean))];
   for (let k = 0; k < models.length; k++) {
     const model = models[k];
     if (tried.has(model)) continue;
     tried.add(model);
     // acabaram os nomes conhecidos: descobre os modelos disponíveis na chave
     if (k === models.length - 1) for (const m of await geminiDiscover()) if (!models.includes(m)) models.push(m);
-    const res = await fetch(`${GEMINI_BASE}/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
+    // conversa do dia a dia: raciocínio mínimo = resposta muito mais rápida (se o modelo não aceitar, manda sem)
+    const think = noThinkCfg.has(model) ? null : /gemini-2\./.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: "low" };
+    const send = cfg => fetch(`${GEMINI_BASE}/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(90 * 1000)
+      body: JSON.stringify(cfg ? { ...body, generationConfig: { ...body.generationConfig, thinkingConfig: cfg } } : body),
+      signal: AbortSignal.timeout(60 * 1000)
     }).catch(e => { lastErr = e; return null; });
+    let res = await send(think);
+    if (res && res.status === 400 && think) {
+      const t = await res.text().catch(() => "");
+      if (/thinking/i.test(t)) { noThinkCfg.add(model); res = await send(null); }
+      else { lastErr = new Error(`Gemini 400 (${model}): ${t.slice(0, 200)}`); continue; }
+    }
     if (!res) continue;
     if (!res.ok) {
       const t = await res.text().catch(() => "");
@@ -127,6 +137,7 @@ async function replyGemini({ system, messages, maxTokens, onText }) {
     }
     if (!full.trim() && blocked) return { text: "", refused: true };
     if (!full.trim()) { lastErr = new Error(`Gemini (${model}) respondeu vazio`); continue; }
+    geminiGood = model;
     return { text: full.trim(), refused: false };
   }
   throw lastErr || new Error("Gemini indisponível");
@@ -200,7 +211,7 @@ async function reply({ system, messages, maxTokens = 2000, onText }) {
       const msg = String((e && e.message) || e);
       console.warn("[ia] " + name + " falhou:", msg);
       lastError = { at: Date.now(), provider: name, msg: msg.slice(0, 300) };
-      if (/credit|balance|billing|quota|401|403|invalid.*key|API key|authentication|permission/i.test(msg)) cooldown[name] = Date.now() + 15 * 60e3;
+      if (/credit|balance|billing|quota|401|403|invalid.*key|API key|authentication|permission/i.test(msg)) cooldown[name] = Date.now() + (/credit|balance|billing/i.test(msg) ? 6 * 3600e3 : 15 * 60e3);
       if (onText) { try { onText(""); } catch {} }
     }
   }
