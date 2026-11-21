@@ -243,6 +243,7 @@ function pubUser(u) {
     steam: u.steam || "", game: off ? null : gameOf(u), plan: planOf(u),
     // Perfil Turbo — só aparece o que o plano atual libera (se o plano vencer, some sem apagar nada)
     banner: r >= NEED.banner ? u.banner || "" : "", bannerStill: r >= NEED.banner && u.banner ? u.bannerStill || "" : "",
+    bp: r >= NEED.banner && u.banner && u.bp ? u.bp : null,   // enquadramento do banner: posição, zoom e altura
     theme: r >= NEED.theme ? u.theme || null : null, pron: u.pron || "",
     cs: off || r < NEED.cs ? null : u.cs || null, fx: r >= NEED.fx ? u.fx || "" : "", pfx: r >= NEED.pfx ? u.pfx || "" : "",
     ring: u.ring && r >= (RINGS[u.ring] || 9) ? u.ring : "",
@@ -1806,7 +1807,7 @@ io.on("connection", socket => {
   });
 
   /* ---------- Perfil ---------- */
-  on("profile:update", async ({ color, avatar, about, status, steam, game, banner, bannerStill, theme, pron, cs, fx, pfx, ring, accent }) => {
+  on("profile:update", async ({ color, avatar, about, status, steam, game, banner, bannerStill, bp, theme, pron, cs, fx, pfx, ring, accent }) => {
     const u = me();
     // benefícios Premium: o servidor confere o plano (limpar é sempre permitido)
     const r = rankOf(u);
@@ -1828,6 +1829,14 @@ io.on("connection", socket => {
       // banner animado: guarda também o 1º quadro (aparece com "reduzir animações" ou se o GIF não carregar)
       if (!gif) u.bannerStill = "";
       else if (bannerStill !== undefined) { const st = cleanPic(bannerStill); u.bannerStill = st.startsWith("/f/") && ownImg(st, 2 * 1048576) ? st : ""; }
+    }
+    // enquadramento do banner (imagem/GIF): x/y = ponto que fica no centro (0–100%), z = zoom (100–300%), h = altura
+    if (bp !== undefined) {
+      const n = (v, lo, hi, def) => { v = Math.round(Number(v)); return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : def; };
+      const v = bp && typeof bp === "object" ? { x: n(bp.x, 0, 100, 50), y: n(bp.y, 0, 100, 50), z: n(bp.z, 100, 300, 100), h: ["s", "m", "l"].includes(bp.h) ? bp.h : "m" } : null;
+      const isDefault = !v || (v.x === 50 && v.y === 50 && v.z === 100 && v.h === "m");
+      if (!isDefault) need("banner", true);
+      u.bp = isDefault ? null : v;
     }
     if (ring !== undefined) { const v = RINGS[ring] ? ring : ""; if (v && r < RINGS[v]) fail(`Essa moldura faz parte do plano ${RANK_NAME[RINGS[v]]}.`); u.ring = v; }
     if (accent !== undefined) { const a = Array.isArray(accent) && accent.length === 2 && accent.every(isColor) ? accent : null; need("accent", a); u.accent = a; }

@@ -251,6 +251,20 @@ function bannerStyle(u) {
   const t = u.theme || [u.banner && u.banner.startsWith("#") ? u.banner : u.color || "#7c5cff", null];
   return `background:linear-gradient(135deg, ${esc(t[0])}, ${esc(t[1] || `color-mix(in srgb, ${t[0]} 30%, #000)`)})`;
 }
+/* Banner do perfil (imagem ou GIF) como <img>: a pessoa escolhe a altura, o zoom e o ponto que fica no centro.
+   Antes era um fundo com "cover" numa faixa de 300×64 — um GIF 4:3 mostrava só ~1/4 da altura.
+   O 1º quadro (still) fica por baixo só até o GIF carregar (classe "ld"), para não aparecer atrás de GIFs transparentes. */
+const BANNER_H = { s: 64, m: 100, l: 140 };
+const bpOf = u => ({ x: 50, y: 50, z: 100, h: "m", ...(u.bp || {}) });
+const bpImgStyle = bp => `object-position:${bp.x}% ${bp.y}%;transform-origin:${bp.x}% ${bp.y}%;transform:scale(${bp.z / 100})`;
+function bannerHTML(u) {
+  if (!(u.banner && u.banner.startsWith("/f/"))) return `<div class="pb" style="${bannerStyle(u)}"></div>`;
+  const bp = bpOf(u), still = u.bannerStill && u.bannerStill.startsWith("/f/") ? u.bannerStill : "";
+  const src = still && S.settings.reduceMotion ? still : u.banner;
+  return `<div class="pb pb-img" style="--bh:${BANNER_H[bp.h] || BANNER_H.m}px${still ? `;background-image:url('${esc(still)}')` : ""}"><img src="${esc(src)}" alt="" decoding="async" draggable="false" style="${bpImgStyle(bp)}"></div>`;
+}
+document.addEventListener("load", e => { const t = e.target; if (t.tagName === "IMG" && t.parentNode && t.parentNode.classList && t.parentNode.classList.contains("pb-img")) t.parentNode.classList.add("ld"); }, true);
+document.addEventListener("error", e => { const t = e.target; if (t.tagName === "IMG" && t.parentNode && t.parentNode.classList && t.parentNode.classList.contains("pb-img")) t.style.display = "none"; }, true);
 function uploadBlob(file, kind) {
   return new Promise((resolve, reject) => {
     if (LOCAL) return reject(new Error("Disponível na versão online da Auryx Nexos."));
@@ -4991,7 +5005,7 @@ function profilePop(uid, anchor) {
   const steam = steamId ? `<div class="sec"><span class="label">Steam</span><div class="gl"><a href="https://steamcommunity.com/profiles/${steamId}" target="_blank" rel="noopener">${ic("steam", "xs")} Perfil Steam</a>${mine ? "" : `<a href="steam://friends/message/${steamId}">Conversar na Steam</a>`}</div></div>` : "";
   const acts = mine ? `<button class="btn sm" data-edit-profile>Editar perfil</button>`
     : `<button class="btn sm primary" data-dm>${ic("message", "sm")}Mensagem</button>${f === "friend" ? "" : f === "out" ? `<button class="btn sm" disabled>Pedido enviado</button>` : f === "in" ? `<button class="btn sm green" data-accept>Aceitar amizade</button>` : `<button class="btn sm" data-addf>${ic("userPlus", "sm")}Adicionar</button>`}${S.view === "chat" && !isDm(S.channelId) ? `<button class="btn sm ghost" data-mention>@</button>` : ""}`;
-  popover(anchor, `<div class="pb" style="${bannerStyle(u)}"></div><div class="pc">${avatar(u, 76, true)}${badges(u)}<h3>${nameHTML(u)}${u.pron ? `<small class="pron">${esc(u.pron)}</small>` : ""}</h3><div class="status-line"><i class="dot st-${esc(u.status)}"></i>${STATUS[u.status] || ""}${f === "friend" ? " · Amigo" : ""}</div>${u.cs ? `<div class="cs-bubble">${csText(u)}</div>` : ""}${game}${u.about ? `<div class="sec"><span class="label">Sobre mim</span>${esc(u.about)}</div>` : ""}${steam}<div class="sec"><span class="label">No Auryx Nexos desde</span>${u.created ? new Date(u.created).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</div>${v ? `<div class="sec"><span class="label">Em chamada</span><a data-go-voice="${v.channelId}" style="cursor:pointer">${esc(chan(v.channelId)?.name || "Sala de voz")}</a>${v.screen ? ' <b class="live-tag">AO VIVO</b>' : ""}</div>` : ""}<div class="sec" style="display:flex;gap:8px;flex-wrap:wrap">${acts}</div></div>`, "profile-pop" + (u.pfx ? " pfx-" + u.pfx : ""), (el, close) => {
+  popover(anchor, `${bannerHTML(u)}<div class="pc">${avatar(u, 76, true)}${badges(u)}<h3>${nameHTML(u)}${u.pron ? `<small class="pron">${esc(u.pron)}</small>` : ""}</h3><div class="status-line"><i class="dot st-${esc(u.status)}"></i>${STATUS[u.status] || ""}${f === "friend" ? " · Amigo" : ""}</div>${u.cs ? `<div class="cs-bubble">${csText(u)}</div>` : ""}${game}${u.about ? `<div class="sec"><span class="label">Sobre mim</span>${esc(u.about)}</div>` : ""}${steam}<div class="sec"><span class="label">No Auryx Nexos desde</span>${u.created ? new Date(u.created).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</div>${v ? `<div class="sec"><span class="label">Em chamada</span><a data-go-voice="${v.channelId}" style="cursor:pointer">${esc(chan(v.channelId)?.name || "Sala de voz")}</a>${v.screen ? ' <b class="live-tag">AO VIVO</b>' : ""}</div>` : ""}<div class="sec" style="display:flex;gap:8px;flex-wrap:wrap">${acts}</div></div>`, "profile-pop" + (u.pfx ? " pfx-" + u.pfx : ""), (el, close) => {
     el.addEventListener("click", e => {
       if (e.target.closest("[data-mention]")) { close(); insertAtCaret(`@${u.username} `); }
       if (e.target.closest("[data-edit-profile]")) { close(); userSettings("account"); }
@@ -5427,7 +5441,7 @@ function userSettings(initial) {
 function mountTurbo(p) {
   const me = S.me;
   let saved = false;
-  const d = { avatar: me.avatar || "", banner: me.banner || "", bannerStill: me.bannerStill || "", theme: me.theme || [me.color || "#7c5cff", "#22d3ee"], useTheme: !!me.theme, pron: me.pron || "", cs: { e: (me.cs && me.cs.e) || "", t: (me.cs && me.cs.t) || "" }, fx: me.fx || "", pfx: me.pfx || "", ring: me.ringPref || "",
+  const d = { avatar: me.avatar || "", banner: me.banner || "", bannerStill: me.bannerStill || "", theme: me.theme || [me.color || "#7c5cff", "#22d3ee"], useTheme: !!me.theme, pron: me.pron || "", cs: { e: (me.cs && me.cs.e) || "", t: (me.cs && me.cs.t) || "" }, fx: me.fx || "", pfx: me.pfx || "", ring: me.ringPref || "", bp: bpOf(me),
     accent: me.accentSaved || [S.settings.accent || "#7c5cff", "#22d3ee"], useAccent: !!me.accentSaved };
   const root = p.querySelector("#turboRoot");
   const FX = [["", "Normal"], ["grad", "Degradê"], ["glow", "Brilho"], ["rainbow", "Arco-íris"]];
@@ -5435,8 +5449,8 @@ function mountTurbo(p) {
   const RINGS = [["", "Nenhuma", 0], ["spin", "Giratória", 2], ["pulse", "Pulsante", 2], ["rainbow", "Arco-íris", 2], ["gold", "Ouro", 3], ["aurora", "Aurora", 3]];
   const AURYS = [["#7c5cff", "#22d3ee"], ["#ff4d8d", "#ffb86b"], ["#00c6a7", "#1e90ff"], ["#f59e0b", "#ef4444"], ["#a855f7", "#ec4899"], ["#22c55e", "#06b6d4"], ["#e11d48", "#7c3aed"], ["#64748b", "#e2e8f0"]];
   const preview = () => {
-    const u = { ...me, avatar: d.avatar, banner: d.banner, bannerStill: d.bannerStill, theme: d.useTheme ? d.theme : null, pron: d.pron, cs: d.cs.t || d.cs.e ? d.cs : null, fx: d.fx, pfx: d.pfx, ring: d.ring, status: me.statusPref === "invisible" ? "offline" : me.statusPref };
-    return `<div class="popover profile-pop turbo-preview${d.pfx ? " pfx-" + d.pfx : ""}"><div class="pb" style="${bannerStyle(u)}"></div><div class="pc">${avatar(u, 76, true)}${badges(u)}<h3>${nameHTML(u)}${u.pron ? `<small class="pron">${esc(u.pron)}</small>` : ""}</h3><div class="status-line"><i class="dot st-${esc(u.status)}"></i>${STATUS[u.status] || ""}</div>${u.cs ? `<div class="cs-bubble">${csText(u)}</div>` : ""}${u.about ? `<div class="sec"><span class="label">Sobre mim</span>${esc(u.about)}</div>` : ""}</div></div>`;
+    const u = { ...me, avatar: d.avatar, banner: d.banner, bannerStill: d.bannerStill, bp: d.bp, theme: d.useTheme ? d.theme : null, pron: d.pron, cs: d.cs.t || d.cs.e ? d.cs : null, fx: d.fx, pfx: d.pfx, ring: d.ring, status: me.statusPref === "invisible" ? "offline" : me.statusPref };
+    return `<div class="popover profile-pop turbo-preview${d.pfx ? " pfx-" + d.pfx : ""}">${bannerHTML(u)}<div class="pc">${avatar(u, 76, true)}${badges(u)}<h3>${nameHTML(u)}${u.pron ? `<small class="pron">${esc(u.pron)}</small>` : ""}</h3><div class="status-line"><i class="dot st-${esc(u.status)}"></i>${STATUS[u.status] || ""}</div>${u.cs ? `<div class="cs-bubble">${csText(u)}</div>` : ""}${u.about ? `<div class="sec"><span class="label">Sobre mim</span>${esc(u.about)}</div>` : ""}</div></div>`;
   };
   const R = myRank(), PN = ["", "VIP", "Pro", "Max"];
   // seção bloqueada: mostra o cadeado e o plano necessário (o servidor também confere)
@@ -5450,6 +5464,13 @@ function mountTurbo(p) {
           <span class="label">Banner (imagem ou GIF animado)</span>
           <div class="row-btns"><button class="btn sm" data-up="banner">${ic("image", "sm")}Enviar banner</button>${d.banner ? `<button class="btn sm ghost" data-clear="banner">Remover</button>` : ""}</div>
           <small class="hint" style="display:block;margin:-4px 0 12px">GIF de até 6 MB, de preferência 600×240. Quem usa "reduzir animações" vê o 1º quadro.</small>
+          ${d.banner && d.banner.startsWith("/f/") ? `<div class="bp-ctl"><span class="label">Enquadramento do banner</span>
+          <div class="chips">${[["s", "Baixo"], ["m", "Médio"], ["l", "Alto"]].map(([k, n]) => `<button type="button" class="chip${d.bp.h === k ? " on" : ""}" data-bh="${k}">${n}</button>`).join("")}</div>
+          <label class="bp-range"><span>Zoom <b data-bv="z">${d.bp.z}%</b></span><input type="range" min="100" max="300" step="5" data-k="bz" value="${d.bp.z}"></label>
+          <label class="bp-range"><span>Horizontal <b data-bv="x">${d.bp.x}%</b></span><input type="range" min="0" max="100" data-k="bx" value="${d.bp.x}"></label>
+          <label class="bp-range"><span>Vertical <b data-bv="y">${d.bp.y}%</b></span><input type="range" min="0" max="100" data-k="by" value="${d.bp.y}"></label>
+          <div class="row-btns"><button type="button" class="btn sm ghost" data-bp-reset>Centralizar</button></div>
+          <small class="hint" style="display:block;margin:-4px 0 12px">Dica: arraste a imagem na prévia para mudar o ponto que aparece.</small></div>` : ""}
           <span class="label">Moldura do avatar</span>
           <div class="chips">${RINGS.map(([k, n, need]) => `<button class="chip${d.ring === k ? " on" : ""}${need > R ? " locked-chip" : ""}" data-ring="${k}" ${need > R ? `data-tip="Plano ${PN[need]}"` : ""}>${n}${need > R ? " 🔒" : ""}</button>`).join("")}</div>`)}
           ${sec(2, `<div class="toggle-row"><span><b>Aurys · cor do app inteiro</b><small>Botões, destaques e degradês na sua cor, em todos os seus aparelhos</small></span><label class="switch"><input type="checkbox" data-k="useAccent" ${d.useAccent ? "checked" : ""}><i></i></label></div>
@@ -5468,6 +5489,34 @@ function mountTurbo(p) {
         <div class="turbo-prev"><span class="label">Prévia</span>${preview()}</div>
       </div>`;
   };
+  const bpPaint = () => {
+    const pb = root.querySelector(".turbo-prev .pb-img"), im = pb && pb.querySelector("img");
+    if (!im) { refreshPrev(); return; }
+    pb.style.setProperty("--bh", (BANNER_H[d.bp.h] || BANNER_H.m) + "px");
+    im.style.cssText = bpImgStyle(d.bp);
+    for (const k of ["x", "y", "z"]) {
+      const b = root.querySelector(`[data-bv="${k}"]`), r = root.querySelector(`[data-k="b${k}"]`);
+      if (b) b.textContent = d.bp[k] + "%";
+      if (r && document.activeElement !== r) r.value = d.bp[k];
+    }
+  };
+  // arrastar a imagem na prévia: move o ponto que fica no centro
+  root.addEventListener("pointerdown", e => {
+    const pb = e.target.closest(".turbo-prev .pb-img");
+    if (!pb || e.button) return;
+    e.preventDefault();
+    const w = pb.clientWidth, h = pb.clientHeight, x0 = d.bp.x, y0 = d.bp.y, sx = e.clientX, sy = e.clientY;
+    try { pb.setPointerCapture(e.pointerId); } catch {}
+    pb.classList.add("dragging");
+    const move = ev => {
+      const k = 100 / (d.bp.z / 100);
+      d.bp.x = Math.round(Math.min(100, Math.max(0, x0 - (ev.clientX - sx) / w * k)));
+      d.bp.y = Math.round(Math.min(100, Math.max(0, y0 - (ev.clientY - sy) / h * k)));
+      bpPaint();
+    };
+    const up = () => { pb.classList.remove("dragging"); pb.removeEventListener("pointermove", move); pb.removeEventListener("pointerup", up); pb.removeEventListener("pointercancel", up); };
+    pb.addEventListener("pointermove", move); pb.addEventListener("pointerup", up); pb.addEventListener("pointercancel", up);
+  });
   const refreshPrev = () => { const pv = root.querySelector(".turbo-prev"); if (pv) pv.innerHTML = `<span class="label">Prévia</span>${preview()}`; };
   draw();
   // prévia ao vivo da Aurys no app inteiro (volta ao normal se sair sem salvar)
@@ -5475,6 +5524,7 @@ function mountTurbo(p) {
   root.addEventListener("input", e => {
     const k = e.target.dataset.k;
     if (k === "a0" || k === "a1") { d.accent[+k[1]] = e.target.value; liveAccent(); return; }
+    if (k === "bx" || k === "by" || k === "bz") { d.bp[k[1]] = +e.target.value; bpPaint(); return; }
     if (k === "t0" || k === "t1") d.theme[+k[1]] = e.target.value;
     else if (k === "cst") d.cs.t = e.target.value;
     else if (k === "pron") d.pron = e.target.value;
@@ -5491,7 +5541,9 @@ function mountTurbo(p) {
     const rg = t.closest("[data-ring]"); if (rg) { const need = (RINGS.find(x => x[0] === rg.dataset.ring) || [0, 0, 0])[2]; if (need > R) { toast(`A moldura ${rg.textContent.replace(" 🔒", "")} é do plano ${PN[need]}.`, "info"); return; } d.ring = rg.dataset.ring; draw(); return; }
     const fx = t.closest("[data-fx]"); if (fx) { d.fx = fx.dataset.fx; draw(); return; }
     const pfx = t.closest("[data-pfx]"); if (pfx) { d.pfx = pfx.dataset.pfx; draw(); return; }
-    const cl = t.closest("[data-clear]"); if (cl) { d[cl.dataset.clear] = ""; if (cl.dataset.clear === "banner") d.bannerStill = ""; draw(); return; }
+    const bh = t.closest("[data-bh]"); if (bh) { d.bp.h = bh.dataset.bh; root.querySelectorAll("[data-bh]").forEach(b => b.classList.toggle("on", b === bh)); bpPaint(); return; }
+    if (t.closest("[data-bp-reset]")) { Object.assign(d.bp, { x: 50, y: 50, z: 100 }); bpPaint(); return; }
+    const cl = t.closest("[data-clear]"); if (cl) { d[cl.dataset.clear] = ""; if (cl.dataset.clear === "banner") { d.bannerStill = ""; d.bp = bpOf({}); } draw(); return; }
     const em = t.closest("[data-cs-emoji]"); if (em) { emojiPicker(em, v => { d.cs.e = v; draw(); }); return; }
     const up = t.closest("[data-up]");
     if (up) {
@@ -5509,6 +5561,7 @@ function mountTurbo(p) {
           const still = isBanner && gif ? await gifStill(f).catch(() => null) : null;
           const r = await uploadBlob(f);
           d[up.dataset.up] = r.url;
+          if (isBanner) Object.assign(d.bp, { x: 50, y: 50, z: 100 });
           if (isBanner) d.bannerStill = still ? (await uploadBlob(still).catch(() => ({ url: "" }))).url : "";
           draw();
           toast(gif ? (isBanner ? "Banner animado enviado! ✨ Clique em Salvar." : "GIF enviado — seu avatar vai ficar animado! ✨") : "Imagem enviada.", "ok");
@@ -5521,7 +5574,7 @@ function mountTurbo(p) {
       // só envia o que o plano libera (o resto fica guardado como está)
       const data = { pron: d.pron };
       if (R >= 1) Object.assign(data, { theme: d.useTheme ? d.theme : null, cs: d.cs });
-      if (R >= 2) Object.assign(data, { avatar: d.avatar, banner: d.banner, bannerStill: d.bannerStill, fx: d.fx, ring: d.ring, accent: d.useAccent ? d.accent : null });
+      if (R >= 2) Object.assign(data, { avatar: d.avatar, banner: d.banner, bannerStill: d.bannerStill, bp: d.banner && d.banner.startsWith("/f/") ? d.bp : null, fx: d.fx, ring: d.ring, accent: d.useAccent ? d.accent : null });
       if (R >= 3) data.pfx = d.pfx;
       const r = await emit("profile:update", data);
       if (r.error) toast(r.error, "error"); else { saved = true; toast("Perfil Turbo salvo! ⚡", "ok"); confetti(); }
