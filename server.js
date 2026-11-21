@@ -244,6 +244,7 @@ function pubUser(u) {
     // Perfil Turbo — só aparece o que o plano atual libera (se o plano vencer, some sem apagar nada)
     banner: r >= NEED.banner ? u.banner || "" : "", bannerStill: r >= NEED.banner && u.banner ? u.bannerStill || "" : "",
     bp: r >= NEED.banner && u.banner && u.bp ? u.bp : null,   // enquadramento do banner: posição, zoom e altura
+    ap: av.startsWith("/f/") && r >= NEED.avatarFile && u.ap ? u.ap : null,   // enquadramento do avatar: posição e zoom
     theme: r >= NEED.theme ? u.theme || null : null, pron: u.pron || "",
     cs: off || r < NEED.cs ? null : u.cs || null, fx: r >= NEED.fx ? u.fx || "" : "", pfx: r >= NEED.pfx ? u.pfx || "" : "",
     ring: u.ring && r >= (RINGS[u.ring] || 9) ? u.ring : "",
@@ -315,7 +316,9 @@ async function serveStatic(req, res, pathname) {
   if (!st || !st.isFile()) { res.writeHead(404, { "content-type": "text/plain; charset=utf-8" }); res.end("Não encontrado"); return; }
   let entry = fileCache.get(file);
   if (!entry || entry.mtime !== st.mtimeMs) {
-    const raw = await fsp.readFile(file);
+    let raw = await fsp.readFile(file);
+    // o app.js leva a própria versão: assim ele percebe sozinho quando está desatualizado (cópia guardada antiga)
+    if (rel === "/app.js") raw = Buffer.from(raw.toString("utf8").replace("__AURYX_BUILD__", APP_VER));
     const type = MIME[path.extname(file).toLowerCase()] || "application/octet-stream";
     const zip = /text|javascript|json|svg/.test(type) && raw.length > 1024;
     // gzip fora da thread principal (antes era gzipSync: travava o servidor no 1º acesso de cada arquivo)
@@ -1807,7 +1810,7 @@ io.on("connection", socket => {
   });
 
   /* ---------- Perfil ---------- */
-  on("profile:update", async ({ color, avatar, about, status, steam, game, banner, bannerStill, bp, theme, pron, cs, fx, pfx, ring, accent }) => {
+  on("profile:update", async ({ color, avatar, about, status, steam, game, banner, bannerStill, bp, ap, theme, pron, cs, fx, pfx, ring, accent }) => {
     const u = me();
     // benefícios Premium: o servidor confere o plano (limpar é sempre permitido)
     const r = rankOf(u);
@@ -1837,6 +1840,14 @@ io.on("connection", socket => {
       const isDefault = !v || (v.x === 50 && v.y === 50 && v.z === 100 && v.h === "m");
       if (!isDefault) need("banner", true);
       u.bp = isDefault ? null : v;
+    }
+    // enquadramento do avatar (imagem/GIF): x/y = ponto no centro do círculo (0–100%), z = zoom (100–300%)
+    if (ap !== undefined) {
+      const n = (v, lo, hi, def) => { v = Math.round(Number(v)); return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : def; };
+      const v = ap && typeof ap === "object" ? { x: n(ap.x, 0, 100, 50), y: n(ap.y, 0, 100, 50), z: n(ap.z, 100, 300, 100) } : null;
+      const isDefault = !v || (v.x === 50 && v.y === 50 && v.z === 100);
+      if (!isDefault) need("avatarFile", true);
+      u.ap = isDefault ? null : v;
     }
     if (ring !== undefined) { const v = RINGS[ring] ? ring : ""; if (v && r < RINGS[v]) fail(`Essa moldura faz parte do plano ${RANK_NAME[RINGS[v]]}.`); u.ring = v; }
     if (accent !== undefined) { const a = Array.isArray(accent) && accent.length === 2 && accent.every(isColor) ? accent : null; need("accent", a); u.accent = a; }

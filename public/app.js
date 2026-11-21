@@ -218,7 +218,7 @@ function fmtStamp(ts) {
 
 function avatar(u, size = 40, status = false, attrs = "") {
   const name = u.username || "?";
-  const inner = IS_IMG(u.avatar) ? `<img src="${esc(u.avatar)}" alt="" decoding="async">`
+  const inner = IS_IMG(u.avatar) ? `<span class="av-im"><img src="${esc(u.avatar)}" alt="" decoding="async"${u.ap ? ` style="${bpImgStyle({ x: 50, y: 50, z: 100, ...u.ap })}"` : ""}></span>`
     : u.avatar ? `<span class="av-emoji">${esc(u.avatar)}</span>` : esc(([...name][0] || "?").toUpperCase());
   // moldura animada (Pro/Max): só em avatares de tamanho médio para cima, para não pesar em listas grandes
   const ring = u.ring && size >= 30 ? ` frame fr-${esc(u.ring)}` : "";
@@ -2819,12 +2819,23 @@ async function resumeVoice(cid) {
   renderAll();
 }
 /* Atualização automática: o servidor mudou de versão enquanto o app estava aberto */
+// Versão deste app.js (o servidor troca o marcador abaixo pela versão real ao entregar o arquivo).
+// Antes, o app aberto a partir da cópia guardada comparava a versão do servidor com ela mesma e nunca se atualizava.
+const BUILD = "__AURYX_BUILD__";
+const appBusy = () => V.channelId || (document.activeElement && /TEXTAREA|INPUT/.test(document.activeElement.tagName) && document.activeElement.value);
 function checkVersion(ver) {
   if (!ver) return;
-  if (!S.appVer) { S.appVer = ver; return; }
+  if (!S.appVer) S.appVer = /^[0-9a-f]{10}$/.test(BUILD) ? BUILD : ver;
   if (ver === S.appVer) return;
-  const busy = V.channelId || (document.activeElement && /TEXTAREA|INPUT/.test(document.activeElement.tagName) && document.activeElement.value);
-  if (busy) { showUpdateBar(); return; }
+  // proteção contra recarregar em loop se algo der errado com a cópia nova
+  if (store.get("updTried") === ver) { showUpdateBar(); return; }
+  if (appBusy()) {
+    showUpdateBar();
+    // em chamada ou digitando: atualiza sozinho assim que a pessoa sair da chamada / parar de digitar
+    if (!S.updWait) S.updWait = setInterval(() => { if (!appBusy()) { clearInterval(S.updWait); S.updWait = 0; checkVersion(ver); } }, 15000);
+    return;
+  }
+  store.set("updTried", ver);
   toast("Atualizando a Auryx Nexos…", "info", 3000);
   // apaga a cópia guardada do app para a recarga já vir com a versão nova
   const wipe = window.caches ? caches.keys().then(ks => Promise.all(ks.map(k => caches.delete(k)))).catch(() => {}) : Promise.resolve();
@@ -5441,7 +5452,7 @@ function userSettings(initial) {
 function mountTurbo(p) {
   const me = S.me;
   let saved = false;
-  const d = { avatar: me.avatar || "", banner: me.banner || "", bannerStill: me.bannerStill || "", theme: me.theme || [me.color || "#7c5cff", "#22d3ee"], useTheme: !!me.theme, pron: me.pron || "", cs: { e: (me.cs && me.cs.e) || "", t: (me.cs && me.cs.t) || "" }, fx: me.fx || "", pfx: me.pfx || "", ring: me.ringPref || "", bp: bpOf(me),
+  const d = { avatar: me.avatar || "", banner: me.banner || "", bannerStill: me.bannerStill || "", theme: me.theme || [me.color || "#7c5cff", "#22d3ee"], useTheme: !!me.theme, pron: me.pron || "", cs: { e: (me.cs && me.cs.e) || "", t: (me.cs && me.cs.t) || "" }, fx: me.fx || "", pfx: me.pfx || "", ring: me.ringPref || "", bp: bpOf(me), ap: { x: 50, y: 50, z: 100, ...(me.ap || {}) },
     accent: me.accentSaved || [S.settings.accent || "#7c5cff", "#22d3ee"], useAccent: !!me.accentSaved };
   const root = p.querySelector("#turboRoot");
   const FX = [["", "Normal"], ["grad", "Degradê"], ["glow", "Brilho"], ["rainbow", "Arco-íris"]];
@@ -5449,7 +5460,7 @@ function mountTurbo(p) {
   const RINGS = [["", "Nenhuma", 0], ["spin", "Giratória", 2], ["pulse", "Pulsante", 2], ["rainbow", "Arco-íris", 2], ["gold", "Ouro", 3], ["aurora", "Aurora", 3]];
   const AURYS = [["#7c5cff", "#22d3ee"], ["#ff4d8d", "#ffb86b"], ["#00c6a7", "#1e90ff"], ["#f59e0b", "#ef4444"], ["#a855f7", "#ec4899"], ["#22c55e", "#06b6d4"], ["#e11d48", "#7c3aed"], ["#64748b", "#e2e8f0"]];
   const preview = () => {
-    const u = { ...me, avatar: d.avatar, banner: d.banner, bannerStill: d.bannerStill, bp: d.bp, theme: d.useTheme ? d.theme : null, pron: d.pron, cs: d.cs.t || d.cs.e ? d.cs : null, fx: d.fx, pfx: d.pfx, ring: d.ring, status: me.statusPref === "invisible" ? "offline" : me.statusPref };
+    const u = { ...me, avatar: d.avatar, banner: d.banner, bannerStill: d.bannerStill, bp: d.bp, ap: d.avatar && d.avatar.startsWith("/f/") ? d.ap : null, theme: d.useTheme ? d.theme : null, pron: d.pron, cs: d.cs.t || d.cs.e ? d.cs : null, fx: d.fx, pfx: d.pfx, ring: d.ring, status: me.statusPref === "invisible" ? "offline" : me.statusPref };
     return `<div class="popover profile-pop turbo-preview${d.pfx ? " pfx-" + d.pfx : ""}">${bannerHTML(u)}<div class="pc">${avatar(u, 76, true)}${badges(u)}<h3>${nameHTML(u)}${u.pron ? `<small class="pron">${esc(u.pron)}</small>` : ""}</h3><div class="status-line"><i class="dot st-${esc(u.status)}"></i>${STATUS[u.status] || ""}</div>${u.cs ? `<div class="cs-bubble">${csText(u)}</div>` : ""}${u.about ? `<div class="sec"><span class="label">Sobre mim</span>${esc(u.about)}</div>` : ""}</div></div>`;
   };
   const R = myRank(), PN = ["", "VIP", "Pro", "Max"];
@@ -5461,6 +5472,12 @@ function mountTurbo(p) {
         <div class="turbo-form">
           ${sec(2, `<span class="label">Avatar animado</span>
           <div class="row-btns"><button class="btn sm" data-up="avatar">${ic("image", "sm")}Enviar imagem ou GIF</button>${d.avatar ? `<button class="btn sm ghost" data-clear="avatar">Remover</button>` : ""}</div>
+          ${d.avatar && d.avatar.startsWith("/f/") ? `<div class="bp-ctl"><span class="label">Enquadramento do avatar</span>
+          <label class="bp-range"><span>Zoom <b data-av="z">${d.ap.z}%</b></span><input type="range" min="100" max="300" step="5" data-k="az" value="${d.ap.z}"></label>
+          <label class="bp-range"><span>Horizontal <b data-av="x">${d.ap.x}%</b></span><input type="range" min="0" max="100" data-k="ax" value="${d.ap.x}"></label>
+          <label class="bp-range"><span>Vertical <b data-av="y">${d.ap.y}%</b></span><input type="range" min="0" max="100" data-k="ay" value="${d.ap.y}"></label>
+          <div class="row-btns"><button type="button" class="btn sm ghost" data-ap-reset>Centralizar</button></div>
+          <small class="hint" style="display:block;margin:-4px 0 12px">Dica: arraste o avatar na prévia para escolher a parte do GIF que aparece no círculo.</small></div>` : ""}
           <span class="label">Banner (imagem ou GIF animado)</span>
           <div class="row-btns"><button class="btn sm" data-up="banner">${ic("image", "sm")}Enviar banner</button>${d.banner ? `<button class="btn sm ghost" data-clear="banner">Remover</button>` : ""}</div>
           <small class="hint" style="display:block;margin:-4px 0 12px">GIF de até 6 MB, de preferência 600×240. Quem usa "reduzir animações" vê o 1º quadro.</small>
@@ -5489,6 +5506,16 @@ function mountTurbo(p) {
         <div class="turbo-prev"><span class="label">Prévia</span>${preview()}</div>
       </div>`;
   };
+  const apPaint = () => {
+    const im = root.querySelector(".turbo-prev .pc .av-im img");
+    if (!im) { refreshPrev(); return; }
+    im.style.cssText = bpImgStyle(d.ap);
+    for (const k of ["x", "y", "z"]) {
+      const b = root.querySelector(`[data-av="${k}"]`), r = root.querySelector(`[data-k="a${k}"]`);
+      if (b) b.textContent = d.ap[k] + "%";
+      if (r && document.activeElement !== r) r.value = d.ap[k];
+    }
+  };
   const bpPaint = () => {
     const pb = root.querySelector(".turbo-prev .pb-img"), im = pb && pb.querySelector("img");
     if (!im) { refreshPrev(); return; }
@@ -5502,17 +5529,19 @@ function mountTurbo(p) {
   };
   // arrastar a imagem na prévia: move o ponto que fica no centro
   root.addEventListener("pointerdown", e => {
-    const pb = e.target.closest(".turbo-prev .pb-img");
+    const avEl = e.target.closest(".turbo-prev .pc .av");
+    const pb = avEl && avEl.querySelector(".av-im") ? avEl : e.target.closest(".turbo-prev .pb-img");
     if (!pb || e.button) return;
     e.preventDefault();
-    const w = pb.clientWidth, h = pb.clientHeight, x0 = d.bp.x, y0 = d.bp.y, sx = e.clientX, sy = e.clientY;
+    const o = pb === avEl ? d.ap : d.bp, paint = pb === avEl ? apPaint : bpPaint;
+    const w = pb.clientWidth, h = pb.clientHeight, x0 = o.x, y0 = o.y, sx = e.clientX, sy = e.clientY;
     try { pb.setPointerCapture(e.pointerId); } catch {}
     pb.classList.add("dragging");
     const move = ev => {
-      const k = 100 / (d.bp.z / 100);
-      d.bp.x = Math.round(Math.min(100, Math.max(0, x0 - (ev.clientX - sx) / w * k)));
-      d.bp.y = Math.round(Math.min(100, Math.max(0, y0 - (ev.clientY - sy) / h * k)));
-      bpPaint();
+      const k = 100 / (o.z / 100);
+      o.x = Math.round(Math.min(100, Math.max(0, x0 - (ev.clientX - sx) / w * k)));
+      o.y = Math.round(Math.min(100, Math.max(0, y0 - (ev.clientY - sy) / h * k)));
+      paint();
     };
     const up = () => { pb.classList.remove("dragging"); pb.removeEventListener("pointermove", move); pb.removeEventListener("pointerup", up); pb.removeEventListener("pointercancel", up); };
     pb.addEventListener("pointermove", move); pb.addEventListener("pointerup", up); pb.addEventListener("pointercancel", up);
@@ -5525,6 +5554,7 @@ function mountTurbo(p) {
     const k = e.target.dataset.k;
     if (k === "a0" || k === "a1") { d.accent[+k[1]] = e.target.value; liveAccent(); return; }
     if (k === "bx" || k === "by" || k === "bz") { d.bp[k[1]] = +e.target.value; bpPaint(); return; }
+    if (k === "ax" || k === "ay" || k === "az") { d.ap[k[1]] = +e.target.value; apPaint(); return; }
     if (k === "t0" || k === "t1") d.theme[+k[1]] = e.target.value;
     else if (k === "cst") d.cs.t = e.target.value;
     else if (k === "pron") d.pron = e.target.value;
@@ -5542,8 +5572,9 @@ function mountTurbo(p) {
     const fx = t.closest("[data-fx]"); if (fx) { d.fx = fx.dataset.fx; draw(); return; }
     const pfx = t.closest("[data-pfx]"); if (pfx) { d.pfx = pfx.dataset.pfx; draw(); return; }
     const bh = t.closest("[data-bh]"); if (bh) { d.bp.h = bh.dataset.bh; root.querySelectorAll("[data-bh]").forEach(b => b.classList.toggle("on", b === bh)); bpPaint(); return; }
+    if (t.closest("[data-ap-reset]")) { Object.assign(d.ap, { x: 50, y: 50, z: 100 }); apPaint(); return; }
     if (t.closest("[data-bp-reset]")) { Object.assign(d.bp, { x: 50, y: 50, z: 100 }); bpPaint(); return; }
-    const cl = t.closest("[data-clear]"); if (cl) { d[cl.dataset.clear] = ""; if (cl.dataset.clear === "banner") { d.bannerStill = ""; d.bp = bpOf({}); } draw(); return; }
+    const cl = t.closest("[data-clear]"); if (cl) { d[cl.dataset.clear] = ""; if (cl.dataset.clear === "banner") { d.bannerStill = ""; d.bp = bpOf({}); } if (cl.dataset.clear === "avatar") d.ap = { x: 50, y: 50, z: 100 }; draw(); return; }
     const em = t.closest("[data-cs-emoji]"); if (em) { emojiPicker(em, v => { d.cs.e = v; draw(); }); return; }
     const up = t.closest("[data-up]");
     if (up) {
@@ -5561,7 +5592,7 @@ function mountTurbo(p) {
           const still = isBanner && gif ? await gifStill(f).catch(() => null) : null;
           const r = await uploadBlob(f);
           d[up.dataset.up] = r.url;
-          if (isBanner) Object.assign(d.bp, { x: 50, y: 50, z: 100 });
+          if (isBanner) Object.assign(d.bp, { x: 50, y: 50, z: 100 }); else d.ap = { x: 50, y: 50, z: 100 };
           if (isBanner) d.bannerStill = still ? (await uploadBlob(still).catch(() => ({ url: "" }))).url : "";
           draw();
           toast(gif ? (isBanner ? "Banner animado enviado! ✨ Clique em Salvar." : "GIF enviado — seu avatar vai ficar animado! ✨") : "Imagem enviada.", "ok");
@@ -5574,7 +5605,7 @@ function mountTurbo(p) {
       // só envia o que o plano libera (o resto fica guardado como está)
       const data = { pron: d.pron };
       if (R >= 1) Object.assign(data, { theme: d.useTheme ? d.theme : null, cs: d.cs });
-      if (R >= 2) Object.assign(data, { avatar: d.avatar, banner: d.banner, bannerStill: d.bannerStill, bp: d.banner && d.banner.startsWith("/f/") ? d.bp : null, fx: d.fx, ring: d.ring, accent: d.useAccent ? d.accent : null });
+      if (R >= 2) Object.assign(data, { avatar: d.avatar, banner: d.banner, bannerStill: d.bannerStill, bp: d.banner && d.banner.startsWith("/f/") ? d.bp : null, ap: d.avatar && d.avatar.startsWith("/f/") ? d.ap : null, fx: d.fx, ring: d.ring, accent: d.useAccent ? d.accent : null });
       if (R >= 3) data.pfx = d.pfx;
       const r = await emit("profile:update", data);
       if (r.error) toast(r.error, "error"); else { saved = true; toast("Perfil Turbo salvo! ⚡", "ok"); confetti(); }
