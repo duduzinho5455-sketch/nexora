@@ -1,7 +1,7 @@
 /* Auryx Nexos — service worker
    Guarda só a "casca" do app (HTML, CSS, JS, ícones) para abrir rápido.
    Mensagens, login e voz sempre vão direto para o servidor. */
-const CACHE = "auryx-v15";
+const CACHE = "auryx-v16";
 const SHELL = ["/", "/style.css", "/app.js", "/socket.io/socket.io.min.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 const cacheable = p => SHELL.includes(p) || p.startsWith("/icons/") || p.startsWith("/vendor/") || p === "/noise-worklet.js";
 
@@ -44,6 +44,7 @@ self.addEventListener("fetch", e => {
   // dados ao vivo, login, arquivos privados e o agente: sempre direto no servidor
   if ((p.startsWith("/socket.io") && p !== "/socket.io/socket.io.min.js") || p.startsWith("/api/") || p.startsWith("/f/") || p === "/health" || p.startsWith("/agente/")) return;
   if (req.mode === "navigate" && /^\/(site|baixar|download|sobre)\/?$/.test(p)) return;   // site de apresentação: sempre do servidor
+  if (p === "/spotify-callback.html") return;   // volta do login do Spotify: sempre do servidor
   if (req.mode === "navigate") { e.respondWith(fromCacheThenNetwork(e, req, "/")); return; }
   if (cacheable(p)) e.respondWith(fromCacheThenNetwork(e, req, p));
 });

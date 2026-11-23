@@ -1330,6 +1330,7 @@ io.on("connection", socket => {
     for (const d of dms) for (const id of d.members) addU(id);
     const ids = new Set([...mine.map(s => s.id), ...dms.map(d => d.id)]);
     socket.emit("ready", {
+      spotifyId: process.env.SPOTIFY_CLIENT_ID || "",   // app do Spotify Developer (login com a conta, música inteira e volume)
       me: meView(me()),
       servers: mine.map(serverView),
       users: [...users.values()],
@@ -2139,6 +2140,45 @@ io.on("connection", socket => {
     }
     audit("user:setpass", u.id, {});
     save();
+  });
+  /* Trocar o nome de usuário (nick). Também é o login, então a pessoa passa a entrar com o nome novo.
+     O ADM Supremo e os ADMs de ADMIN_USERS são reconhecidos pelo nome: esses nomes não mudam e ninguém pode pegá-los. */
+  const renameUser = (u, raw) => {
+    const name = str(raw, 24).replace(/^@/, "");
+    if (!/^[\p{L}\p{N}_.-]{3,24}$/u.test(name)) fail("O nome deve ter de 3 a 24 caracteres (letras, números, _ . -).");
+    const oldKey = u.username.toLowerCase(), key = name.toLowerCase();
+    if (name === u.username) fail("Esse já é o nome atual.");
+    if (oldKey === OWNER || ENV_ADMINS.includes(oldKey)) fail("O nome dessa conta é fixo (o cargo dela depende dele).");
+    if (key !== oldKey && (byName.has(key) || ADMIN_SET.has(key) || key === OWNER || ENV_ADMINS.includes(key) || /^aury([ _.-]?(ia|ai|bot))?$/.test(key))) fail("Esse nome de usuário já está em uso.");
+    const old = u.username;
+    byName.delete(oldKey);
+    byName.set(key, u.id);
+    u.username = name;
+    u.nameLog = (u.nameLog || []).concat({ at: Date.now(), from: old, by: uid }).slice(-20);
+    refreshAdmins();
+    save();
+    emitToPeers(u.id, "user:update", { user: pubUser(u) });
+    io.to("u:" + u.id).emit("me:update", { me: meView(u) });
+    return old;
+  };
+  on("profile:rename", ({ name }) => {
+    const u = me();
+    const wait = (u.renamedAt || 0) + 7 * 86400e3 - Date.now();
+    if (wait > 0 && !isAdmin(u)) fail(`Você poderá trocar de nome de novo em ${Math.ceil(wait / 86400e3)} dia(s).`);
+    renameUser(u, name);
+    u.renamedAt = Date.now();
+    save();
+    return { username: u.username };
+  });
+  on("admin:rename", ({ userId, name }) => {
+    const adm = requireAdmin();
+    const u = db.users[userId];
+    if (!u) fail("Usuário não encontrado.");
+    if (isAdmin(u) && u.id !== adm.id && !isOwnerUser(adm)) fail("Só o ADM Supremo troca o nome de outro ADM.");
+    const old = renameUser(u, name);
+    audit("user:rename", u.id, { from: old, to: u.username });
+    save();
+    return { username: u.username };
   });
   on("admin:unban", ({ userId }) => {
     requireAdmin();

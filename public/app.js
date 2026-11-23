@@ -257,6 +257,12 @@ function bannerStyle(u) {
 const BANNER_H = { s: 64, m: 100, l: 140 };
 const bpOf = u => ({ x: 50, y: 50, z: 100, h: "m", ...(u.bp || {}) });
 const bpImgStyle = bp => `object-position:${bp.x}% ${bp.y}%;transform-origin:${bp.x}% ${bp.y}%;transform:scale(${bp.z / 100})`;
+// banner (VIP) no fundo do quadro da call, atrás do avatar — GIF animado continua animado
+function tileBanner(u) {
+  const bp = bpOf(u), still = u.bannerStill && u.bannerStill.startsWith("/f/") ? u.bannerStill : "";
+  const src = still && S.settings.reduceMotion ? still : u.banner;
+  return `<div class="tile-bn"><img src="${esc(src)}" alt="" decoding="async" draggable="false" style="${bpImgStyle(bp)}"></div>`;
+}
 function bannerHTML(u) {
   if (!(u.banner && u.banner.startsWith("/f/"))) return `<div class="pb" style="${bannerStyle(u)}"></div>`;
   const bp = bpOf(u), still = u.bannerStill && u.bannerStill.startsWith("/f/") ? u.bannerStill : "";
@@ -1288,7 +1294,7 @@ async function adminUserCard(uid) {
       <div class="modal-foot uc-acts">
         ${u.admin ? "" : `<button class="btn sm" data-uc="logout">${ic("logout", "sm")}Desconectar de tudo</button>`}
         ${u.email && !u.emailVerified ? `<button class="btn sm" data-uc="verify">${ic("check", "sm")}Confirmar e-mail</button>` : ""}
-        ${u.admin ? "" : `<button class="btn sm" data-uc="pass">🔑 Senha</button><button class="btn sm" data-uc="grant">${ic("gem", "sm")}Dar plano</button>${u.banned ? `<button class="btn sm green" data-uc="unban">Reativar</button>` : `<button class="btn sm danger" data-uc="ban">Suspender</button>`}`}
+        ${u.admin ? "" : `<button class="btn sm" data-uc="pass">🔑 Senha</button><button class="btn sm" data-uc="rename">✏️ Nome</button><button class="btn sm" data-uc="grant">${ic("gem", "sm")}Dar plano</button>${u.banned ? `<button class="btn sm green" data-uc="unban">Reativar</button>` : `<button class="btn sm danger" data-uc="ban">Suspender</button>`}`}
       </div>`,
     onMount(m, close) {
       m.addEventListener("click", async e => {
@@ -1298,6 +1304,7 @@ async function adminUserCard(uid) {
         if (k === "logout") { if (!confirm(`Desconectar ${u.username} de todos os aparelhos?`)) return; const x = await emit("admin:user:logout", { userId: uid }); if (x.error) toast(x.error, "error"); else { toast(`${x.ended} aparelho(s) desconectado(s).`, "ok"); close(); } }
         if (k === "verify") { const x = await emit("admin:user:verify", { userId: uid }); if (x.error) toast(x.error, "error"); else { toast("E-mail confirmado.", "ok"); close(); renderAdmin(true); } }
         if (k === "pass") { close(); adminSetPass(uid, u.username); }
+        if (k === "rename") { close(); renameDialog(u.username, uid); }
         if (k === "grant") { close(); const g = document.querySelector(`[data-act="admin-grant"][data-uid="${uid}"]`); if (g) g.click(); }
         if (k === "ban") { close(); adminBan(uid, u.username); }
         if (k === "unban") { close(); const x = await emit("admin:unban", { userId: uid }); if (x.error) toast(x.error, "error"); else { toast("Conta reativada.", "ok"); renderAdmin(true); } }
@@ -1305,6 +1312,29 @@ async function adminUserCard(uid) {
     }
   });
 }
+// Trocar nome de usuário: sem uid = o próprio (1 vez a cada 7 dias); com uid = ADM trocando o de outra pessoa
+function renameDialog(cur, uid) {
+  modal({
+    title: "✏️ Trocar nome de usuário", sub: esc(cur),
+    body: `<p style="color:var(--text-2)">${uid ? "A pessoa passa a entrar com o nome novo. Avise ela." : "Você passa a entrar com o nome novo. Dá para trocar de novo depois de 7 dias."}</p><label class="field"><span>Novo nome (3 a 24: letras, números, _ . -)</span><input data-n type="text" maxlength="24" autocomplete="off" spellcheck="false" value="${esc(cur)}"></label><div class="modal-foot"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" data-go>Salvar nome</button></div>`,
+    onMount(m, close) {
+      const go = m.querySelector("[data-go]"), inp = m.querySelector("[data-n]");
+      inp.focus(); inp.select();
+      const run = async () => {
+        go.classList.add("loading");
+        const r = await emit(uid ? "admin:rename" : "profile:rename", uid ? { userId: uid, name: inp.value } : { name: inp.value });
+        go.classList.remove("loading");
+        if (r.error) { toast(r.error, "error"); return; }
+        toast(`Nome trocado para ${r.username}. ✅`, "ok");
+        close();
+        if (uid && typeof renderAdmin === "function") renderAdmin(true);
+      };
+      go.onclick = run;
+      inp.addEventListener("keydown", e => { if (e.key === "Enter") run(); });
+    }
+  });
+}
+document.addEventListener("click", e => { if (e.target.closest("[data-rename-me]") && S.me) renameDialog(S.me.username); });
 function adminSetPass(uid, name) {
   modal({
     title: "🔑 Alterar senha", sub: esc(name),
@@ -2862,6 +2892,7 @@ function showNews() {
 }
 function onReady(d) {
   checkVersion(d.ver);
+  S.spotifyId = d.spotifyId || "";
   const rejoin = V.channelId;
   S.me = d.me;
   S.users = new Map(d.users.map(u => [u.id, u]));
@@ -4127,7 +4158,7 @@ function updateTile(el, t) {
   } else if (video) { video.srcObject = null; video.remove(); }
   const ctrl = t.kind === "screen" && V.controlling && V.controlling.uid === u.id;
   el.classList.toggle("controlling", !!ctrl);
-  const sig = [t.kind, hasVideo, t.v.muted, t.v.deaf, u.username, u.avatar, u.color, t.watching, V.focus === t.key, ctrl && V.controlling.mode].join("|");
+  const sig = [t.kind, hasVideo, t.v.muted, t.v.deaf, u.username, u.avatar, u.color, u.banner, JSON.stringify(u.bp || ""), S.settings.reduceMotion, t.watching, V.focus === t.key, ctrl && V.controlling.mode].join("|");
   if (el._sig === sig) return;
   el._sig = sig;
   for (const n of [...el.children]) if (n.tagName !== "VIDEO") n.remove();
@@ -4144,6 +4175,7 @@ function updateTile(el, t) {
     if (ctrl) h += `<div class="tile-ctrl">${ic(V.controlling.mode === "full" ? "pointer" : "gamepad", "xs")}${V.controlling.mode === "full" ? "Controlando" : "Co-op"}</div>`;
     h += `<div class="tile-btns">${!mine && hasVideo ? (ctrl ? btn("ctrl-stop", "x", "Parar de controlar") : btn("ctrl-request", "gamepad", "Pedir controle / jogar junto")) : ""}${hasVideo ? btn("tile-focus", "focus", V.focus === t.key ? "Sair do foco" : "Focar") + btn("fullscreen", "maximize", "Tela cheia") : ""}${mine ? btn("share-stop", "stop", "Parar transmissão") : hasVideo ? btn("unwatch", "eyeOff", "Parar de assistir") : ""}</div>`;
   } else {
+    if (!hasVideo && u.banner && u.banner.startsWith("/f/")) h += tileBanner(u);
     if (!hasVideo) h += `<div class="tile-av">${avatar(u, 84)}</div>`;
     h += `<div class="tile-name">${t.v.deaf ? ic("headOff") : t.v.muted ? ic("micOff") : ""}<span>${esc(u.username)}${mine ? " (você)" : ""}</span></div>`;
     { const pp = mine ? null : peerByUser(u.id), cs = pp && pp.pc.connectionState; if (cs === "failed" || cs === "disconnected" || (pp && cs === "new" && Date.now() - (t.v.at || 0) > 15000)) h += `<div class="tile-conn" data-tip="Sem conexão de voz com essa pessoa — tentando de novo">${ic("signal", "xs")}Reconectando…</div>`; }
@@ -4550,6 +4582,98 @@ function spotifyLogin(done) {
   toast("Entre na sua conta do Spotify e feche a janela quando terminar.", "info", 6000);
   const t = setInterval(() => { if (w.closed) { clearInterval(t); toast("Pronto! Se entrou, a música toca inteira agora.", "ok"); done && done(); } }, 800);
 }
+/* Conta do Spotify (Premium) conectada: o player oficial (Web Playback SDK) toca a música inteira e deixa mudar o volume.
+   Login OAuth com PKCE: não precisa de segredo no servidor, só do Client ID (SPOTIFY_CLIENT_ID no Render). */
+const SP_SCOPES = "streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state";
+const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const spConnected = () => !!(S.spotifyId && store.get("spTok"));
+async function spotifyConnect(done) {
+  if (!S.spotifyId) { spotifyLogin(done); return; }
+  if (!crypto.subtle) { toast("Abra a Auryx pelo endereço https para conectar o Spotify.", "warn"); return; }
+  const verifier = b64u(crypto.getRandomValues(new Uint8Array(48)));
+  const challenge = b64u(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
+  const state = b64u(crypto.getRandomValues(new Uint8Array(12)));
+  const redirect = location.origin + "/spotify-callback.html";
+  store.set("spPkce", { verifier, state, redirect, client: S.spotifyId, android: !!(ANDROID && ANDROID.spotifyAuth) });
+  const url = "https://accounts.spotify.com/authorize?" + new URLSearchParams({ response_type: "code", client_id: S.spotifyId, scope: SP_SCOPES, redirect_uri: redirect, state, code_challenge_method: "S256", code_challenge: challenge });
+  window.__axSpotifyDone = () => { if (store.get("spTok")) { toast("Spotify conectado! 🎧 Música inteira e volume liberados.", "ok"); done && done(); } };
+  if (ANDROID) { if (ANDROID.spotifyAuth) { try { ANDROID.spotifyAuth(url); } catch {} } else toast("Atualize o app Android para conectar o Spotify.", "warn", 6000); return; }
+  const w = window.open(url, "spotify-login", "width=480,height=760");
+  if (!w) location.href = url;   // janela bloqueada: faz o login nesta aba e volta sozinho
+  else toast("Entre na sua conta do Spotify na janela que abriu.", "info", 5000);
+}
+window.addEventListener("message", e => { if (e.origin === location.origin && e.data && "axSpotify" in e.data && window.__axSpotifyDone) window.__axSpotifyDone(); });
+let spRefreshing = null;
+function spToken() {
+  const t = store.get("spTok");
+  if (!t) return Promise.resolve("");
+  if (Date.now() < t.exp) return Promise.resolve(t.a);
+  return spRefreshing || (spRefreshing = fetch("https://accounts.spotify.com/api/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: t.r, client_id: t.c }) })
+    .then(r => r.json()).then(j => {
+      if (!j.access_token) throw new Error("refresh");
+      store.set("spTok", { a: j.access_token, r: j.refresh_token || t.r, exp: Date.now() + (j.expires_in - 60) * 1000, c: t.c });
+      return j.access_token;
+    }).catch(() => { store.del("spTok"); return ""; }).finally(() => { spRefreshing = null; }));
+}
+let spSdk = null;
+function loadSpotifySDK() {
+  if (spSdk) return spSdk;
+  return (spSdk = new Promise((res, rej) => {
+    if (window.Spotify) return res(window.Spotify);
+    window.onSpotifyWebPlaybackSDKReady = () => res(window.Spotify);
+    const sc = document.createElement("script");
+    sc.src = "https://sdk.scdn.co/spotify-player.js";
+    sc.onerror = () => { spSdk = null; rej(new Error("load")); };
+    document.head.append(sc);
+    setTimeout(() => { if (!window.Spotify) { spSdk = null; rej(new Error("load")); } }, 15000);
+  }));
+}
+// Player da conta com a mesma "cara" do controle do embed (loadUri/play/pause/resume/seek/destroy) + volume
+async function spSdkController() {
+  const Sp = await loadSpotifySDK();
+  const ls = {}, fire = (n, d) => (ls[n] || []).forEach(f => { try { f(d); } catch {} });
+  const player = new Sp.Player({ name: "Auryx Nexos", getOAuthToken: cb => spToken().then(cb), volume: store.get("spVol", 70) / 100 });
+  const call = async (method, path, body) => {
+    const t = await spToken();
+    if (!t) throw new Error("conecte sua conta de novo");
+    const r = await fetch("https://api.spotify.com/v1/me/player" + path, { method, headers: { authorization: "Bearer " + t, "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    if (r.status >= 400) { const j = await r.json().catch(() => ({})); throw new Error((j.error && j.error.message) || "HTTP " + r.status); }
+  };
+  return new Promise((res, rej) => {
+    let device = "", cur = "", loaded = false, lastPlay = 0, settled = false;
+    const fail = m => { if (!settled) { settled = true; try { player.disconnect(); } catch {} rej(new Error(m)); } };
+    player.addListener("initialization_error", () => fail("init"));
+    player.addListener("authentication_error", () => { store.del("spTok"); fail("auth"); });
+    player.addListener("account_error", () => fail("premium"));
+    player.addListener("player_state_changed", st => { if (st) fire("playback_update", { data: { isPaused: st.paused, position: st.position, duration: st.duration } }); });
+    player.addListener("ready", ({ device_id }) => {
+      if (settled) return;
+      device = device_id; settled = true;
+      const play = () => {
+        if (!cur || Date.now() - lastPlay < 1500) return;
+        lastPlay = Date.now(); loaded = true;
+        const single = /^spotify:(track|episode):/.test(cur);
+        call("PUT", "/play?device_id=" + encodeURIComponent(device), single ? { uris: [cur] } : { context_uri: cur }).catch(e => toast("Spotify: " + e.message, "error"));
+      };
+      res({
+        sdk: true,
+        addListener(n, f) { (ls[n] = ls[n] || []).push(f); },
+        activate() { try { player.activateElement(); } catch {} },
+        loadUri(uri) { cur = uri; loaded = false; lastPlay = 0; },
+        play,
+        resume() { if (!loaded) play(); else player.resume(); },
+        pause() { player.pause(); },
+        seek(sec) { if (loaded) player.seek(Math.max(0, sec * 1000)); },
+        setVolume(v) { player.setVolume(Math.max(0, Math.min(1, v))); },
+        destroy() { try { player.disconnect(); } catch {} }
+      });
+    });
+    player.connect().then(ok => { if (!ok) fail("connect"); });
+    setTimeout(() => fail("timeout"), 15000);
+  });
+}
+const SP_ERR = { premium: "O player do Spotify só funciona com conta Premium — usando o player comum.", auth: "Sua conexão com o Spotify expirou. Conecte de novo.", init: "Este app não roda o player do Spotify (use o navegador ou o Android) — usando o player comum.", load: "Não foi possível carregar o player do Spotify — usando o player comum.", connect: "O Spotify não aceitou a conexão — usando o player comum.", timeout: "O Spotify demorou para responder — usando o player comum." };
+
 // Troca o Spotify (prévia de 30 s) pela mesma música inteira no player do YouTube, para todos da call
 async function spotifyToFull(s) {
   if (!s || !s.uri) { toast("Coloque uma música do Spotify primeiro.", "warn"); return; }
@@ -4567,34 +4691,85 @@ async function spotifyToFull(s) {
 }
 function mountSpotify(el) {
   el.innerHTML = `<div class="yt-wrap sp-wrap"><div class="sp-player"><div class="sp-frame"></div><div class="yt-empty sp-empty">${ic("music", "lg")}<b>Ouvir juntos no Spotify</b><small>Cole aqui embaixo o link de uma música, álbum, playlist ou podcast do Spotify (Compartilhar › Copiar link). Todo mundo na call ouve junto.</small></div></div>
-    <div class="yt-bar"><button class="icon-btn" data-sp="toggle" data-tip="Tocar / pausar para todos">${ic("play")}</button><button class="icon-btn" data-sp="skip" data-tip="Próxima da fila">${ic("skip")}</button><span class="yt-time">0:00</span><input type="range" class="yt-seek" min="0" max="100" value="0" step="0.5"><span class="yt-dur">0:00</span><span class="mm-sep"></span><button class="icon-btn" data-mm="mute" data-tip="Mutar a música (só para você)">${ic(musicMuted() ? "volumeX" : "volume")}</button><button class="icon-btn" data-mm="min" data-tip="Diminuir / aumentar o player">${ic("minimize")}</button></div>
+    <div class="yt-bar"><button class="icon-btn" data-sp="toggle" data-tip="Tocar / pausar para todos">${ic("play")}</button><button class="icon-btn" data-sp="skip" data-tip="Próxima da fila">${ic("skip")}</button><span class="yt-time">0:00</span><input type="range" class="yt-seek" min="0" max="100" value="0" step="0.5"><span class="yt-dur">0:00</span><span class="sp-volw"><button class="icon-btn sp-vb" type="button" data-sp="vol-" data-tip="Abaixar o volume (só para você)">−</button><input type="range" class="yt-vol sp-vol" min="0" max="100" step="5" value="${store.get("spVol", 70)}"><button class="icon-btn sp-vb" type="button" data-sp="vol+" data-tip="Aumentar o volume (só para você)">+</button></span><span class="mm-sep"></span><button class="icon-btn" data-mm="mute" data-tip="Mutar a música (só para você)">${ic(musicMuted() ? "volumeX" : "volume")}</button><button class="icon-btn" data-mm="min" data-tip="Diminuir / aumentar o player">${ic("minimize")}</button></div>
     <form class="yt-add"><input placeholder="Cole um link do Spotify para tocar ou pôr na fila…" spellcheck="false"><button class="btn sm primary">${ic("plus", "sm")}Adicionar</button></form>
     <div class="yt-queue"></div>
-    <div class="sp-login"><small>🎧 Tocando só 30 s? O Spotify só toca a música inteira para quem está logado nele.</small><button class="btn sm primary" type="button" data-sp="full">${ic("play", "sm")}Tocar inteira (sem prévia)</button><button class="btn sm" type="button" data-sp="login">${ic("headphones", "sm")}Entrar no Spotify</button></div></div>`;
+    <div class="sp-login"></div></div>`;
   let ctl = null, ready = false, lastUri = "", seeking = false, pb = { paused: true, pos: 0, dur: 0 }, alive = true;
   const st = () => (V.act && V.act.type === "sp" ? V.act.state : null);
   const push = s => emit("act:state", { state: s }).then(r => r.error && toast(r.error, "error"));
   const next = () => { const s = st(); if (!s) return; const q = (s.queue || []).slice(); const uri = q.shift() || ""; push({ ...s, uri, queue: q, playing: !!uri, pos: 0 }); };
   const posOf = s => (s.pos || 0) + (s.playing ? (nowServer() - s.at) / 1000 : 0);
-  let api = null, creating = false;
-  loadSpotify().then(x => { api = x; if (alive) sync(); }).catch(e => toast(e.message, "error"));
+  let api = null, creating = false, sdkFailed = false;
+  const useSdk = () => spConnected() && !sdkFailed;
+  const ensureEmbed = () => { if (!api) loadSpotify().then(x => { api = x; if (alive) sync(); }).catch(e => toast(e.message, "error")); };
+  if (!useSdk()) ensureEmbed();
+  // o player do embed troca a .sp-frame por um <iframe>: aqui ela é recriada limpa quando preciso
+  const frame = () => {
+    let f = el.querySelector(".sp-frame");
+    if (!f) { f = document.createElement("div"); f.className = "sp-frame"; el.querySelector(".sp-player").prepend(f); }
+    return f;
+  };
+  const dropCtl = () => {
+    if (ctl) { try { ctl.destroy(); } catch {} }
+    ctl = null; ready = false; creating = false; lastUri = ""; pb = { paused: true, pos: 0, dur: 0 };
+    el.querySelectorAll(".sp-player > iframe").forEach(x => x.remove());
+    frame().innerHTML = "";
+  };
+  function drawLogin() {
+    const sdk = !!(ctl && ctl.sdk);
+    el.classList.toggle("sp-sdk", sdk);
+    el.querySelector(".sp-vol").disabled = !sdk;
+    el.querySelectorAll(".sp-vb").forEach(b => { b.disabled = !sdk; });
+    el.querySelector(".sp-volw").dataset.tip = sdk ? "Volume (só para você)" : "Conecte sua conta do Spotify para mudar o volume";
+    el.querySelector(".sp-login").innerHTML = sdk
+      ? `<small>🟢 Tocando pela sua conta do Spotify — música inteira, sem prévia.</small><button class="btn sm" type="button" data-sp="logout">Desconectar</button>`
+      : spConnected()
+      ? `<small>🎧 Sua conta do Spotify está conectada, mas o player dela não abriu aqui.</small><button class="btn sm primary" type="button" data-sp="full">${ic("play", "sm")}Tocar inteira (sem prévia)</button><button class="btn sm" type="button" data-sp="logout">Desconectar</button>`
+      : `<small>🎧 Tocando só 30 s? ${S.spotifyId ? "Conecte sua conta do Spotify (Premium) para tocar a música inteira e mudar o volume." : "O Spotify só toca a música inteira para quem está logado nele."}</small><button class="btn sm primary" type="button" data-sp="login">${ic("headphones", "sm")}${S.spotifyId ? "Conectar minha conta" : "Entrar no Spotify"}</button><button class="btn sm" type="button" data-sp="full">${ic("play", "sm")}Tocar inteira (sem prévia)</button>`;
+  }
+  function drawNow(uri) {
+    if (!(ctl && ctl.sdk)) return;
+    const m = spInfo.get(uri);
+    frame().innerHTML = uri ? `<div class="sp-now">${m && m.img ? `<img src="${esc(m.img)}" alt="" referrerpolicy="no-referrer">` : `<span class="sp-ph">${ic("music", "lg")}</span>`}<div><b>${esc(m ? m.title : SP_KIND[spKind(uri)] || "Spotify")}</b><small>Tocando pela sua conta do Spotify</small></div></div>` : "";
+    if (uri && !m) spMeta(uri).then(() => { if (alive && lastUri === uri) drawNow(uri); });
+  }
+  function startSdk() {
+    creating = true;
+    spSdkController().then(c => {
+      if (!alive) { c.destroy(); return; }
+      dropCtl();
+      ctl = c; ready = true;
+      wire(c); drawLogin(); sync();
+    }).catch(e => {
+      creating = false; sdkFailed = true;
+      toast(SP_ERR[e.message] || "Spotify: " + e.message, "warn", 7000);
+      drawLogin(); ensureEmbed(); sync();
+    });
+  }
+  function wire(c) {
+    c.addListener("playback_update", e => {
+      const d = e && e.data;
+      if (!d) return;
+      const ended = pb.dur > 0 && !pb.paused && d.isPaused && d.position === 0 && pb.pos > 1000;
+      pb = { paused: d.isPaused, pos: d.position || 0, dur: d.duration || 0 };
+      // acabou: quem "lidera" a call passa para a próxima da fila
+      if (ended && isLeader()) { const s = st(); if (s && s.playing && (s.queue || []).length) next(); else if (s && s.playing) push({ ...s, playing: false, pos: 0 }); }
+    });
+  }
   // o player só é criado quando já existe algo para tocar
   function create(uri) {
-    if (creating || ctl || !api) return;
+    if (creating || ctl) return;
+    if (useSdk()) { startSdk(); return; }
+    if (!api) return;
     creating = true;
-    api.createController(el.querySelector(".sp-frame"), { width: "100%", height: "100%", uri }, c => {
+    api.createController(frame(), { width: "100%", height: "100%", uri }, c => {
       ctl = c;
       if (!alive) { try { c.destroy(); } catch {} return; }
       lastUri = uri;
       c.addListener("ready", () => { ready = true; const s = st(); if (s && s.playing) { c.play(); const w = posOf(s); if (spSingle(s.uri) && w > 2) setTimeout(() => c.seek(w), 900); } });
-      c.addListener("playback_update", e => {
-        const d = e && e.data;
-        if (!d) return;
-        const ended = pb.dur > 0 && !pb.paused && d.isPaused && d.position === 0 && pb.pos > 1000;
-        pb = { paused: d.isPaused, pos: d.position || 0, dur: d.duration || 0 };
-        // acabou: quem "lidera" a call passa para a próxima da fila
-        if (ended && isLeader()) { const s = st(); if (s && s.playing && (s.queue || []).length) next(); else if (s && s.playing) push({ ...s, playing: false, pos: 0 }); }
-      });
+      wire(c);
+      drawLogin();
     });
   }
   function drawQueue(s) {
@@ -4614,6 +4789,7 @@ function mountSpotify(el) {
     if (s.uri !== lastUri) {
       lastUri = s.uri;
       ctl.loadUri(s.uri);
+      drawNow(s.uri);
       if (s.playing) setTimeout(() => { if (!alive) return; ctl.play(); const w = posOf(s); if (spSingle(s.uri) && w > 2) setTimeout(() => ctl.seek(w), 900); }, 600);
       return;
     }
@@ -4643,8 +4819,29 @@ function mountSpotify(el) {
     if (b.dataset.sp === "toggle" && s.uri) push({ ...s, playing: !s.playing, pos: spSingle(s.uri) ? posOf(s) : 0 });
     if (b.dataset.sp === "skip") next();
     if (b.dataset.sp === "full") { spotifyToFull(s); return; }
-    if (b.dataset.sp === "login") spotifyLogin(() => { const s2 = st(); if (ctl && s2 && s2.uri) { lastUri = ""; sync(); } });
+    if (b.dataset.sp === "login") spotifyConnect(() => {
+      if (!alive) return;
+      if (spConnected()) { sdkFailed = false; drawLogin(); if (s2u()) { dropCtl(); startSdk(); } return; }
+      if (ctl && s2u()) { lastUri = ""; sync(); }
+    });
+    if (b.dataset.sp === "logout") {
+      store.del("spTok");
+      if (ctl && ctl.sdk) dropCtl();
+      sdkFailed = false; drawLogin(); ensureEmbed(); sync();
+      toast("Conta do Spotify desconectada.", "info");
+    }
+    if (b.dataset.sp === "vol-" || b.dataset.sp === "vol+") setVol(+el.querySelector(".sp-vol").value + (b.dataset.sp === "vol+" ? 10 : -10));
   });
+  const s2u = () => { const s2 = st(); return !!(s2 && s2.uri); };
+  function setVol(v) {
+    v = Math.max(0, Math.min(100, Math.round(v)));
+    el.querySelector(".sp-vol").value = v;
+    store.set("spVol", v);
+    if (ctl && ctl.sdk) ctl.setVolume(v / 100);
+  }
+  el.querySelector(".sp-vol").addEventListener("input", e => setVol(+e.target.value));
+  el.addEventListener("pointerdown", () => { if (ctl && ctl.activate) ctl.activate(); });
+  drawLogin();
   const seek = el.querySelector(".yt-seek");
   seek.addEventListener("input", () => { seeking = true; });
   seek.addEventListener("change", () => { seeking = false; const s = st(); if (s && s.uri && spSingle(s.uri)) push({ ...s, pos: +seek.value }); });
@@ -5707,7 +5904,7 @@ function bindToggles(p, extra) {
 }
 function renderAccount() {
   const me = S.me;
-  return `<div class="profile-card" style="--c:${esc(me.color)}"><div class="pb"></div><div class="pc"><span data-pick-avatar data-tip="Trocar avatar">${avatar({ ...me, status: me.statusPref === "invisible" ? "offline" : me.statusPref }, 92, true)}</span><div class="info"><b>${esc(me.username)}</b><small>No Auryx Nexos desde ${new Date(me.created).toLocaleDateString("pt-BR")}</small></div><button class="btn sm" data-pick-avatar>Alterar avatar</button></div></div>
+  return `<div class="profile-card" style="--c:${esc(me.color)}"><div class="pb"${me.banner ? ` style="${bannerStyle(me)}"` : ""}></div><div class="pc"><span data-pick-avatar data-tip="Trocar avatar">${avatar({ ...me, status: me.statusPref === "invisible" ? "offline" : me.statusPref }, 92, true)}</span><div class="info"><b>${esc(me.username)}</b><small>No Auryx Nexos desde ${new Date(me.created).toLocaleDateString("pt-BR")}</small></div><button class="btn sm" data-rename-me>Trocar nome</button><button class="btn sm" data-pick-avatar>Alterar avatar</button></div></div>
     ${LOCAL ? "" : `<div class="email-box"><span>${ic("bell", "sm")}<b>E-mail</b>${me.email ? `<small>${esc(me.email)} ${me.emailVerified ? `<span class="ost st-ok">confirmado</span>` : `<span class="ost st-pend">não confirmado</span>`}</small>` : `<small>Nenhum e-mail — adicione para poder recuperar a senha.</small>`}</span><button class="btn sm" data-email>${me.email ? "Trocar e-mail" : "Adicionar e-mail"}</button></div>`}
     <span class="label">Cor do perfil</span>
     <div class="swatches" style="margin:8px 0 18px">${COLORS.map(c => `<button type="button" class="swatch${c === me.color ? " on" : ""}" style="--c:${c}" data-color="${c}"></button>`).join("")}</div>

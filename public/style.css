@@ -1689,3 +1689,29 @@ html.aurys .rail-item.home .srv-icon { box-shadow: 0 0 0 2px color-mix(in srgb, 
 .bp-range span { display: flex; justify-content: space-between; }
 .bp-range b { color: var(--text-2); font-weight: 600; font-variant-numeric: tabular-nums; }
 .bp-range input[type=range] { width: 100%; accent-color: var(--accent); }
+
+/* banner animado (VIP) no fundo do quadro da call */
+.tile-bn { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.tile-bn > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; user-select: none; }
+.tile-bn::after { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at center, rgba(0,0,0,.15), rgba(0,0,0,.5)); }
+
+/* efeitos do perfil (Max): partículas cobrem o banner inteiro, também nos banners GIF mais altos */
+@keyframes pdrop { from { transform: translateY(-22px); opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } to { transform: translateY(calc(var(--bh, 64px) + 6px)) rotate(8deg); opacity: 0; } }
+.pfx-sakura .pb::after, .pfx-hearts .pb::after { z-index: 1; font-size: 16px; text-shadow: 0 1px 4px rgba(0,0,0,.45); }
+.pfx-galaxy .pb::after, .pfx-snow .pb::after, .pfx-stars .pb::after { z-index: 1; }
+.pfx-stars .pb::after { top: 0; bottom: 0; display: grid; place-items: center; font-size: 15px; text-shadow: 0 0 6px #fbbf24, 0 0 2px #000; }
+.pfx-aurora::after, .pfx-neon::after, .pfx-fire::after, .pfx-galaxy::after, .pfx-sakura::after, .pfx-snow::after, .pfx-hearts::after { margin: 3px; }
+.pfx-fire .pb { overflow: hidden; }
+.pfx-fire .pb::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 60%; z-index: 1; pointer-events: none; background: radial-gradient(40% 70% at 20% 100%, rgba(251,146,60,.75), transparent 70%), radial-gradient(35% 80% at 55% 100%, rgba(244,63,94,.65), transparent 70%), radial-gradient(30% 60% at 85% 100%, rgba(251,191,36,.7), transparent 70%); mix-blend-mode: screen; animation: flame 1.6s ease-in-out infinite alternate; transform-origin: bottom; }
+@keyframes flame { from { transform: scaleY(.85); opacity: .75; } to { transform: scaleY(1.12); opacity: 1; } }
+.pfx-neon { box-shadow: 0 0 18px rgba(34,211,238,.45), var(--shadow); }
+.pfx-fire { box-shadow: 0 0 18px rgba(251,146,60,.4), var(--shadow); }
+
+/* Spotify com a conta conectada: capa + volume */
+.sp-volw { display: flex; align-items: center; gap: 2px; }
+.sp-volw .sp-vol { width: 80px; }
+.sp-vb { font-size: 17px; font-weight: 700; line-height: 1; width: 28px; height: 28px; }
+.sp-volw :disabled { opacity: .4; cursor: not-allowed; }
+.sp-now { position: absolute; inset: 0; display: flex; align-items: center; gap: 16px; padding: 16px; background: linear-gradient(135deg, #1db95433, #12121288); }
+.sp-now img, .sp-now .sp-ph { width: 96px; height: 96px; border-radius: 10px; object-fit: cover; flex: none; box-shadow: 0 8px 24px rgba(0,0,0,.4); display: grid; place-items: center; background: #1db95455; }
+.sp-now b { display: block; font-size: 16px; } .sp-now small { color: #1ed760; }

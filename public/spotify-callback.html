@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Spotify · Auryx Nexos</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0d14;color:#e6e8f0;font:15px system-ui,sans-serif;text-align:center;padding:16px}b{color:#1ed760}</style></head>
+<body><div id="m">Conectando sua conta do Spotify…</div>
+<script>
+// Volta do login do Spotify (PKCE): troca o código pelo token aqui mesmo e guarda para o player da call.
+(async () => {
+  const m = document.getElementById("m");
+  const q = new URLSearchParams(location.search);
+  const get = k => { try { return JSON.parse(localStorage.getItem("nx:" + k)); } catch { return null; } };
+  const pend = get("spPkce");
+  const done = ok => {
+    try { localStorage.removeItem("nx:spPkce"); } catch {}
+    m.innerHTML = ok ? "<b>Pronto!</b> Conta do Spotify conectada. Pode fechar esta janela." : "Não foi possível conectar o Spotify (" + (q.get("error") || "erro") + "). Feche e tente de novo.";
+    try { if (window.opener) { window.opener.postMessage({ axSpotify: ok }, location.origin); setTimeout(() => window.close(), 700); return; } } catch {}
+    // sem janela de origem: Android (janela do app) fecha sozinho ao ir para open.spotify.com; no navegador volta para o app
+    setTimeout(() => { location.href = pend && pend.android ? "https://open.spotify.com/" : "/"; }, 900);
+  };
+  if (!pend || q.get("error") || !q.get("code") || q.get("state") !== pend.state) return done(false);
+  try {
+    const r = await fetch("https://accounts.spotify.com/api/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "authorization_code", code: q.get("code"), redirect_uri: pend.redirect, client_id: pend.client, code_verifier: pend.verifier }) });
+    const j = await r.json();
+    if (!j.access_token) return done(false);
+    localStorage.setItem("nx:spTok", JSON.stringify({ a: j.access_token, r: j.refresh_token, exp: Date.now() + (j.expires_in - 60) * 1000, c: pend.client }));
+    done(true);
+  } catch { done(false); }
+})();
+</script></body></html>

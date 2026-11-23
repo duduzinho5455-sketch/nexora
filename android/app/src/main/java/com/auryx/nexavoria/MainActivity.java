@@ -258,7 +258,12 @@ public class MainActivity extends Activity {
 
         /** Entrar no Spotify numa janela por cima do app; o login fica salvo para o player da call. */
         @JavascriptInterface
-        public void spotifyLogin() {
+        public void spotifyLogin() { spotifyAuth("https://accounts.spotify.com/login?continue=https%3A%2F%2Fopen.spotify.com%2F"); }
+
+        /** Login com a conta do Spotify (OAuth): abre a URL dada e deixa voltar para a página de retorno da Auryx. */
+        @JavascriptInterface
+        public void spotifyAuth(String start) {
+            if (start == null || !start.startsWith("https://accounts.spotify.com/")) return;
             runOnUiThread(() -> {
                 Dialog d = new Dialog(MainActivity.this, android.R.style.Theme_Black_NoTitleBar);
                 WebView w = new WebView(MainActivity.this);
@@ -269,7 +274,7 @@ public class MainActivity extends Activity {
                     @Override
                     public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
                         String h = req.getUrl().getHost();
-                        if (h != null && (h.endsWith("spotify.com") || h.endsWith("google.com") || h.endsWith("facebook.com") || h.endsWith("apple.com"))) return false;
+                        if (h != null && (h.endsWith("spotify.com") || h.endsWith("google.com") || h.endsWith("facebook.com") || h.endsWith("apple.com") || h.equals(HOST))) return false;
                         return true;
                     }
                     @Override
@@ -285,7 +290,7 @@ public class MainActivity extends Activity {
                     web.evaluateJavascript("window.__axSpotifyDone && window.__axSpotifyDone()", null);
                 });
                 d.show();
-                w.loadUrl("https://accounts.spotify.com/login?continue=https%3A%2F%2Fopen.spotify.com%2F");
+                w.loadUrl(start);
             });
         }
 
