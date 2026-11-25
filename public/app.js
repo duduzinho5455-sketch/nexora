@@ -157,6 +157,7 @@ const V = {
   peers: new Map(), ctx: null, sink: null, meters: new Map(), speaking: new Set(),
   loop: null, statsTimer: null, ping: null, watching: new Set(), viewers: new Set(), focus: null,
   granted: new Map(),   // quem pode controlar meu PC: sock -> { uid, mode }
+  padUsed: new Set(),   // vagas de controle virtual (0–3) ocupadas no meu PC
   controlling: null     // PC que eu controlo: { uid, sock, mode, kb }
 };
 
@@ -3297,7 +3298,8 @@ async function handleSignal(p, data) {
   if (data.watch) { V.viewers.add(p.sock); p.viewer = data.dev || null; addScreenTo(p); return; }
   if (data.unwatch) { V.viewers.delete(p.sock); removeScreenFrom(p); rebalance(); endGrant(p.sock, true); return; }
   if (data.ctrlReq) { askControl(p); return; }
-  if (data.ctrlGrant) { onGranted(p, data.ctrlGrant); return; }
+  if (data.ctrlGrant) { onGranted(p, data.ctrlGrant, data.pad); return; }
+  if (data.ctrlPad) { onCtrlPad(p, data.ctrlPad); return; }
   if (data.ctrlDeny) { toast(typeof data.ctrlDeny === "string" ? data.ctrlDeny : `${user(p.userId).username} recusou o pedido de controle.`, "warn", 4500); return; }
   if (data.ctrlEnd) { if (V.controlling && V.controlling.sock === p.sock) stopControlling(true, `${user(p.userId).username} encerrou o controle.`); endGrant(p.sock, true); return; }
   if (data.desc) {
@@ -3796,8 +3798,11 @@ function stopCam(silent) {
 /* dados direto entre os dois PCs. Quem transmite precisa da Auryx Nexos    */
 /* Agente aberto e aceitar o pedido — nada acontece sem permissão.     */
 /* ------------------------------------------------------------------ */
-const AG = { ws: null };
+// ver = versão do agente (2 = controles virtuais + mouse relativo); pad = "ok" | "nodriver" | "erro" | ""
+const AG = { ws: null, ver: 0, pad: "" };
 const agentOk = () => !!(AG.ws && AG.ws.readyState === 1);
+const VIGEM_URL = "https://github.com/nefarius/ViGEmBus/releases/latest";
+const padReady = () => agentOk() && AG.pad === "ok";
 // No app de PC o agente já vem embutido: o app abre ele sozinho, escondido.
 async function agentConnect(code) {
   if (agentOk()) return;
@@ -3818,14 +3823,64 @@ function agentConnectRaw(code) {
     try { ws = new WebSocket(`ws://127.0.0.1:47800/?t=${encodeURIComponent(code)}`); }
     catch { return rej(new Error("O navegador bloqueou a conexão com o Agente Auryx.")); }
     const t = setTimeout(() => { try { ws.close(); } catch {} rej(new Error("Agente Auryx não respondeu. Ele está aberto?")); }, 4000);
-    ws.onopen = () => { clearTimeout(t); AG.ws = ws; res(); renderCtrlBar(); };
+    let helloWait = 0;
+    const done = () => { clearTimeout(helloWait); helloWait = -1; res(); renderCtrlBar(); };
+    ws.onopen = () => {
+      clearTimeout(t); AG.ws = ws; AG.ver = 0; AG.pad = "";
+      helloWait = setTimeout(done, 1500);       // agente antigo não se apresenta: segue sem controle virtual
+    };
+    ws.onmessage = e => {
+      const line = String(e.data || "");
+      if (line.startsWith("hello ")) {
+        AG.ver = parseInt(line.split(" ")[1], 10) || 1;
+        AG.pad = (/pad=(\w+)/.exec(line) || [])[1] || "";
+        if (helloWait !== -1) done();
+      } else onAgentMsg(line);
+    };
     ws.onerror = () => { clearTimeout(t); rej(new Error("Agente Auryx não encontrado ou código errado.")); };
     ws.onclose = () => {
       if (AG.ws !== ws) return;
-      AG.ws = null;
+      AG.ws = null; AG.ver = 0;
+      V.padUsed.clear();
       if (V.granted.size) { for (const sock of [...V.granted.keys()]) endGrant(sock); toast("O Agente Auryx foi fechado — controle encerrado.", "warn"); }
     };
   });
+}
+// respostas do agente sobre os controles virtuais: "pad <vaga> ok <jogador>" ou "pad <vaga> erro <motivo>"
+function onAgentMsg(line) {
+  const a = line.split(" ");
+  if (a[0] !== "pad") return;
+  const slot = +a[1];
+  for (const [sock, g] of V.granted) {
+    if (!g.pads) continue;
+    for (const [i, s] of g.pads) {
+      if (s !== slot) continue;
+      const name = user(g.uid).username;
+      if (a[2] === "ok") {
+        const player = +a[3] >= 0 ? +a[3] + 1 : 0;
+        toast(`🎮 Controle de ${name} conectado no seu PC${player ? ` como Jogador ${player}` : ""}.`, "ok", 5000);
+        sig(sock, { ctrlPad: { i, ok: true, player } });
+      } else {
+        toast(`Não deu para criar o controle virtual de ${name}: ${a.slice(3).join(" ") || "erro"}. O controle dele vai virar teclado.`, "warn", 7000);
+        sig(sock, { ctrlPad: { i, ok: false } });
+        g.pads.delete(i); V.padUsed.delete(s);
+      }
+      return;
+    }
+  }
+}
+// vaga do agente (0–3) para o controle número i de quem joga junto; o Windows aceita no máximo 4 controles
+function padSlot(g, i) {
+  g.pads = g.pads || new Map();
+  if (g.pads.has(i)) return g.pads.get(i);
+  for (let s = 0; s < 4; s++) if (!V.padUsed.has(s)) { V.padUsed.add(s); g.pads.set(i, s); return s; }
+  if (!g.padFull) { g.padFull = true; toast("Limite de 4 controles virtuais atingido.", "warn"); }
+  return -1;
+}
+function freePads(g) {
+  if (!g || !g.pads) return;
+  for (const s of g.pads.values()) { agentSend(`px ${s}`); V.padUsed.delete(s); }
+  g.pads.clear();
 }
 const agentSend = line => { if (agentOk()) AG.ws.send(line); };
 
@@ -3860,10 +3915,47 @@ function setupDc(p, dc) {
 }
 
 /* --- lado de quem transmite --- */
+// Segurança do controle: pedidos só com a sua permissão, no máximo um pedido aberto por pessoa,
+// espera de 20 s depois de uma recusa, opção de bloquear todos os pedidos e fim automático
+// do controle depois de 15 min sem uso. Cada sessão fica no histórico deste aparelho.
+const CTRL_IDLE = 15 * 60e3, CTRL_RETRY = 20e3;
+let ctrlIdleTimer = 0, agentStopTimer = 0;
+function ctrlLogAdd(entry) {
+  const list = store.get("ctrlLog", []);
+  list.unshift(entry);
+  store.set("ctrlLog", list.slice(0, 30));
+}
+function ctrlLogEnd(g, why) {
+  if (!g || !g.logAt) return;
+  const list = store.get("ctrlLog", []), e = list.find(x => x.at === g.logAt && x.uid === g.uid);
+  if (e && !e.end) { e.end = Date.now(); e.why = why || ""; store.set("ctrlLog", list); }
+}
+function ctrlWatch() {
+  // um relógio só enquanto alguém tem permissão; desliga sozinho depois
+  if (V.granted.size && !ctrlIdleTimer) ctrlIdleTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [sock, g] of [...V.granted]) if (now - (g.last || g.since) > CTRL_IDLE) {
+      endGrant(sock, false, "inativo");
+      toast(`O controle de ${user(g.uid).username} terminou sozinho depois de 15 min sem uso.`, "info", 6000);
+    }
+    if (!V.granted.size) { clearInterval(ctrlIdleTimer); ctrlIdleTimer = 0; }
+  }, 30e3);
+  // app de PC: o agente embutido fecha 2 min depois que ninguém mais tem permissão (não fica escutando à toa)
+  clearTimeout(agentStopTimer);
+  if (!V.granted.size && DESKTOP && DESKTOP.stopAgent) agentStopTimer = setTimeout(() => {
+    if (V.granted.size) return;
+    if (AG.ws) { const ws = AG.ws; AG.ws = null; try { ws.close(); } catch {} }
+    DESKTOP.stopAgent().catch(() => {});
+  }, 120e3);
+}
 function askControl(p) {
   const u = user(p.userId);
   if (!V.screen) { sig(p.sock, { ctrlDeny: "Essa pessoa não está transmitindo a tela agora." }); return; }
-  if (V.granted.has(p.sock)) { sig(p.sock, { ctrlGrant: V.granted.get(p.sock).mode }); return; }
+  if (V.granted.has(p.sock)) { const g = V.granted.get(p.sock); sig(p.sock, { ctrlGrant: g.mode, pad: g.pad ? 2 : 0 }); return; }
+  if (S.settings.noCtrl) { sig(p.sock, { ctrlDeny: "Essa pessoa não está aceitando pedidos de controle agora." }); return; }
+  if (p.ctrlAsking) return;                                                     // já tem um pedido aberto na tela
+  if (p.ctrlDeniedAt && Date.now() - p.ctrlDeniedAt < CTRL_RETRY) { sig(p.sock, { ctrlDeny: "Pedido recusado há pouco. Espere alguns segundos para pedir de novo." }); return; }
+  p.ctrlAsking = true;
   const surface = (V.screen.getVideoTracks()[0]?.getSettings() || {}).displaySurface;
   sfx("mention");
   let mode = "coop", answered = false;
@@ -3873,10 +3965,11 @@ function askControl(p) {
       <label class="radio-card on">${ic("gamepad", "lg")}<span><b>Co-op (jogar junto)</b><small>Só teclado e controle — ideal para co-op local. Mouse bloqueado.</small></span><input type="radio" name="cm" value="coop" checked></label>
       <label class="radio-card">${ic("pointer", "lg")}<span><b>Controle total</b><small>Mouse e teclado, como AnyDesk.${surface && surface !== "monitor" ? " <b style='color:var(--yellow)'>Transmita a tela inteira para o mouse cair no lugar certo.</b>" : ""}</small></span><input type="radio" name="cm" value="full"></label>
       <div class="hint" style="margin:10px 0 0">${DESKTOP || agentOk() ? "✅ Controle remoto pronto." : "⚠️ O Agente Auryx precisa estar aberto neste PC (Configurações › Controle remoto) — ou use o app de PC, que já vem com ele."} Você pode encerrar a qualquer momento.</div>
+      ${agentOk() && AG.pad && AG.pad !== "ok" ? `<div class="hint" style="margin:8px 0 0">🎮 Para o jogo reconhecer o controle dessa pessoa como <b>Jogador 2</b>, instale o driver gratuito <a href="${VIGEM_URL}" target="_blank" rel="noopener">ViGEmBus</a> (uma vez só). Sem ele, o controle vira teclado.</div>` : ""}
       <div class="modal-foot"><button class="btn ghost" data-no>Recusar</button><button class="btn primary" data-yes>Permitir</button></div>`,
     onMount(m, close) {
       m.addEventListener("change", e => { if (e.target.name === "cm") { mode = e.target.value; $$(".radio-card", m).forEach(r => r.classList.toggle("on", r.querySelector("input").checked)); } });
-      m.querySelector("[data-no]").onclick = () => { answered = true; close(); sig(p.sock, { ctrlDeny: true }); };
+      m.querySelector("[data-no]").onclick = () => { answered = true; p.ctrlDeniedAt = Date.now(); close(); sig(p.sock, { ctrlDeny: true }); };
       m.querySelector("[data-yes]").onclick = async () => {
         const b = m.querySelector("[data-yes]");
         b.classList.add("loading");
@@ -3889,26 +3982,35 @@ function askControl(p) {
         answered = true;
         close();
         if (!V.peers.has(p.sock) || !V.screen) return;
-        V.granted.set(p.sock, { uid: p.userId, mode, alt: false });
-        sig(p.sock, { ctrlGrant: mode });
+        const now = Date.now(), pad = padReady();
+        V.granted.set(p.sock, { uid: p.userId, mode, alt: false, since: now, last: now, logAt: now, pad, pads: new Map() });
+        ctrlLogAdd({ at: now, uid: p.userId, name: u.username, mode });
+        ctrlWatch();
+        // pad: 2 = este PC cria controles de Xbox virtuais (cada pessoa vira outro jogador no jogo)
+        sig(p.sock, { ctrlGrant: mode, pad: pad ? 2 : 0 });
         toast(`${u.username} agora pode ${mode === "full" ? "controlar seu PC" : "jogar com você"}.`, "ok");
+        if (!pad && mode === "coop") toast(`Sem o driver ViGEmBus, o controle de ${u.username} vira teclado e o jogo pode achar que é o Jogador 1. Veja Configurações › Controle remoto.`, "warn", 9000);
         renderCtrlBar();
       };
     },
-    onClose() { if (!answered) sig(p.sock, { ctrlDeny: true }); }
+    onClose() { p.ctrlAsking = false; if (!answered) { p.ctrlDeniedAt = Date.now(); sig(p.sock, { ctrlDeny: true }); } }
   });
 }
-function endGrant(sock, silent) {
+function endGrant(sock, silent, why) {
   const g = V.granted.get(sock);
   if (!g) return;
   V.granted.delete(sock);
   agentSend("u 0\nu 1\nu 2");
+  freePads(g);                                   // tira os controles virtuais dessa pessoa do Windows
   if (!silent) sig(sock, { ctrlEnd: true });
+  ctrlLogEnd(g, why);
+  ctrlWatch();
   renderCtrlBar();
 }
 function onRemoteInput(p, data) {
   const g = V.granted.get(p.sock);
   if (!g || !agentOk() || typeof data !== "string" || data.length > 2000) return;
+  g.last = Date.now();
   const out = [];
   for (const line of data.split("\n")) {
     const a = line.split(" ");
@@ -3921,6 +4023,22 @@ function onRemoteInput(p, data) {
     } else if (a[0] === "w" && g.mode === "full") {
       const d = Math.round(clamp(+a[1] || 0, -1200, 1200));
       if (d) out.push(`w ${d}`);
+    } else if (a[0] === "r" && g.mode === "full") {
+      // mouse relativo (jogos 3D): só no controle total
+      const dx = Math.round(clamp(+a[1] || 0, -800, 800)), dy = Math.round(clamp(+a[2] || 0, -800, 800));
+      if (dx || dy) out.push(`r ${dx} ${dy}`);
+    } else if (a[0] === "p" && g.pad) {
+      // estado do controle: p <nº do controle> <botões> <LT> <RT> <LX> <LY> <RX> <RY>
+      const i = Math.round(+a[1]);
+      if (!(i >= 0 && i <= 3) || a.length < 9) continue;
+      const slot = padSlot(g, i);
+      if (slot < 0) continue;
+      const n = (v, lo, hi) => Math.round(clamp(+v || 0, lo, hi));
+      // botão Guia (0x0400) bloqueado: abriria a Xbox Game Bar no seu PC
+      out.push(`p ${slot} ${n(a[2], 0, 0xffff) & ~0x0400} ${n(a[3], 0, 255)} ${n(a[4], 0, 255)} ${n(a[5], -32768, 32767)} ${n(a[6], -32768, 32767)} ${n(a[7], -32768, 32767)} ${n(a[8], -32768, 32767)}`);
+    } else if (a[0] === "px") {
+      const i = Math.round(+a[1]), s = g.pads && g.pads.get(i);
+      if (s !== undefined) { out.push(`px ${s}`); g.pads.delete(i); V.padUsed.delete(s); }
     } else if (a[0] === "k") {
       const down = a[1] === "1", vk = Math.round(+a[2]);
       if (!(vk > 0 && vk < 255)) continue;
@@ -3941,11 +4059,16 @@ function requestControl(uid) {
   sig(p.sock, { ctrlReq: true });
   toast(`Pedido enviado para ${user(uid).username}. Aguarde a resposta…`, "info");
 }
-function onGranted(p, mode) {
-  V.controlling = { uid: p.userId, sock: p.sock, mode: mode === "full" ? "full" : "coop", kb: false, keys: new Set(), padKeys: new Set(), preset: store.get("padPreset", "wasd") };
+function onGranted(p, mode, pad) {
+  const prev = V.controlling && V.controlling.sock === p.sock ? V.controlling : null;
+  V.controlling = { uid: p.userId, sock: p.sock, mode: mode === "full" ? "full" : "coop", kb: false, keys: new Set(), padKeys: new Set(), preset: store.get("padPreset", "wasd"),
+    // pad: o PC de quem transmite cria controles de Xbox virtuais (cada controle seu vira um jogador no jogo)
+    pad: +pad >= 2, kbPad: store.get("kbPad", false), padSent: new Map(), padFail: new Set(), player: {}, kbState: new Set() };
+  if (prev) { V.controlling.padSent = prev.padSent; V.controlling.player = prev.player; }
   V.focus = p.userId + ":screen";
   sfx("live");
-  toast(mode === "full" ? `Você está controlando o PC de ${user(p.userId).username}. Clique na transmissão para usar mouse e teclado.` : `Co-op liberado! Clique na transmissão e jogue com teclado ou controle.`, "ok", 6000);
+  const padTip = V.controlling.pad ? " Seu controle aparece no PC dele como um controle de Xbox (outro jogador) — no jogo, aperte Start para entrar." : "";
+  toast(mode === "full" ? `Você está controlando o PC de ${user(p.userId).username}. Clique na transmissão para usar mouse e teclado.${padTip}` : `Co-op liberado! Clique na transmissão e jogue com controle${V.controlling.pad ? "" : " ou teclado"}.${padTip}`, "ok", 7000);
   if (S.view !== "stage" && V.channelId) openChannel(V.channelId, false);
   schedule("stage");
   renderCtrlBar();
@@ -3955,11 +4078,22 @@ function dcSend(line) {
   const c = V.controlling, p = c && V.peers.get(c.sock);
   if (p && p.dc && p.dc.readyState === "open") p.dc.send(line);
 }
+// resposta do PC de quem transmite sobre o controle virtual número i
+function onCtrlPad(p, d) {
+  const c = V.controlling;
+  if (!c || c.sock !== p.sock || !d) return;
+  const i = +d.i;
+  if (d.ok) { c.player[i] = +d.player || 0; toast(`🎮 Seu controle${i ? " " + (i + 1) : ""} está conectado${c.player[i] ? ` como Jogador ${c.player[i]}` : ""}. No jogo, aperte Start para entrar.`, "ok", 6000); }
+  else { c.padFail.add(i); toast("O PC de quem transmite não conseguiu criar o controle virtual. Seu controle vai virar teclado.", "warn", 7000); }
+  renderCtrlBar();
+}
 function stopControlling(silent, msg) {
   const c = V.controlling;
   if (!c) return;
   const ups = [...c.keys, ...c.padKeys].map(vk => `k 0 ${vk} 0`);
   if (ups.length) dcSend(ups.join("\n"));
+  if (c.pad) { const px = [...c.padSent.keys()].map(i => `px ${i}`); if (px.length) dcSend(px.join("\n")); }
+  if (document.pointerLockElement) document.exitPointerLock();
   if (c.mode === "full") dcSend("u 0\nu 1\nu 2");
   if (!silent) { const p = V.peers.get(c.sock); if (p) sig(p.sock, { ctrlEnd: true }); }
   V.controlling = null;
@@ -3978,13 +4112,64 @@ function videoPoint(video, e) {
   const x = (e.clientX - (r.left + (r.width - w) / 2)) / w, y = (e.clientY - (r.top + (r.height - h) / 2)) / h;
   return x < 0 || y < 0 || x > 1 || y > 1 ? null : { x, y };
 }
-let pendingMove = null, moveRaf = 0;
+let pendingMove = null, moveRaf = 0, relMove = null;
+// Mouse travado (Pointer Lock): manda movimento relativo, que é o que jogos 3D/FPS leem para girar a câmera
+const mouseLocked = () => { const v = ctrlVideo(); return !!(v && document.pointerLockElement === v); };
+function toggleMouseLock() {
+  const c = V.controlling, v = ctrlVideo();
+  if (!c || c.mode !== "full" || !v) return;
+  if (document.pointerLockElement) { document.exitPointerLock(); return; }
+  c.kb = true; v.closest(".tile").classList.add("kb");
+  const r = v.requestPointerLock && v.requestPointerLock();
+  if (r && r.catch) r.catch(() => toast("O navegador não deixou travar o mouse. Clique na transmissão e tente de novo.", "warn"));
+  toast("Mouse travado no jogo (bom para jogos 3D). Aperte Esc para soltar.", "info", 5000);
+}
+// Teclado como controle de Xbox (para quem não tem controle): vira o controle nº 4 no PC de quem transmite
+const KBPAD = {
+  KeyW: ["ly", 1], KeyS: ["ly", -1], KeyA: ["lx", -1], KeyD: ["lx", 1], KeyI: ["ry", 1], KeyK: ["ry", -1], KeyJ: ["rx", -1], KeyL: ["rx", 1],
+  ArrowUp: 0x0001, ArrowDown: 0x0002, ArrowLeft: 0x0004, ArrowRight: 0x0008, Space: 0x1000, KeyE: 0x2000, KeyQ: 0x4000, KeyR: 0x8000,
+  Digit1: 0x0100, Digit3: 0x0200, KeyZ: "lt", KeyC: "rt", Enter: 0x0010, Tab: 0x0020, KeyF: 0x0040, KeyH: 0x0080
+};
+const KBPAD_HELP = [["W A S D", "analógico esquerdo"], ["I J K L", "analógico direito"], ["Setas", "direcional"], ["Espaço", "A"], ["E", "B"], ["Q", "X"], ["R", "Y"], ["1 / 3", "LB / RB"], ["Z / C", "LT / RT"], ["Enter", "Start"], ["Tab", "Back"], ["F / H", "L3 / R3"]];
+const KB_PAD = 3;
+function kbPadState(set) {
+  let btn = 0, lt = 0, rt = 0;
+  const ax = { lx: 0, ly: 0, rx: 0, ry: 0 };
+  for (const code of set) {
+    const v = KBPAD[code];
+    if (typeof v === "number") btn |= v; else if (v === "lt") lt = 255; else if (v === "rt") rt = 255; else if (Array.isArray(v)) ax[v[0]] += v[1];
+  }
+  const s = v => Math.round(clamp(v, -1, 1) * 32767);
+  return `${btn} ${lt} ${rt} ${s(ax.lx)} ${s(ax.ly)} ${s(ax.rx)} ${s(ax.ry)}`;
+}
+function sendPad(c, i, st) {
+  if (c.padSent.get(i) === st) return;
+  c.padSent.set(i, st);
+  dcSend(`p ${i} ${st}`);
+}
 function wireControlInput() {
   const grid = () => $("#stageGrid");
   const onTarget = e => { const v = ctrlVideo(); return v && (e.target === v || (e.target.closest && e.target.closest(".tile") === v.closest(".tile") && !e.target.closest("button"))) ? v : null; };
+  const btnOf = e => (e.button === 2 ? 2 : e.button === 1 ? 1 : 0);
+  document.addEventListener("pointerlockchange", () => {
+    const c = V.controlling;
+    if (!document.pointerLockElement && c && c.mode === "full") { relMove = null; dcSend("u 0\nu 1\nu 2"); }
+    renderCtrlBar();
+  });
   document.addEventListener("pointermove", e => {
     const c = V.controlling;
     if (!c || c.mode !== "full") return;
+    if (mouseLocked()) {
+      // soma o movimento e manda no máximo uma vez por quadro
+      relMove = relMove || { x: 0, y: 0 };
+      relMove.x += e.movementX || 0; relMove.y += e.movementY || 0;
+      if (!moveRaf) moveRaf = requestAnimationFrame(() => {
+        moveRaf = 0;
+        const r = relMove; relMove = null;
+        if (r && (r.x || r.y)) dcSend(`r ${Math.round(r.x)} ${Math.round(r.y)}`);
+      });
+      return;
+    }
     const v = onTarget(e); if (!v) return;
     const pt = videoPoint(v, e); if (!pt) return;
     pendingMove = pt;
@@ -3993,6 +4178,7 @@ function wireControlInput() {
   document.addEventListener("pointerdown", e => {
     const c = V.controlling;
     if (!c) return;
+    if (c.mode === "full" && mouseLocked()) { e.preventDefault(); dcSend(`d ${btnOf(e)}`); return; }
     const v = onTarget(e);
     c.kb = !!v;
     v && v.closest(".tile").classList.add("kb");
@@ -4001,23 +4187,31 @@ function wireControlInput() {
     const pt = videoPoint(v, e);
     if (!pt) return;
     e.preventDefault();
-    dcSend(`m ${pt.x.toFixed(5)} ${pt.y.toFixed(5)}\nd ${e.button === 2 ? 2 : e.button === 1 ? 1 : 0}`);
+    dcSend(`m ${pt.x.toFixed(5)} ${pt.y.toFixed(5)}\nd ${btnOf(e)}`);
   }, true);
   document.addEventListener("pointerup", e => {
     const c = V.controlling;
-    if (!c || c.mode !== "full" || !onTarget(e)) return;
-    dcSend(`u ${e.button === 2 ? 2 : e.button === 1 ? 1 : 0}`);
+    if (!c || c.mode !== "full" || (!mouseLocked() && !onTarget(e))) return;
+    dcSend(`u ${btnOf(e)}`);
   }, true);
   document.addEventListener("contextmenu", e => { if (V.controlling && onTarget(e)) e.preventDefault(); }, true);
   document.addEventListener("wheel", e => {
     const c = V.controlling;
-    if (!c || c.mode !== "full" || !onTarget(e)) return;
+    if (!c || c.mode !== "full" || (!mouseLocked() && !onTarget(e))) return;
     e.preventDefault();
     dcSend(`w ${-Math.sign(e.deltaY) * 120}`);
   }, { passive: false, capture: true });
   const key = down => e => {
     const c = V.controlling;
     if (!c || !c.kb) return;
+    // teclado como controle de Xbox (só quando o PC de quem transmite tem controle virtual)
+    if (c.pad && c.kbPad && !c.padFail.has(KB_PAD) && KBPAD[e.code] !== undefined) {
+      e.preventDefault(); e.stopPropagation();
+      if (e.repeat) return;
+      if (down) c.kbState.add(e.code); else c.kbState.delete(e.code);
+      sendPad(c, KB_PAD, kbPadState(c.kbState));
+      return;
+    }
     const k = VK[e.code];
     if (!k) return;
     e.preventDefault(); e.stopPropagation();
@@ -4035,14 +4229,39 @@ function releaseKeys() {
   c.kb = false;
   if (c.keys.size) dcSend([...c.keys].map(vk => `k 0 ${vk} 0`).join("\n"));
   c.keys.clear();
+  if (c.kbState && c.kbState.size) { c.kbState.clear(); sendPad(c, KB_PAD, kbPadState(c.kbState)); }
 }
-// Controle (gamepad) de quem controla -> teclas no PC de quem transmite
+// Botões no padrão do navegador (Xbox, PlayStation e a maioria dos genéricos) -> botões do controle de Xbox
+// 0 A · 1 B · 2 X · 3 Y · 4 LB · 5 RB · 6 LT · 7 RT · 8 Back/Share · 9 Start/Options · 10 L3 · 11 R3 · 12–15 direcional · 16 Guia
+const XB_BTN = [0x1000, 0x2000, 0x4000, 0x8000, 0x0100, 0x0200, 0, 0, 0x0020, 0x0010, 0x0040, 0x0080, 0x0001, 0x0002, 0x0004, 0x0008, 0x0400];
+const PAD_IDLE = "0 0 0 0 0 0 0";
+function padState(gp) {
+  let btn = 0;
+  for (let i = 0; i < XB_BTN.length; i++) if (XB_BTN[i] && gp.buttons[i] && gp.buttons[i].pressed) btn |= XB_BTN[i];
+  const trig = i => { const b = gp.buttons[i]; return b ? Math.round(clamp(b.value || (b.pressed ? 1 : 0), 0, 1) * 255) : 0; };
+  // zona morta de 10% (controle parado não manda nada) e 256 degraus por lado (menos mensagens, sem perda perceptível)
+  const ax = i => { let v = +gp.axes[i] || 0; if (Math.abs(v) < 0.1) v = 0; return Math.round(Math.round(clamp(v, -1, 1) * 255) / 255 * 32767); };
+  // no navegador "para cima" é negativo; no controle de Xbox é positivo
+  return `${btn} ${trig(6)} ${trig(7)} ${ax(0)} ${-ax(1) || 0} ${ax(2)} ${-ax(3) || 0}`;
+}
+// Controle (gamepad) de quem controla -> controle de Xbox virtual no PC de quem transmite
+// (ou, se ele não tiver o driver, -> teclas, como antes)
 function padLoop(ref) {
   const c = V.controlling;
   if (!c || (ref && ref !== c) || (!ref && c.looping)) return;
   c.looping = true;
   const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [];
-  const gp = pads[0];
+  const asKeys = [];
+  for (const gp of pads) {
+    const i = gp.index;
+    if (!c.pad || i > 2 || c.padFail.has(i)) { asKeys.push(gp); continue; }
+    sendPad(c, i, padState(gp));
+    if (!c.padSeen) { c.padSeen = true; renderCtrlBar(); }
+    if (gp.mapping !== "standard" && !c.padOdd) { c.padOdd = true; toast("Esse controle não usa o mapeamento padrão do navegador: alguns botões podem ficar trocados.", "warn", 6000); }
+  }
+  // controle desconectado deste lado: solta tudo no controle virtual (a vaga continua dele)
+  for (const [i, st] of c.padSent) if (i !== KB_PAD && st !== PAD_IDLE && !pads.some(gp => gp.index === i)) sendPad(c, i, PAD_IDLE);
+  const gp = asKeys[0];
   if (gp) {
     const pr = PAD_PRESETS[c.preset] || PAD_PRESETS.wasd;
     const want = new Set();
@@ -4058,22 +4277,36 @@ function padLoop(ref) {
     if (lines.length) dcSend(lines.join("\n"));
     c.padKeys = want;
     if (!c.padSeen) { c.padSeen = true; renderCtrlBar(); }
-    requestAnimationFrame(() => padLoop(c));     // controle ligado: lê a cada quadro
-  } else setTimeout(() => padLoop(c), 500);      // sem controle: verifica de vez em quando (economiza CPU)
+  } else if (c.padKeys.size) {                    // controle tirado no meio: solta as teclas que ele segurava
+    dcSend([...c.padKeys].map(vk => `k 0 ${vk} ${EXT_VK.has(vk) ? 1 : 0}`).join("\n"));
+    c.padKeys = new Set();
+  }
+  if (pads.length) requestAnimationFrame(() => padLoop(c));   // controle ligado: lê a cada quadro
+  else setTimeout(() => padLoop(c), 500);                       // sem controle: verifica de vez em quando (economiza CPU)
 }
 function renderCtrlBar() {
   const el = $("#ctrlBar");
   const c = V.controlling;
   let h = "";
   for (const [sock, g] of V.granted) {
-    h += `<div class="cb-row host">${ic(g.mode === "full" ? "pointer" : "gamepad", "sm")}<span><b>${esc(user(g.uid).username)}</b> ${g.mode === "full" ? "está controlando seu PC" : "está jogando com você (co-op)"}</span><button class="btn danger sm" data-act="ctrl-revoke" data-sock="${esc(sock)}">Encerrar</button></div>`;
+    const n = g.pads ? g.pads.size : 0;
+    h += `<div class="cb-row host">${ic(g.mode === "full" ? "pointer" : "gamepad", "sm")}<span><b>${esc(user(g.uid).username)}</b> ${g.mode === "full" ? "está controlando seu PC" : "está jogando com você (co-op)"}${n ? ` · 🎮 ${n} ${n === 1 ? "controle virtual" : "controles virtuais"}` : ""}</span><button class="btn danger sm" data-act="ctrl-revoke" data-sock="${esc(sock)}">Encerrar</button></div>`;
   }
   if (c) {
     const pr = PAD_PRESETS[c.preset] || PAD_PRESETS.wasd;
-    h += `<div class="cb-row">${ic(c.mode === "full" ? "pointer" : "gamepad", "sm")}<span>${c.mode === "full" ? "Controlando" : "Co-op com"} <b>${esc(user(c.uid).username)}</b> · clique na tela para usar o teclado${c.padSeen ? ` · 🎮 ${pr.name}` : ""}</span><button class="btn sm" data-act="pad-preset" data-tip="Teclas do controle">${ic("gamepad", "sm")}</button><button class="btn sm" data-act="ctrl-stop">Parar</button></div>`;
+    const players = Object.values(c.player || {}).filter(Boolean);
+    const padTxt = c.pad ? ` · 🎮 controle de Xbox virtual${players.length ? ` (Jogador ${players.join(", ")})` : ""}${c.kbPad ? " · teclado = controle" : ""}` : c.padSeen ? ` · 🎮 ${pr.name}` : "";
+    h += `<div class="cb-row">${ic(c.mode === "full" ? "pointer" : "gamepad", "sm")}<span>${c.mode === "full" ? "Controlando" : "Co-op com"} <b>${esc(user(c.uid).username)}</b> · clique na tela para usar o teclado${padTxt}</span>${c.mode === "full" ? `<button class="btn sm" data-act="ctrl-lock" data-tip="${document.pointerLockElement ? "Soltar o mouse (Esc)" : "Travar o mouse no jogo (jogos 3D)"}">${ic("pointer", "sm")}</button>` : ""}<button class="btn sm" data-act="pad-preset" data-tip="Controle e teclado">${ic("gamepad", "sm")}</button><button class="btn sm" data-act="ctrl-stop">Parar</button></div>`;
   }
   el.innerHTML = h;
   el.classList.toggle("hidden", !h);
+}
+function kbPadHelp() {
+  modal({
+    title: "Teclado como controle", sub: "Cada tecla vira um botão do controle de Xbox no PC de quem transmite.",
+    body: `<div class="steps">${KBPAD_HELP.map(([k, v]) => `<div class="step"><b>${ic("gamepad", "xs")}</b><div><b><span class="kbd">${esc(k)}</span></b><small>${esc(v)}</small></div></div>`).join("")}</div><div class="modal-foot"><button class="btn primary" data-ok>Entendi</button></div>`,
+    onMount(m, close) { m.querySelector("[data-ok]").onclick = close; }
+  });
 }
 function onVoiceState(st) {
   const prev = S.voice.get(st.userId);
@@ -5893,10 +6126,32 @@ function mountAppDl(p, rerender) {
   const b = p.querySelector("[data-install]");
   if (b) b.onclick = async () => { await installApp(); rerender(); };
 }
+// Co-op de verdade: cada amigo vira um controle de Xbox virtual (precisa do driver ViGEmBus neste PC)
+function remotePads() {
+  const st = agentOk() ? AG.pad : "";
+  const status = st === "ok" ? `<small style="color:var(--green)">✅ Driver pronto — cada amigo vira um controle de Xbox (Jogador 2, 3, 4).</small>`
+    : st === "nodriver" ? `<small style="color:var(--yellow)">⚠️ Driver não encontrado neste PC.</small>`
+    : st === "erro" ? `<small style="color:var(--yellow)">⚠️ O driver respondeu com erro. Reinstale o ViGEmBus e reinicie o PC.</small>`
+    : agentOk() && AG.ver < 2 ? `<small style="color:var(--yellow)">⚠️ Seu Agente Auryx é antigo: baixe de novo (ou atualize o app de PC).</small>` : "";
+  return `<span class="label" style="margin-top:18px;display:block">Co-op com controle (Jogador 2, 3, 4)</span>
+    <div class="steps"><div class="step"><b>${ic("gamepad", "sm")}</b><div><b>Driver de controle virtual (ViGEmBus)</b><small>Para o jogo reconhecer cada amigo como um controle diferente (LEGO, luta, corrida em tela dividida…), instale uma vez neste PC o driver gratuito ViGEmBus. Sem ele, o controle do amigo vira teclado e o jogo acha que é o Jogador 1.</small>${status}<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><a class="btn sm" href="${VIGEM_URL}" target="_blank" rel="noopener">${ic("arrowDown", "sm")}Baixar ViGEmBus</a><button class="btn sm" data-pad-check>Verificar driver</button></div><small>Depois de instalar, reinicie o PC. Quem joga de longe pode usar controle de Xbox, PlayStation, genérico ou o teclado (opção "Teclado como controle").</small></div></div></div>`;
+}
+// Segurança e histórico do controle remoto (vale para o app de PC e para o Agente Auryx)
+function remoteSafety() {
+  const log = store.get("ctrlLog", []).slice(0, 10);
+  const when = t => new Date(t).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const dur = e => { const m = Math.max(1, Math.round(((e.end || Date.now()) - e.at) / 60e3)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+  const why = { inativo: " · terminou por inatividade" };
+  return `<span class="label" style="margin-top:18px;display:block">Segurança</span>
+    ${toggleRow("noCtrl", "Bloquear pedidos de controle", "Ninguém consegue pedir para controlar seu PC enquanto isto estiver ligado.", !!S.settings.noCtrl)}
+    <div class="hint" style="margin-top:8px">Nada acontece sem você aceitar. O controle termina sozinho depois de 15 minutos sem uso, quando você para de transmitir ou quando clica em <b>Encerrar</b> na barra de controle.</div>
+    <span class="label" style="margin-top:18px;display:block">Histórico neste aparelho</span>
+    ${log.length ? `<div class="steps">${log.map(e => `<div class="step"><b>${ic(e.mode === "full" ? "pointer" : "gamepad", "sm")}</b><div><b>${esc(e.name || "?")}</b><small>${e.mode === "full" ? "Controle total" : "Co-op"} · ${when(e.at)} · ${e.end ? dur(e) : "em andamento"}${why[e.why] || ""}</small></div></div>`).join("")}</div>` : `<small style="color:var(--muted)">Ninguém controlou este PC ainda.</small>`}`;
+}
 function renderRemote() {
   const local = LOCAL || location.protocol === "file:";
   if (DESKTOP) return `<p style="color:var(--muted);margin-top:-8px">Deixe um amigo controlar seu PC (como AnyDesk) ou jogar com você em co-op local pela transmissão.</p>
-    <div class="steps"><div class="step"><b>✓</b><div><b>Já está pronto!</b><small>O app de PC tem o controle remoto embutido. Quando alguém clicar em ${ic("gamepad", "xs")} <b>Pedir controle</b> na sua transmissão, é só escolher <b>Co-op</b> ou <b>Controle total</b>.</small><small>Para jogos que rodam como administrador, abra a Auryx Nexos como administrador também.</small></div></div></div>`;
+    <div class="steps"><div class="step"><b>✓</b><div><b>Já está pronto!</b><small>O app de PC tem o controle remoto embutido. Quando alguém clicar em ${ic("gamepad", "xs")} <b>Pedir controle</b> na sua transmissão, é só escolher <b>Co-op</b> ou <b>Controle total</b>.</small><small>Para jogos que rodam como administrador, abra a Auryx Nexos como administrador também.</small></div></div></div>${remotePads()}${remoteSafety()}`;
   return `<p style="color:var(--muted);margin-top:-8px">Deixe um amigo controlar seu PC (como AnyDesk) ou jogar com você em co-op local pela transmissão — como o Remote Play Together da Steam.</p>
     <div class="steps">
       <div class="step"><b>1</b><div><b>Baixe o Agente Auryx</b><small>Um programinha do Windows que move o mouse e o teclado quando você permite. Não precisa instalar.</small>${local ? `<small style="color:var(--yellow)">Disponível na versão online da Auryx Nexos.</small>` : `<a class="btn sm" href="/agente/Auryx-Agente.zip" download>${ic("arrowDown", "sm")}Baixar Auryx-Agente.zip</a>`}</div></div>
@@ -5904,9 +6159,20 @@ function renderRemote() {
       <div class="step"><b>3</b><div><b>Conecte aqui</b><div class="invite-box" style="margin-top:8px"><input id="agCode" inputmode="numeric" maxlength="6" placeholder="Código de 6 números" value="${esc(S.settings.agentCode || "")}"><button class="btn primary sm" data-ag>Conectar</button></div><small data-ag-status style="margin-top:6px;display:block">${agentOk() ? "✅ Agente conectado" : "Agente desconectado"}</small></div></div>
       <div class="step"><b>4</b><div><b>Transmita a tela e aceite</b><small>Quando alguém clicar em ${ic("gamepad", "xs")} <b>Pedir controle</b> na sua transmissão, você escolhe: <b>Co-op</b> (só teclado/controle) ou <b>Controle total</b> (mouse e teclado). Fechar a janela do agente corta tudo na hora.</small></div></div>
     </div>
-    <div class="hint" style="margin-top:16px">Para jogar co-op: transmita no modo <b>Movimento</b> com <b>720p ou 1080p 60 FPS</b>. Quem joga pode usar teclado ou controle — o controle vira teclas (WASD ou setas) no seu PC.</div>`;
+    <div class="hint" style="margin-top:16px">Para jogar co-op: transmita no modo <b>Movimento</b> com <b>720p ou 1080p 60 FPS</b>. Quem joga pode usar controle ou teclado — com o driver ViGEmBus (abaixo), cada controle vira um jogador separado no jogo.</div>${remotePads()}${remoteSafety()}`;
 }
 function mountRemote(p, rerender) {
+  bindToggles(p, (k, on) => { if (k === "noCtrl" && on) toast("Pedidos de controle bloqueados.", "ok"); });
+  const chk = p.querySelector("[data-pad-check]");
+  if (chk) chk.onclick = async () => {
+    chk.classList.add("loading");
+    try { await agentConnect(); }
+    catch (e) { chk.classList.remove("loading"); toast(e.message, "error", 6000); return; }
+    const okPad = AG.pad === "ok";
+    toast(okPad ? "Driver de controle virtual pronto! Seus amigos vão aparecer como Jogador 2, 3 e 4." : AG.ver < 2 ? "Seu Agente Auryx é antigo: baixe de novo (ou atualize o app de PC)." : "Driver ViGEmBus não encontrado neste PC. Instale e reinicie o PC.", okPad ? "ok" : "warn", 7000);
+    ctrlWatch();
+    rerender();
+  };
   const btn = p.querySelector("[data-ag]");
   if (!btn) return;
   btn.onclick = async () => {
@@ -6396,7 +6662,24 @@ const ACTIONS = {
   "ctrl-request": a => requestControl(a.dataset.uid),
   "ctrl-stop": () => stopControlling(false, "Você parou de controlar."),
   "ctrl-revoke": a => { const g = V.granted.get(a.dataset.sock); endGrant(a.dataset.sock); if (g) toast(`Controle de ${user(g.uid).username} encerrado.`, "ok"); },
-  "pad-preset": a => menu(a, Object.entries(PAD_PRESETS).map(([k, p]) => ({ label: p.name, icon: V.controlling && V.controlling.preset === k ? "check" : null, run: () => { if (V.controlling) { V.controlling.preset = k; store.set("padPreset", k); renderCtrlBar(); } } }))),
+  "ctrl-lock": () => toggleMouseLock(),
+  "pad-preset": a => {
+    const c = V.controlling;
+    if (!c) return;
+    // PC de quem transmite com controle virtual: o controle vai inteiro (analógicos e gatilhos); o teclado pode virar controle também
+    if (c.pad) return menu(a, [
+      { label: "Controle → controle de Xbox (outro jogador)", icon: "check", run: () => toast("Seu controle aparece no PC de quem transmite como um controle de Xbox. No jogo, aperte Start para entrar como outro jogador.", "info", 6000) },
+      { label: c.kbPad ? "Teclado como controle: ligado" : "Teclado como controle: desligado", icon: c.kbPad ? "check" : null, run: () => {
+        releaseKeys();
+        c.kbPad = !c.kbPad; store.set("kbPad", c.kbPad);
+        if (!c.kbPad && c.padSent.has(KB_PAD)) { dcSend(`px ${KB_PAD}`); c.padSent.delete(KB_PAD); }
+        toast(c.kbPad ? "Agora o teclado vira um controle de Xbox (outro jogador). Clique na transmissão para jogar." : "O teclado voltou a ser teclado.", "ok");
+        renderCtrlBar();
+      } },
+      { label: "Ver teclas do teclado-controle", icon: "info", run: kbPadHelp }
+    ]);
+    menu(a, Object.entries(PAD_PRESETS).map(([k, p]) => ({ label: p.name, icon: c.preset === k ? "check" : null, run: () => { c.preset = k; store.set("padPreset", k); renderCtrlBar(); } })));
+  },
   discover: goDiscover,
   "add-server": addServerModal,
   "create-server": createServerModal,

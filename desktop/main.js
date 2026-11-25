@@ -188,16 +188,21 @@ function agentScript() {
   if (app.isPackaged && fs.existsSync(packed)) return packed;
   return path.join(__dirname, "..", "public", "agente", "nexora-agente.ps1");
 }
-ipcMain.handle("agent:start", () => {
+// Segurança: código longo e aleatório (ninguém adivinha), só a página do próprio app pode conectar
+// (-Origens) e o agente fecha sozinho se este app fechar, mesmo num travamento (-PaiPid).
+ipcMain.handle("agent:start", e => {
   if (process.platform !== "win32") throw new Error("O controle remoto funciona só no Windows.");
+  if (!win || e.sender !== win.webContents) throw new Error("Pedido inválido.");
   if (agent && agent.exitCode === null) return agentCode;
-  agentCode = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
-  agent = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", agentScript(), "-Codigo", agentCode, "-Oculto"], { windowsHide: true, stdio: "ignore" });
-  agent.on("exit", () => { agent = null; });
+  agentCode = crypto.randomBytes(24).toString("hex");
+  const proc = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", agentScript(),
+    "-Codigo", agentCode, "-Oculto", "-PaiPid", String(process.pid), "-Origens", ORIGIN], { windowsHide: true, stdio: "ignore" });
+  agent = proc;
+  proc.on("exit", () => { if (agent === proc) { agent = null; agentCode = null; } });
   return agentCode;
 });
-ipcMain.handle("agent:stop", () => { stopAgent(); return true; });
-function stopAgent() { if (agent) { try { agent.kill(); } catch {} agent = null; } }
+ipcMain.handle("agent:stop", e => { if (win && e.sender === win.webContents) stopAgent(); return true; });
+function stopAgent() { if (agent) { try { agent.kill(); } catch {} agent = null; agentCode = null; } }
 
 /* ---------- ciclo de vida ---------- */
 app.on("second-instance", showWindow);
