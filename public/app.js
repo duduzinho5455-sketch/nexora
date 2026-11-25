@@ -55,6 +55,7 @@ const P = {
   send: '<path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/>',
   pin: '<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>',
   fileSearch: '<path d="M21 6H3M10 12H3M10 18H3"/><circle cx="17" cy="15" r="3"/><path d="m21 19-1.9-1.9"/>',
+  flag: '<path d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.33 2q2 0 3.67-.8a1 1 0 0 1 1 .8v11a1 1 0 0 1-.4.8 6 6 0 0 1-3.6 1.2c-3 0-5-2-7.33-2q-2 0-3.67.8"/>',
   crown: '<path d="m2 7 5 5 5-8 5 8 5-5-2 12H4z"/>',
   eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>',
   eyeOff: '<path d="M17.9 17.9A10.5 10.5 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.1-5.9M9.9 4.2A9.1 9.1 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2M1 1l22 22"/>',
@@ -1063,6 +1064,24 @@ function openTicket(orderId) {
 }
 
 /* --- painel ADM --- */
+// Monitoramento ao vivo: banco, gravação, lentidão, memória, tempo de resposta, erros e alertas
+function admHealth(h) {
+  if (!h) return "";
+  const ok = (b, t) => `<span class="ost ${b ? "st-ok" : "st-bad"}">${t}</span>`;
+  const ago = t => { if (!t) return "nunca"; const s = Math.round((Date.now() - t) / 1000); return s < 60 ? `há ${s} s` : s < 3600 ? `há ${Math.round(s / 60)} min` : `há ${Math.round(s / 3600)} h`; };
+  const memPct = h.mem.rss / h.mem.limit * 100;
+  return `<div class="section-title">${ic("signal", "sm")} Saúde do servidor (medida a cada minuto)</div>
+    ${h.alerts.length ? `<div class="prem-alert" style="border-color:var(--red)">${ic("info")}<span>${h.alerts.map(a => `⚠️ ${esc(a.text)} <small>(desde ${new Date(a.since).toLocaleTimeString("pt-BR")})</small>`).join("<br>")}</span></div>` : ""}
+    <div class="svc-list">
+      <div><b>Banco respondendo</b>${h.db.kind !== "PostgreSQL" ? ok(true, "arquivo local") : h.db.at ? ok(h.db.ok, h.db.ok ? `sim · ${h.db.ms} ms` : "NÃO — " + esc(h.db.err)) : ok(true, "medindo…")}</div>
+      <div><b>Última gravação</b>${ok(!h.save.fails, h.save.fails ? `${h.save.fails} falhas seguidas — ${esc(h.save.err)}` : h.save.last ? `${ago(h.save.last)} (${h.save.ms} ms)` : "nada mudou desde que ligou")}</div>
+      <div><b>Mensagens</b>${ok(true, h.db.msgTable ? "tabela própria (histórico completo)" : "formato antigo")}</div>
+      <div><b>Lentidão do servidor</b>${ok(h.loop.p99 < 200, `atraso de até ${h.loop.p99} ms (média ${h.loop.mean} ms)`)}</div>
+      <div><b>Tempo de resposta</b>${ok(h.http.p95 < 1000, h.http.n ? `metade em até ${h.http.p50} ms · 95% em até ${h.http.p95} ms` : "sem dados ainda")}</div>
+      <div><b>Memória</b>${ok(memPct < 85, `${Math.round(h.mem.rss / 1048576)} MB de ${Math.round(h.mem.limit / 1048576)} MB (${memPct.toFixed(0)}%)`)}</div>
+      <div><b>Erros na última hora</b>${ok(h.errorsHour < 10, String(h.errorsHour))}${h.errors.length ? `<details style="margin-top:6px"><summary style="cursor:pointer;color:var(--muted)">Ver os últimos erros</summary><small style="display:block;color:var(--muted);white-space:pre-wrap">${h.errors.map(e => `${new Date(e.at).toLocaleString("pt-BR")} — ${esc(e.text)}`).join("\n")}</small></details>` : ""}</div>
+    </div>`;
+}
 async function goAdmin() {
   if (!S.me || !(S.me.admin || S.me.mod)) { toast("Apenas a equipe.", "warn"); return; }
   setView("admin");
@@ -1078,7 +1097,7 @@ async function renderAdmin(soft) {
   if (!sup && !modOnly && (S.adminTab === "system" || S.adminTab === "backup")) S.adminTab = "dash";
   const tab = S.adminTab;
   clearInterval(S.admLive); S.admLive = null;
-  const tabs = [["dash", "Visão geral"], ["orders", "Solicitações"], ["users", "Usuários e planos"], ["servers", "Servidores"], ["team", "Equipe"], ["games", "Jogos"], sup && ["system", "⚙️ Sistema"], sup && ["backup", "Backups"], ["audit", "Histórico"]].filter(Boolean).filter(t => !modOnly || t[0] === "backup" || t[0] === "team");
+  const tabs = [["dash", "Visão geral"], ["orders", "Solicitações"], ["reports", "Denúncias"], ["users", "Usuários e planos"], ["servers", "Servidores"], ["team", "Equipe"], ["games", "Jogos"], sup && ["system", "⚙️ Sistema"], sup && ["backup", "Backups"], ["audit", "Histórico"]].filter(Boolean).filter(t => !modOnly || t[0] === "backup" || t[0] === "team");
   const head = `<div class="page admin"><div class="hero adm-hero"><h1>${ic("shield", "lg")} ${modOnly ? "Painel do Moderador" : "Painel ADM"} ${sup ? `<span class="supreme-tag">ADM Supremo</span>` : ""}</h1><p>${modOnly ? "Você é <b>Moderador</b>: faça o backup e guarde no Drive do dono. O arquivo tem os dados de todo mundo — não compartilhe com ninguém." : sup ? "Acesso total: equipe, sistema, versão do app, desconexão geral e backups." : "Confira no extrato do banco se o Pix caiu antes de aprovar. Toda decisão fica registrada com o seu nome."}</p>${modOnly ? "" : `<button class="btn adm-announce" data-act="admin-broadcast">📢 Aviso geral</button>`}</div><div class="tabs-row">${tabs.map(([k, n]) => `<button class="tab${k === tab ? " on" : ""}" data-act="admin-tab" data-tab="${k}">${n}</button>`).join("")}</div><div class="adm-body"></div></div>`;
   if (!soft || !root.querySelector(".adm-body")) root.innerHTML = head;
   else root.querySelectorAll(".tabs-row .tab").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
@@ -1102,7 +1121,9 @@ async function renderAdmin(soft) {
       ${card("receipt", fmtMoney(r.revenueMonth), "Recebido este mês", `${fmtMoney(r.revenueTotal)} no total · ${r.paidCount} pagamentos`, "gold")}
       ${card("info", r.pending, "Pedidos esperando", r.pending ? "Abra Solicitações" : "Tudo em dia", r.pending ? "warn" : "")}
       ${card("shield", r.banned, "Contas suspensas", `${r.verified} com e-mail confirmado`)}
+      ${card("flag", r.reportsOpen || 0, "Denúncias abertas", r.reportsOpen ? "Abra Denúncias" : "Nenhuma esperando", r.reportsOpen ? "warn" : "")}
     </div>
+    ${admHealth(r.health)}
     <div class="section-title">${ic("settings", "sm")} Estado dos serviços</div>
     <div class="svc-list">
       <div><b>Banco de dados</b>${ok(true, r.db)}</div>
@@ -1121,6 +1142,19 @@ async function renderAdmin(soft) {
       const el = $("#adminView [data-live]");
       if (!x.error && el) el.textContent = `${x.online} online · ${x.sockets} conexões · ${x.msgsMin} msg/min · ${x.msgsHour} msg na última hora`;
     }, 5000);
+  } else if (tab === "reports") {
+    const want = S.repTab || "open";
+    const r = await emit("admin:reports", { status: want });
+    if (r.error) { body.innerHTML = esc(r.error); return; }
+    const when = t => new Date(t).toLocaleString("pt-BR");
+    const st = { open: ["aberta", "st-pend"], removed: ["mensagem apagada", "st-bad"], dismissed: ["sem problema", "st-ok"] };
+    body.innerHTML = `<div class="tabs-row" style="margin-bottom:12px">${[["open", `Abertas (${r.open})`], ["done", "Resolvidas"], ["all", "Todas"]].map(([k, n]) => `<button class="tab${k === want ? " on" : ""}" data-act="admin-rep-tab" data-tab="${k}">${n}</button>`).join("")}</div>` +
+      (r.reports.length ? r.reports.map(x => `<div class="adm-user" style="align-items:flex-start">${x.author ? avatar(x.author, 36) : ""}<div class="who" style="flex:1;min-width:0"><b>${esc(x.author ? x.author.username : "Conta apagada")} <span class="ost ${st[x.status][1]}">${st[x.status][0]}</span>${x.authorBanned ? ` <span class="ost st-bad">conta suspensa</span>` : ""}${x.against > 1 ? ` <span class="ost st-bad">${x.against} denúncias contra</span>` : ""}</b>
+        <small>${esc(x.kindName)} · ${esc(x.where)} · denunciado por ${esc(x.reporter ? x.reporter.username : "?")} em ${when(x.at)}</small>
+        <div class="msg-text" style="background:var(--bg-3);border-radius:10px;padding:8px 10px;margin:6px 0">${x.msg.t ? renderText(x.msg.t).html : ""}${x.msg.f ? `<small>📎 ${x.msg.f.map(f => esc(f.n)).join(", ")}</small>` : ""}</div>
+        ${x.note ? `<small>Detalhes: ${esc(x.note)}</small>` : ""}${x.decidedByName ? `<small>Resolvida por ${esc(x.decidedByName)} em ${when(x.decidedAt)}${x.decision ? " — " + esc(x.decision) : ""}</small>` : ""}</div>
+        <div class="ao-acts">${x.status === "open" ? `<button class="btn sm danger" data-act="admin-rep" data-id="${x.id}" data-do="delete">Apagar mensagem</button><button class="btn sm" data-act="admin-rep" data-id="${x.id}" data-do="dismiss">Sem problema</button>` : ""}${x.author && !x.authorBanned ? `<button class="btn sm" data-act="admin-user" data-uid="${x.author.id}">Ver conta</button>` : ""}</div></div>`).join("")
+        : `<div class="empty">${ic("flag")}<p>${want === "open" ? "Nenhuma denúncia esperando. 🎉" : "Nada por aqui."}</p></div>`);
   } else if (tab === "team") {
     const r = await emit("admin:admins", {});
     if (r.error) { body.innerHTML = esc(r.error); return; }
@@ -1206,7 +1240,7 @@ async function renderAdmin(soft) {
   } else {
     const r = await emit("admin:audit", { q: S.auditQ || "", action: S.auditA || "" });
     if (r.error) { body.innerHTML = esc(r.error); return; }
-    const NAMES = { "order:approve": "Aprovou pedido", "order:reject": "Recusou pedido", "order:review": "Pôs em análise", "plan:grant": "Deu plano", "plan:revoke": "Revogou plano", "game:save": "Salvou jogo", "game:delete": "Removeu jogo", "server:block": "Bloqueou servidor de", "server:unblock": "Desbloqueou servidor de", "server:delete": "Excluiu servidor de", "user:ban": "Suspendeu", "user:unban": "Reativou", "broadcast": "Enviou aviso geral", "backup:now": "Fez backup do banco", "user:setpass": "Trocou a senha de", "user:logout": "Desconectou de tudo", "user:verify": "Confirmou o e-mail de", "admin:add": "Tornou ADM", "mod:add": "Tornou Moderador", "mod:remove": "Tirou o MOD de", "admin:remove": "Tirou o ADM de", "settings": "Mudou o sistema", "logout:all": "Desconectou todo mundo", "announce:clear": "Tirou o aviso fixado", "migration": "Atualização automática", "backup:fail": "Backup com problema" };
+    const NAMES = { "order:approve": "Aprovou pedido", "order:reject": "Recusou pedido", "order:review": "Pôs em análise", "plan:grant": "Deu plano", "plan:revoke": "Revogou plano", "game:save": "Salvou jogo", "game:delete": "Removeu jogo", "server:block": "Bloqueou servidor de", "server:unblock": "Desbloqueou servidor de", "server:delete": "Excluiu servidor de", "user:ban": "Suspendeu", "user:unban": "Reativou", "broadcast": "Enviou aviso geral", "backup:now": "Fez backup do banco", "user:setpass": "Trocou a senha de", "user:logout": "Desconectou de tudo", "user:verify": "Confirmou o e-mail de", "admin:add": "Tornou ADM", "mod:add": "Tornou Moderador", "mod:remove": "Tirou o MOD de", "admin:remove": "Tirou o ADM de", "settings": "Mudou o sistema", "logout:all": "Desconectou todo mundo", "announce:clear": "Tirou o aviso fixado", "migration": "Atualização automática", "backup:fail": "Backup com problema", "report:remove": "Apagou mensagem denunciada de", "report:dismiss": "Arquivou denúncia contra" };
     const ACTS = [["", "Tudo"], ["order", "Pedidos"], ["plan", "Planos"], ["user", "Contas"], ["server", "Servidores"], ["admin", "Equipe"], ["settings", "Sistema"], ["broadcast", "Avisos"], ["game", "Jogos"]];
     body.innerHTML = `<div class="adm-games-head"><div class="chips">${ACTS.map(([k, n]) => `<button class="chip${(S.auditA || "") === k ? " on" : ""}" data-act="audit-a" data-a="${k}">${n}</button>`).join("")}</div><form class="add-box" data-asearch style="flex:1;max-width:340px"><input placeholder="Buscar por nome, motivo…" value="${esc(S.auditQ || "")}"><button class="btn primary">Buscar</button></form></div><small class="hint" style="display:block;margin:-4px 0 10px">${r.entries.length} de ${r.total} registros</small>` + (r.entries.length ? `<div class="audit">${r.entries.map(e => `<div class="au-row"><small>${new Date(e.at).toLocaleString("pt-BR")}</small><b>${esc(e.adminName)}</b><span>${esc(NAMES[e.action] || e.action)}</span><span>→ ${esc(e.targetName === "?" && e.details && e.details.game ? e.details.game : e.targetName)}</span><small>${esc([(e.details || {}).tier, e.details && e.details.days ? e.details.days + " dias" : "", e.details.amount ? fmtMoney(e.details.amount) : "", e.details.server ? "“" + e.details.server + "”" : "", e.details.reason].filter(Boolean).join(" · "))}</small></div>`).join("")}</div>` : `<div class="empty">${ic("shield")}<p>Nenhuma ação encontrada.</p></div>`);
   }
@@ -2758,6 +2792,9 @@ function connect() {
   sock.on("order:update", ({ order }) => onOrderUpdate(order));
   sock.on("order:new", ({ order }) => { if (S.me && S.me.admin) { sfx("mention"); toast(`Novo pedido: ${order.user ? order.user.username : "?"} — plano ${order.plan}`, "info", 5000); } });
   sock.on("announce", showAnnounce);
+  // equipe: denúncia nova e alertas do servidor aparecem na hora
+  sock.on("report:new", () => { if (S.view === "admin" && S.adminTab === "reports") renderAdmin(true); else toast("🚩 Nova denúncia para analisar no Painel ADM.", "warn", 6000); });
+  sock.on("admin:alert", ({ text }) => toast("⚠️ " + text, "error", 9000));
   sock.on("call:ring", showRing);
   sock.on("call:end", ({ channelId }) => stopRing(channelId));
   sock.on("call:declined", ({ userId }) => toast(`${user(userId).username} recusou a chamada. Você pode continuar esperando na call.`, "info", 4500));
@@ -6310,7 +6347,10 @@ async function mountSecurity(p) {
       <span class="label">Aparelhos conectados (${r.list.length})</span>
       <div class="sec-list">${r.list.map(x => `<div class="sec-dev${x.current ? " cur" : ""}"><span class="sec-ico">${ic(/Android|iPhone/.test(x.dev) ? "phone" : "monitor")}</span><div class="who"><b>${esc(x.dev)}${x.current ? ` <span class="ost st-ok">este aparelho</span>` : x.online ? ` <span class="ost st-rev">online</span>` : ""}</b><small>Entrou em ${new Date(x.created).toLocaleDateString("pt-BR")} · ativo ${ago(x.last)}</small></div>${x.current ? "" : `<button class="btn sm danger" data-end="${esc(x.id)}">Desconectar</button>`}</div>`).join("")}</div>
       ${r.list.length > 1 ? `<button class="btn danger" style="margin-top:12px" data-endall>Desconectar todos os outros</button>` : ""}
-      <small style="color:var(--muted);display:block;margin-top:10px">Não reconhece algum aparelho? Desconecte e troque a senha.</small>`;
+      <small style="color:var(--muted);display:block;margin-top:10px">Não reconhece algum aparelho? Desconecte e troque a senha.</small>
+      <span class="label" style="margin-top:22px;display:block">Seus dados</span>
+      <small style="color:var(--muted);display:block;margin:4px 0 10px">Baixe uma cópia de tudo o que a sua conta tem: perfil, aparelhos, amigos, servidores, pedidos, conversa com a Aury, arquivos e as mensagens que você escreveu.</small>
+      <button class="btn" data-export>${ic("download", "sm")}Baixar meus dados</button>`;
   };
   root.addEventListener("submit", async e => {
     e.preventDefault();
@@ -6321,6 +6361,21 @@ async function mountSecurity(p) {
     draw();
   });
   root.addEventListener("click", async e => {
+    const ex = e.target.closest("[data-export]");
+    if (ex) {
+      ex.classList.add("loading");
+      try {
+        const res = await fetch("/api/account/export", { headers: { authorization: "Bearer " + S.token } });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Não deu para gerar o arquivo.");
+        const name = (/filename="([^"]+)"/.exec(res.headers.get("content-disposition") || "") || [])[1] || "auryx-meus-dados.json";
+        const url = URL.createObjectURL(await res.blob()), link = document.createElement("a");
+        link.href = url; link.download = name; document.body.append(link); link.click(); link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        toast("Seus dados foram baixados.", "ok");
+      } catch (err) { toast(err.message, "error"); }
+      ex.classList.remove("loading");
+      return;
+    }
     const b = e.target.closest("[data-end]"), all = e.target.closest("[data-endall]");
     if (!b && !all) return;
     if (all && !confirm("Desconectar todos os outros aparelhos?")) return;
@@ -6636,6 +6691,28 @@ function searchModal() {
     }
   });
 }
+const REPORT_KINDS = [["spam", "Spam ou propaganda"], ["abuse", "Assédio ou ofensa"], ["nsfw", "Conteúdo impróprio"], ["scam", "Golpe ou fraude"], ["other", "Outro motivo"]];
+function reportModal(id) {
+  const cid = S.channelId, m = findMsg(id);
+  if (!m) return;
+  let kind = "";
+  modal({
+    title: "Denunciar mensagem", sub: "A equipe da Auryx vai analisar. Quem escreveu não fica sabendo quem denunciou.",
+    body: `<div class="msg-text" style="background:var(--bg-3);border-radius:10px;padding:10px 12px;margin-bottom:12px;max-height:120px;overflow:auto"><b>${esc(user(m.a).username)}:</b> ${m.t ? renderText(m.t).html : "📎 Anexo"}</div>
+      ${REPORT_KINDS.map(([k, n]) => `<label class="radio-card"><span><b>${n}</b></span><input type="radio" name="rk" value="${k}"></label>`).join("")}
+      <label class="field" style="margin-top:10px"><span>Detalhes (opcional)</span><textarea data-note maxlength="300" placeholder="Conte o que aconteceu"></textarea></label>
+      <div class="modal-foot"><button class="btn ghost" data-no>Cancelar</button><button class="btn danger" data-yes disabled>Enviar denúncia</button></div>`,
+    onMount(md, close) {
+      md.addEventListener("change", e => { if (e.target.name === "rk") { kind = e.target.value; $$(".radio-card", md).forEach(r => r.classList.toggle("on", r.querySelector("input").checked)); md.querySelector("[data-yes]").disabled = false; } });
+      md.querySelector("[data-no]").onclick = close;
+      md.querySelector("[data-yes]").onclick = async () => {
+        const r = await emit("report", { channelId: cid, id, kind, note: md.querySelector("[data-note]").value });
+        if (r.error) { toast(r.error, "error"); return; }
+        close(); toast("Denúncia enviada. Obrigado por ajudar a manter a Auryx segura.", "ok", 5000);
+      };
+    }
+  });
+}
 function messageMenu(id, at) {
   const m = findMsg(id);
   if (!m || m.pending || m.sys) return;
@@ -6646,6 +6723,7 @@ function messageMenu(id, at) {
     mine && { label: "Editar mensagem", icon: "edit", run: () => startEdit(id) },
     { label: "Copiar texto", icon: "copy", run: () => navigator.clipboard.writeText(m.t).then(() => toast("Texto copiado.", "ok")).catch(() => {}) },
     canPinHere() && { label: pinnedHere(id) ? "Desafixar mensagem" : "Fixar mensagem", icon: "pin", run: () => pinMsg(id, !pinnedHere(id)) },
+    !mine && !(chan() || {}).ticket && { label: "Denunciar mensagem", icon: "flag", run: () => reportModal(id) },
     (mine || canDo(s, "messages")) && "-",
     (mine || canDo(s, "messages")) && { label: "Apagar mensagem", icon: "trash", danger: true, run: e => deleteMsg(id, e && e.shiftKey) }
   ]);
@@ -6697,6 +6775,16 @@ const ACTIONS = {
   "plan-cycle": a => { S.cycle = a.dataset.c; renderPremium(); },
   "open-ticket": a => openTicket(a.dataset.id),
   "admin-tab": a => { S.adminTab = a.dataset.tab; renderAdmin(true); },
+  "admin-rep-tab": a => { S.repTab = a.dataset.tab; renderAdmin(true); },
+  "admin-rep": async a => {
+    const del = a.dataset.do === "delete";
+    if (del && !(await confirmBox({ title: "Apagar a mensagem denunciada?", html: "Ela some para todo mundo na conversa. A decisão fica registrada no Histórico com o seu nome.", ok: "Apagar" }))) return;
+    a.disabled = true;
+    const r = await emit("admin:report:decide", { id: a.dataset.id, action: a.dataset.do });
+    if (r.error) { toast(r.error, "error"); a.disabled = false; return; }
+    toast(del ? "Mensagem apagada e denúncia resolvida." : "Denúncia marcada como sem problema.", "ok");
+    renderAdmin(true);
+  },
   "audit-a": a => { S.auditA = a.dataset.a; renderAdmin(true); },
   "admin-mod-set": async a => {
     const name = a.dataset.name;

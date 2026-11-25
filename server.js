@@ -128,6 +128,7 @@ async function loadDb() {
     save();
   }
   db.audit = db.audit || [];
+  db.reports = db.reports && typeof db.reports === "object" ? db.reports : {};
   db.admins = Array.isArray(db.admins) ? db.admins : [];
   db.mods = Array.isArray(db.mods) ? db.mods : [];   // Moderadores: cargo básico (backups), nomeado pelo ADM Supremo
   db.migrations = Array.isArray(db.migrations) ? db.migrations : [];
@@ -387,13 +388,93 @@ async function flush() {
   if (saving) { saveTimer = setTimeout(flush, 400); return; }
   if (!dirty) return;
   saving = true; dirty = false;
+  const t0 = Date.now();
   try {
     await writeDb();
+    health.lastSave = Date.now(); health.saveMs = health.lastSave - t0; health.saveFails = 0;
   } catch (e) {
     console.error("Falha ao salvar:", e.message);
+    health.saveFails++; health.saveErr = String(e.message || e).slice(0, 200); health.saveErrAt = Date.now();
     dirty = true;
     if (!saveTimer) saveTimer = setTimeout(flush, 3000);
   } finally { saving = false; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Monitoramento: banco, gravação, lentidão, memória, erros e alertas  */
+/* (o painel ADM mostra tudo; o dono recebe notificação quando algo    */
+/* fica ruim, antes de afetar muita gente)                             */
+/* ------------------------------------------------------------------ */
+const { monitorEventLoopDelay } = require("node:perf_hooks");
+const health = { lastSave: 0, saveMs: 0, saveFails: 0, saveErr: "", saveErrAt: 0, dbOk: true, dbMs: 0, dbErr: "", dbFails: 0, dbAt: 0,
+  loopP99: 0, loopMean: 0, httpMs: [], errors: [], alerts: {} };
+const loopMon = monitorEventLoopDelay({ resolution: 20 });
+loopMon.enable();
+// erros registrados (console.error): guarda os 40 últimos para o painel
+{
+  const orig = console.error.bind(console);
+  console.error = (...a) => {
+    orig(...a);
+    try {
+      const text = a.map(x => (x instanceof Error ? x.message : typeof x === "string" ? x : JSON.stringify(x))).join(" ").slice(0, 300);
+      health.errors.push({ at: Date.now(), text });
+      if (health.errors.length > 40) health.errors.shift();
+    } catch {}
+  };
+}
+const MEM_LIMIT = (Number(process.env.MEM_LIMIT_MB) || 512) * 1048576;
+function healthView() {
+  const now = Date.now(), ms = health.httpMs.slice().sort((a, b) => a - b);
+  const p = q => (ms.length ? ms[Math.min(ms.length - 1, Math.floor(ms.length * q))] : 0);
+  return {
+    db: { ok: health.dbOk, ms: health.dbMs, err: health.dbErr, at: health.dbAt, kind: pg ? "PostgreSQL" : "arquivo", msgTable: msgDb },
+    save: { last: health.lastSave, ms: health.saveMs, fails: health.saveFails, err: health.saveErr, errAt: health.saveErrAt },
+    loop: { p99: health.loopP99, mean: health.loopMean },
+    http: { n: ms.length, p50: p(0.5), p95: p(0.95) },
+    mem: { rss: process.memoryUsage().rss, heap: process.memoryUsage().heapUsed, limit: MEM_LIMIT },
+    errorsHour: health.errors.filter(e => e.at > now - 3600e3).length,
+    errors: health.errors.slice(-15).reverse(),
+    alerts: Object.entries(health.alerts).filter(([, a]) => a.active).map(([k, a]) => ({ key: k, text: a.text, since: a.since }))
+  };
+}
+// alerta: avisa o dono (notificação) quando começa e quando volta ao normal; no máximo 1 aviso a cada 30 min por problema
+function alertSet(key, bad, text) {
+  const a = health.alerts[key] || (health.alerts[key] = { active: false, since: 0, sent: 0, text: "" });
+  const owner = db.users[byName.get(OWNER)];
+  if (bad) {
+    a.text = text;
+    if (!a.active) { a.active = true; a.since = Date.now(); }
+    if (Date.now() - a.sent > 30 * 60e3) {
+      a.sent = Date.now();
+      console.warn("[alerta]", text);
+      if (owner) pushTo(owner.id, { title: "⚠️ Auryx: atenção no servidor", body: text.slice(0, 180), url: "/?abrir=admin", tag: "alert:" + key });
+      io.to("admins").emit("admin:alert", { key, text });
+    }
+  } else if (a.active) {
+    a.active = false;
+    console.warn("[alerta resolvido]", key);
+    if (owner && a.sent) pushTo(owner.id, { title: "✅ Auryx: voltou ao normal", body: a.text.slice(0, 160), url: "/?abrir=admin", tag: "alert:" + key });
+  }
+}
+async function healthTick() {
+  // banco: um SELECT 1 com tempo medido
+  if (pg) {
+    const t0 = Date.now();
+    try { await pg.query("SELECT 1"); health.dbOk = true; health.dbMs = Date.now() - t0; health.dbErr = ""; health.dbFails = 0; }
+    catch (e) { health.dbOk = false; health.dbErr = String(e.message || e).slice(0, 200); health.dbFails++; }
+    health.dbAt = Date.now();
+  }
+  // lentidão do servidor (atraso do event loop) no último minuto
+  health.loopP99 = Math.round(loopMon.percentile(99) / 1e6); health.loopMean = Math.round(loopMon.mean / 1e6);
+  loopMon.reset();
+  const rss = process.memoryUsage().rss;
+  alertSet("db", health.dbFails >= 2, `O banco de dados não está respondendo: ${health.dbErr}`);
+  alertSet("save", health.saveFails >= 3, `As gravações no banco estão falhando (${health.saveFails} seguidas): ${health.saveErr}`);
+  alertSet("mem", rss > MEM_LIMIT * 0.85, `Memória alta: ${Math.round(rss / 1048576)} MB de ${Math.round(MEM_LIMIT / 1048576)} MB.`);
+  alertSet("slow", health.loopP99 > 500, `O servidor está lento (atrasos de até ${health.loopP99} ms).`);
+  const errs = health.errors.filter(e => e.at > Date.now() - 10 * 60e3).length;
+  alertSet("errors", errs >= 30, `${errs} erros nos últimos 10 minutos. Veja o Painel ADM › Visão geral.`);
+  if (storageCache && storageCache.limit) alertSet("disk", storageCache.total > storageCache.limit * 0.85, `O banco está quase cheio: ${(storageCache.total / 1048576).toFixed(0)} MB de ${(storageCache.limit / 1048576).toFixed(0)} MB.`);
 }
 
 /* ------------------------------------------------------------------ */
@@ -576,7 +657,8 @@ async function serveStatic(req, res, pathname) {
     if (zip) zlib.brotliCompress(raw, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: raw.length } }, (e, b) => { if (!e && b.length < (gz ? gz.length : raw.length)) entry.br = b; });
   }
   const headers = {
-    "content-type": entry.type, "cache-control": "no-cache", etag: entry.etag,
+    // ícones e bibliotecas quase nunca mudam: o navegador guarda por 1 dia sem perguntar de novo
+    "content-type": entry.type, "cache-control": /^\/(icons|vendor)\//.test(pathname) ? "public, max-age=86400" : "no-cache", etag: entry.etag,
     "x-content-type-options": "nosniff", "referrer-policy": "strict-origin-when-cross-origin", vary: "accept-encoding",
     // ninguém pode embutir a Auryx num site falso (proteção contra clickjacking)
     "x-frame-options": "SAMEORIGIN", "content-security-policy": "frame-ancestors 'self'; base-uri 'self'; object-src 'none'",
@@ -1092,6 +1174,50 @@ async function serveBackup(req, res, id) {
   res.end(buf);
 }
 
+/* ---------- "Baixar meus dados" (LGPD): tudo o que a conta tem, em JSON ---------- */
+// Só as mensagens que a PRÓPRIA pessoa escreveu (as dos outros são dados dos outros). Sem senha, sem códigos.
+const exportClock = new Map();             // userId -> horários dos pedidos (no máximo 3 por hora)
+async function handleExport(req, res) {
+  const a = userFromBearer(req);
+  if (!a) return sendJson(res, 401, { error: "Entre novamente." });
+  const u = a.user, uid = u.id, now = Date.now();
+  const clock = (exportClock.get(uid) || []).filter(t => t > now - 3600e3);
+  if (clock.length >= 3) return sendJson(res, 429, { error: "Você já baixou seus dados 3 vezes na última hora. Tente mais tarde." });
+  clock.push(now); exportClock.set(uid, clock);
+  const name = id => (db.users[id] || {}).username || "conta apagada";
+  const iso = t => (t ? new Date(t).toISOString() : null);
+  const where = cid => {
+    const sid = chanIndex.get(cid), s = sid && db.servers[sid];
+    if (s) { const c = s.channels.find(x => x.id === cid); return `${s.name} › ${c ? (c.type === "voice" ? "🔊 " : "#") + c.name : "?"}`; }
+    const d = db.dms && db.dms[cid];
+    if (d) return d.group ? `Grupo ${d.name || ""}`.trim() : `Conversa com ${d.members.filter(x => x !== uid).map(name).join(", ")}`;
+    return cid.startsWith("t.") ? "Atendimento de pagamento" : "Conversa apagada";
+  };
+  let mine = [];
+  if (msgDb) {
+    await flushMsgs();
+    const r = await pg.query("SELECT channel, data FROM nexora_msgs WHERE data->>'a' = $1 AND NOT (data ? 'sys') ORDER BY ts LIMIT 200000", [uid]);
+    mine = r.rows.map(x => ({ c: x.channel, m: x.data }));
+  } else for (const [c, l] of Object.entries(db.messages)) for (const m of l) if (m.a === uid && !m.sys) mine.push({ c, m });
+  const out = {
+    sobre: `Dados da sua conta na ${APP_NAME}, gerados em ${new Date(now).toLocaleString("pt-BR")}. Inclui só as mensagens que você escreveu.`,
+    conta: { id: uid, usuario: u.username, email: u.email || "", emailConfirmado: !!u.emailVerified, criadaEm: iso(u.created), sobreMim: u.about || "", pronomes: u.pron || "",
+      status: u.status || "online", cor: u.color, steam: u.steam || "", plano: planOf(u) ? { plano: PLANS[u.plan.tier].name, ate: iso(u.plan.until) } : null,
+      historicoDePlanos: (u.planLog || []).map(x => ({ em: iso(x.at), plano: (PLANS[x.tier] || {}).name || x.tier, dias: x.days })), nomesAnteriores: (u.nameLog || []).map(x => ({ ate: iso(x.at), nome: x.from })) },
+    aparelhosConectados: Object.values(db.sessions).filter(s => s.userId === uid).map(s => ({ aparelho: s.dev || "Aparelho", entrou: iso(s.created), ultimoUso: iso(s.last || s.created) })),
+    amigos: Object.entries(friendsOf(u)).map(([id, st]) => ({ usuario: name(id), situacao: { friend: "amigos", in: "pedido recebido", out: "pedido enviado" }[st] || st })),
+    servidores: userServers(uid).map(s => ({ nome: s.name, dono: s.ownerId === uid, membros: s.members.length })),
+    pedidos: Object.values(db.orders).filter(o => o.uid === uid).map(o => ({ plano: PLANS[o.tier].name, valor: brl(o.amount), situacao: o.status, criado: iso(o.created) })),
+    conversaComAury: ((db.ai && db.ai[uid] && db.ai[uid].msgs) || []).map(m => ({ quem: m.r === "u" ? "você" : "Aury", texto: m.t, em: iso(m.ts) })),
+    arquivosEnviados: Object.entries(db.files).filter(([, f]) => f.o === uid).map(([id, f]) => ({ nome: f.n, tipo: f.t, tamanho: f.s, enviadoEm: iso(f.c), endereco: fileUrl(id, f.n), privado: !!f.p })),
+    mensagens: mine.map(({ c, m }) => ({ onde: where(c), em: iso(m.ts), texto: m.t || "", ...(m.e ? { editadaEm: iso(m.e) } : {}), ...(m.f ? { anexos: m.f.map(f => f.n) } : {}) }))
+  };
+  const body = Buffer.from(JSON.stringify(out, null, 2));
+  const file = `auryx-meus-dados-${u.username.replace(/[^\w.-]/g, "_")}-${new Date(now).toISOString().slice(0, 10)}.json`;
+  res.writeHead(200, { "content-type": "application/json; charset=utf-8", "content-length": body.length, "content-disposition": `attachment; filename="${file}"`, "cache-control": "no-store" });
+  res.end(body);
+}
+
 /* ---------- envio e download de arquivos ---------- */
 const uploadQuota = new Map(); // userId -> { bytes, n, reset }
 const INLINE_TYPES = /^(image\/(png|jpeg|gif|webp|avif)|video\/(mp4|webm|ogg)|audio\/(mpeg|ogg|wav|webm|mp4|aac|x-m4a))$/;
@@ -1179,6 +1305,9 @@ async function serveFile(req, res, rawPath) {
 }
 
 const server = http.createServer(async (req, res) => {
+  // tempo de resposta (as 500 últimas requisições) para o painel
+  const t0 = Date.now();
+  res.on("finish", () => { health.httpMs.push(Date.now() - t0); if (health.httpMs.length > 500) health.httpMs.shift(); });
   let u;
   try { u = new URL(req.url, "http://localhost"); } catch { res.writeHead(400); res.end(); return; }
   let pathname;
@@ -1191,6 +1320,7 @@ const server = http.createServer(async (req, res) => {
     const acct = /^\/api\/account\/(verify|resend|cookie|forgot|reset)$/.exec(pathname);
     if (req.method === "POST" && acct) return await handleAccountApi(req, res, acct[1]);
     if (pathname.startsWith("/f/") && (req.method === "GET" || req.method === "HEAD")) return await serveFile(req, res, u.pathname);
+    if (req.method === "GET" && pathname === "/api/account/export") return await handleExport(req, res);
     const bk = req.method === "GET" && pathname.match(/^\/api\/admin\/backup\/(nexora-\d+-\w+)$/);
     if (bk) return await serveBackup(req, res, bk[1]);
     if (pathname.startsWith("/api/")) return sendJson(res, 404, { error: "Rota inexistente." });
@@ -1663,6 +1793,7 @@ async function aiTicketRun(o) {
 
 /* --- bate-papo exclusivo dos assinantes --- */
 const aiAbort = new Map();                 // userId -> AbortController da resposta em andamento ("Parar")
+const REPORT_KINDS = { spam: "Spam ou propaganda", abuse: "Assédio ou ofensa", nsfw: "Conteúdo impróprio", scam: "Golpe ou fraude", other: "Outro motivo" };
 async function aiChatRun(uid, replyId, signal) {
   const u = db.users[uid], st = aiStore(uid), tier = aiTier(u);
   let chars = 0;
@@ -1998,6 +2129,62 @@ io.on("connection", socket => {
       found = (db.messages[t.c.id] || []).filter(m => !m.sys && (!text || String(m.t || "").toLowerCase().includes(low)) && (!author || m.a === author)).reverse().slice(0, 50);
     }
     return { results: found };
+  });
+
+  /* ---------- denúncias: qualquer pessoa denuncia uma mensagem; a equipe ADM decide ---------- */
+  const reportLimit = mk(8, 10 * 60e3);
+  on("report", async ({ channelId, id, kind, note }) => {
+    const t = await findMsg(channelId, id);
+    if (t.m.a === uid) fail("Você não pode denunciar a sua própria mensagem.");
+    if (t.order) fail("Fale com a equipe aqui mesmo no atendimento.");
+    if (!REPORT_KINDS[kind]) fail("Escolha o motivo da denúncia.");
+    db.reports = db.reports || {};
+    if (Object.values(db.reports).some(r => r.by === uid && r.msg.id === t.m.id && r.status === "open")) fail("Você já denunciou essa mensagem. A equipe vai analisar.");
+    if (!reportLimit()) fail("Muitas denúncias seguidas. Espere alguns minutos.");
+    // guarda uma cópia da mensagem: se o autor apagar, a equipe ainda vê o que foi denunciado
+    const r = { id: newId(), at: Date.now(), by: uid, channel: t.c.id, server: t.s ? t.s.id : null, kind, note: str(note, 300), status: "open",
+      msg: { id: t.m.id, a: t.m.a, t: String(t.m.t || "").slice(0, 2000), ts: t.m.ts, ...(t.m.f ? { f: t.m.f.map(f => ({ n: f.n, t: f.t, id: f.id })) } : {}) } };
+    db.reports[r.id] = r;
+    const all = Object.values(db.reports);
+    if (all.length > 3000) for (const x of all.filter(x => x.status !== "open").sort((a, b) => a.at - b.at).slice(0, all.length - 3000)) delete db.reports[x.id];
+    save();
+    io.to("admins").emit("report:new", { id: r.id });
+    return { ok: true };
+  });
+  const reportView = r => {
+    const s = r.server && db.servers[r.server], c = s && s.channels.find(x => x.id === r.channel), d = db.dms && db.dms[r.channel];
+    const where = s ? `${s.name} › #${c ? c.name : "canal apagado"}` : d ? (d.group ? `Grupo ${d.name || ""}`.trim() : "Conversa privada") : "Conversa apagada";
+    return { ...r, kindName: REPORT_KINDS[r.kind] || r.kind, where, reporter: db.users[r.by] ? pubUser(db.users[r.by]) : null, author: db.users[r.msg.a] ? pubUser(db.users[r.msg.a]) : null,
+      authorBanned: !!(db.users[r.msg.a] && db.users[r.msg.a].banned),
+      against: Object.values(db.reports).filter(x => x.msg.a === r.msg.a).length,           // muitas denúncias contra a mesma pessoa = sinal de alerta
+      decidedByName: r.decidedBy ? (db.users[r.decidedBy] || {}).username || "?" : "" };
+  };
+  on("admin:reports", ({ status }) => {
+    requireAdmin();
+    const want = ["open", "done", "all"].includes(status) ? status : "open";
+    const list = Object.values(db.reports || {}).filter(r => want === "all" || (want === "open" ? r.status === "open" : r.status !== "open"));
+    return { reports: list.sort((a, b) => b.at - a.at).slice(0, 200).map(reportView), open: Object.values(db.reports || {}).filter(r => r.status === "open").length };
+  });
+  on("admin:report:decide", ({ id, action, note }) => {
+    requireAdmin();
+    const r = db.reports && db.reports[id];
+    if (!r) fail("Denúncia não encontrada.");
+    if (r.status !== "open") fail("Essa denúncia já foi resolvida.");
+    if (action !== "delete" && action !== "dismiss") fail("Ação inválida.");
+    if (action === "delete") {
+      // apaga a mensagem denunciada (da memória e da tabela) e avisa quem está na conversa
+      const list = db.messages[r.channel] || [], i = list.findIndex(m => m.id === r.msg.id);
+      if (i >= 0) list.splice(i, 1);
+      msgDel(r.channel, r.msg.id);
+      const d = db.dms && db.dms[r.channel];
+      const rooms = r.server && db.servers[r.server] ? "s:" + r.server : d ? d.members.map(x => "u:" + x) : null;
+      if (rooms) io.to(rooms).emit("msg:delete", { channelId: r.channel, id: r.msg.id });
+    }
+    r.status = action === "delete" ? "removed" : "dismissed";
+    r.decidedBy = uid; r.decidedAt = Date.now(); r.decision = str(note, 300);
+    audit(action === "delete" ? "report:remove" : "report:dismiss", r.msg.a, { reason: (REPORT_KINDS[r.kind] || r.kind) + (r.decision ? " — " + r.decision : "") });
+    save();
+    return { report: reportView(r) };
   });
 
   socket.on("typing", data => {
@@ -2730,6 +2917,7 @@ io.on("connection", socket => {
       voiceNow: voice.size, rooms: new Set([...voice.values()].map(v => v.cid)).size,
       msgs, msgsDay, subs, pending: orders.filter(o => o.status === "pending" || o.status === "review").length,
       revenueMonth: paid.filter(o => (o.decided || o.updated) >= monthStart.getTime()).reduce((a, o) => a + o.amount, 0), revenueTotal: paid.reduce((a, o) => a + o.amount, 0), paidCount: paid.length,
+      health: healthView(), reportsOpen: Object.values(db.reports || {}).filter(x => x.status === "open").length,
       ai: AI.configured(), aiName: AI.provider(), aiStatus: AI.status(), mail: MAIL_ON, turn: !!process.env.TURN_URLS, db: pg ? "PostgreSQL" : "arquivo", lastBackup: bl[0] ? bl[0].at : 0,
       uptime: Math.round(process.uptime()), mem: Math.round(process.memoryUsage().rss / 1048576),
       // tempo real
@@ -3298,6 +3486,8 @@ loadDb().then(async () => {
   // mensagens em tabela própria (migração única, com backup antes e conferência depois)
   try { await msgInit(); } catch (e) { console.error("Mensagens: tabela indisponível, seguindo no formato antigo:", e.message); }
   setInterval(purgeSessions, 3600e3).unref();
+  setTimeout(() => healthTick().catch(() => {}), Number(process.env.HEALTH_FIRST_MS) || 15e3).unref();
+  setInterval(() => healthTick().catch(() => {}), Number(process.env.HEALTH_EVERY_MS) || 60e3).unref();
   // cópia de segurança antes de mexer em tudo (só na primeira vez)
   if (!db.migrations.includes(NEXOS_MIGRATION)) { try { await backupNow("antes da atualização Nexos"); } catch (e) { console.error("Backup antes da migração:", e.message); } }
   try { runMigrations(); } catch (e) { console.error("Migração falhou:", e); }
