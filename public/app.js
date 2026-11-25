@@ -231,7 +231,7 @@ function nameHTML(u) {
   // assinantes: nome na cor do perfil (sem efeito) para se destacar no chat e na lista
   return `<span class="nm${u.fx ? " fx-" + esc(u.fx) : ""}${u.plan && !u.fx ? " nm-vip" : ""}" style="--n1:${esc(t[0])};--n2:${esc(t[1])}">${esc(u.username)}</span>`;
 }
-const staffTag = u => (u.staff === "owner" ? `<span class="staff-tag supreme" data-tip="Fundador e ADM Supremo da Auryx Nexos">ADM</span>` : u.staff === "adm" ? `<span class="staff-tag" data-tip="Equipe da Auryx Nexos">ADM</span>` : "");
+const staffTag = u => (u.staff === "owner" ? `<span class="staff-tag supreme" data-tip="Fundador e ADM Supremo da Auryx Nexos">ADM</span>` : u.staff === "adm" ? `<span class="staff-tag" data-tip="Equipe da Auryx Nexos">ADM</span>` : u.staff === "mod" ? `<span class="staff-tag mod" data-tip="Moderador da Auryx Nexos">MOD</span>` : "");
 const csText = u => (u.cs ? `${u.cs.e ? esc(u.cs.e) + " " : ""}${esc(u.cs.t || "")}` : "");
 function badges(u) {
   const b = [];
@@ -393,7 +393,7 @@ function renderRail() {
   const premView = S.view === "premium" || (S.view === "chat" && isTicket(S.channelId) && !(S.me && S.me.admin));
   $('.rail-item[data-act="premium"]').classList.toggle("on", premView);
   const admBtn = $('.rail-item[data-act="admin"]');
-  admBtn.classList.toggle("hidden", !(S.me && S.me.admin));
+  admBtn.classList.toggle("hidden", !(S.me && (S.me.admin || S.me.mod)));
   admBtn.classList.toggle("on", S.view === "admin" || (S.view === "chat" && isTicket(S.channelId) && !!(S.me && S.me.admin)));
   let tkPings = 0;
   for (const [cid, n] of S.mentions) if (isTicket(cid)) tkPings += n;
@@ -1059,7 +1059,7 @@ function openTicket(orderId) {
 
 /* --- painel ADM --- */
 async function goAdmin() {
-  if (!S.me || !S.me.admin) { toast("Apenas ADMs.", "warn"); return; }
+  if (!S.me || !(S.me.admin || S.me.mod)) { toast("Apenas a equipe.", "warn"); return; }
   setView("admin");
   S.serverId = null; S.channelId = null;
   renderAll(); updateMini();
@@ -1067,13 +1067,14 @@ async function goAdmin() {
 }
 async function renderAdmin(soft) {
   const root = $("#adminView");
-  if (!root || !S.me.admin) return;
-  const sup = !!S.me.supreme;
-  if (!sup && (S.adminTab === "system" || S.adminTab === "backup")) S.adminTab = "dash";
+  if (!root || !(S.me.admin || S.me.mod)) return;
+  const sup = !!S.me.supreme, modOnly = !S.me.admin;
+  if (modOnly && S.adminTab !== "team") S.adminTab = "backup";
+  if (!sup && !modOnly && (S.adminTab === "system" || S.adminTab === "backup")) S.adminTab = "dash";
   const tab = S.adminTab;
   clearInterval(S.admLive); S.admLive = null;
-  const tabs = [["dash", "Visão geral"], ["orders", "Solicitações"], ["users", "Usuários e planos"], ["servers", "Servidores"], ["team", "Equipe"], ["games", "Jogos"], sup && ["system", "⚙️ Sistema"], sup && ["backup", "Backups"], ["audit", "Histórico"]].filter(Boolean);
-  const head = `<div class="page admin"><div class="hero adm-hero"><h1>${ic("shield", "lg")} Painel ADM ${sup ? `<span class="supreme-tag">ADM Supremo</span>` : ""}</h1><p>${sup ? "Acesso total: equipe, sistema, versão do app, desconexão geral e backups." : "Confira no extrato do banco se o Pix caiu antes de aprovar. Toda decisão fica registrada com o seu nome."}</p><button class="btn adm-announce" data-act="admin-broadcast">📢 Aviso geral</button></div><div class="tabs-row">${tabs.map(([k, n]) => `<button class="tab${k === tab ? " on" : ""}" data-act="admin-tab" data-tab="${k}">${n}</button>`).join("")}</div><div class="adm-body"></div></div>`;
+  const tabs = [["dash", "Visão geral"], ["orders", "Solicitações"], ["users", "Usuários e planos"], ["servers", "Servidores"], ["team", "Equipe"], ["games", "Jogos"], sup && ["system", "⚙️ Sistema"], sup && ["backup", "Backups"], ["audit", "Histórico"]].filter(Boolean).filter(t => !modOnly || t[0] === "backup" || t[0] === "team");
+  const head = `<div class="page admin"><div class="hero adm-hero"><h1>${ic("shield", "lg")} ${modOnly ? "Painel do Moderador" : "Painel ADM"} ${sup ? `<span class="supreme-tag">ADM Supremo</span>` : ""}</h1><p>${modOnly ? "Você é <b>Moderador</b>: cuida dos backups do banco. Mais funções chegam com o tempo." : sup ? "Acesso total: equipe, sistema, versão do app, desconexão geral e backups." : "Confira no extrato do banco se o Pix caiu antes de aprovar. Toda decisão fica registrada com o seu nome."}</p>${modOnly ? "" : `<button class="btn adm-announce" data-act="admin-broadcast">📢 Aviso geral</button>`}</div><div class="tabs-row">${tabs.map(([k, n]) => `<button class="tab${k === tab ? " on" : ""}" data-act="admin-tab" data-tab="${k}">${n}</button>`).join("")}</div><div class="adm-body"></div></div>`;
   if (!soft || !root.querySelector(".adm-body")) root.innerHTML = head;
   else root.querySelectorAll(".tabs-row .tab").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
   const body = root.querySelector(".adm-body");
@@ -1118,7 +1119,10 @@ async function renderAdmin(soft) {
     const r = await emit("admin:admins", {});
     if (r.error) { body.innerHTML = esc(r.error); return; }
     body.innerHTML = `<p class="hint" style="margin-top:0">${sup ? "Você é o <b>ADM Supremo</b>: só você nomeia ou tira ADMs, mexe no Sistema, baixa backups e desconecta todo mundo. Para nomear alguém, abra <b>Usuários e planos</b> e clique em <b>Tornar ADM</b>." : "A equipe que modera a Auryx Nexos. Só o ADM Supremo nomeia ou tira ADMs."}</p>` +
-      r.admins.map(a => `<div class="adm-user">${avatar(a, 36)}<div class="who"><b>${esc(a.username)} ${a.supreme ? `<span class="supreme-tag">ADM Supremo</span>` : `<span class="ost st-rev">ADM</span>`}</b><small>${a.online ? "🟢 online agora" : "offline"}${a.env ? " · definido no Render (ADMIN_USERS)" : ""}</small></div><div class="ao-acts">${sup && !a.supreme && !a.env ? `<button class="btn sm danger" data-act="admin-adm-set" data-uid="${a.id}" data-on="0" data-name="${esc(a.username)}">Tirar ADM</button>` : ""}</div></div>`).join("");
+      r.admins.map(a => `<div class="adm-user">${avatar(a, 36)}<div class="who"><b>${esc(a.username)} ${a.supreme ? `<span class="supreme-tag">ADM Supremo</span>` : `<span class="ost st-rev">ADM</span>`}</b><small>${a.online ? "🟢 online agora" : "offline"}${a.env ? " · definido no Render (ADMIN_USERS)" : ""}</small></div><div class="ao-acts">${sup && !a.supreme && !a.env ? `<button class="btn sm danger" data-act="admin-adm-set" data-uid="${a.id}" data-on="0" data-name="${esc(a.username)}">Tirar ADM</button>` : ""}</div></div>`).join("") +
+      `<h3 style="margin:18px 0 8px">Moderadores</h3><p class="hint" style="margin-top:0">Cargo básico: fazem backup do banco (não baixam — o arquivo tem os dados de todo mundo) e ganham a etiqueta <span class="staff-tag mod">MOD</span>.</p>` +
+      (sup ? `<form class="add-box" data-modadd style="max-width:340px;margin-bottom:10px"><input placeholder="Nome de usuário"><button class="btn primary">Tornar MOD</button></form>` : "") +
+      ((r.mods || []).length ? r.mods.map(a => `<div class="adm-user">${avatar(a, 36)}<div class="who"><b>${esc(a.username)} <span class="staff-tag mod">MOD</span></b><small>${a.online ? "🟢 online agora" : "offline"}</small></div><div class="ao-acts">${sup ? `<button class="btn sm danger" data-act="admin-mod-set" data-uid="${a.id}" data-name="${esc(a.username)}">Tirar MOD</button>` : ""}</div></div>`).join("") : `<small class="hint">Nenhum Moderador ainda.</small>`);
   } else if (tab === "system") {
     const r = await emit("admin:settings", {});
     if (r.error) { body.innerHTML = esc(r.error); return; }
@@ -1186,12 +1190,12 @@ async function renderAdmin(soft) {
     if (r.error) { body.innerHTML = esc(r.error); return; }
     const mail = r.mail ? (r.mail.ok ? `<span class="ost st-ok">enviado</span> em ${new Date(r.mail.at).toLocaleString("pt-BR")}` : `<span class="ost st-bad">não enviado</span> — ${esc(r.mail.error || "")}`) : "ainda não enviado";
     body.innerHTML = `<div class="adm-games-head"><p>Uma cópia completa (contas, servidores, mensagens e pedidos) é feita <b>todo dia</b> automaticamente. Ficam guardadas as <b>${r.keep} últimas</b>. Baixe e guarde no seu PC de vez em quando — se o banco do Render sumir, é com ela que tudo volta. <small style="display:block;margin-top:6px;color:var(--muted)">Cópia por e-mail para o dono: ${mail}. Imagens e vídeos enviados não entram no backup.</small></p><button class="btn primary" data-act="admin-backup-now" ${r.running ? "disabled" : ""}>${ic("download", "sm")}Fazer backup agora</button></div>` +
-      (r.list.length ? r.list.map(b => `<div class="adm-user"><span class="ag-ico">${ic("receipt")}</span><div class="who"><b>${new Date(b.at).toLocaleString("pt-BR")}</b><small>${b.reason === "manual" ? "Feito na mão" : "Automático"} · ${fmtSize(b.size)}</small></div><div class="ao-acts"><button class="btn sm" data-act="admin-backup-dl" data-id="${esc(b.id)}">${ic("download", "sm")}Baixar</button></div></div>`).join("")
+      (r.list.length ? r.list.map(b => `<div class="adm-user"><span class="ag-ico">${ic("receipt")}</span><div class="who"><b>${new Date(b.at).toLocaleString("pt-BR")}</b><small>${b.reason === "manual" ? "Feito na mão" : "Automático"} · ${fmtSize(b.size)}</small></div><div class="ao-acts">${sup ? `<button class="btn sm" data-act="admin-backup-dl" data-id="${esc(b.id)}">${ic("download", "sm")}Baixar</button>` : ""}</div></div>`).join("")
         : `<div class="empty">${ic("receipt")}<p>Nenhum backup ainda. O primeiro é feito alguns minutos depois que o servidor liga — ou clique em <b>Fazer backup agora</b>.</p></div>`);
   } else {
     const r = await emit("admin:audit", { q: S.auditQ || "", action: S.auditA || "" });
     if (r.error) { body.innerHTML = esc(r.error); return; }
-    const NAMES = { "order:approve": "Aprovou pedido", "order:reject": "Recusou pedido", "order:review": "Pôs em análise", "plan:grant": "Deu plano", "plan:revoke": "Revogou plano", "game:save": "Salvou jogo", "game:delete": "Removeu jogo", "server:block": "Bloqueou servidor de", "server:unblock": "Desbloqueou servidor de", "server:delete": "Excluiu servidor de", "user:ban": "Suspendeu", "user:unban": "Reativou", "broadcast": "Enviou aviso geral", "backup:now": "Fez backup do banco", "user:setpass": "Trocou a senha de", "user:logout": "Desconectou de tudo", "user:verify": "Confirmou o e-mail de", "admin:add": "Tornou ADM", "admin:remove": "Tirou o ADM de", "settings": "Mudou o sistema", "logout:all": "Desconectou todo mundo", "announce:clear": "Tirou o aviso fixado", "migration": "Atualização automática" };
+    const NAMES = { "order:approve": "Aprovou pedido", "order:reject": "Recusou pedido", "order:review": "Pôs em análise", "plan:grant": "Deu plano", "plan:revoke": "Revogou plano", "game:save": "Salvou jogo", "game:delete": "Removeu jogo", "server:block": "Bloqueou servidor de", "server:unblock": "Desbloqueou servidor de", "server:delete": "Excluiu servidor de", "user:ban": "Suspendeu", "user:unban": "Reativou", "broadcast": "Enviou aviso geral", "backup:now": "Fez backup do banco", "user:setpass": "Trocou a senha de", "user:logout": "Desconectou de tudo", "user:verify": "Confirmou o e-mail de", "admin:add": "Tornou ADM", "mod:add": "Tornou Moderador", "mod:remove": "Tirou o MOD de", "admin:remove": "Tirou o ADM de", "settings": "Mudou o sistema", "logout:all": "Desconectou todo mundo", "announce:clear": "Tirou o aviso fixado", "migration": "Atualização automática" };
     const ACTS = [["", "Tudo"], ["order", "Pedidos"], ["plan", "Planos"], ["user", "Contas"], ["server", "Servidores"], ["admin", "Equipe"], ["settings", "Sistema"], ["broadcast", "Avisos"], ["game", "Jogos"]];
     body.innerHTML = `<div class="adm-games-head"><div class="chips">${ACTS.map(([k, n]) => `<button class="chip${(S.auditA || "") === k ? " on" : ""}" data-act="audit-a" data-a="${k}">${n}</button>`).join("")}</div><form class="add-box" data-asearch style="flex:1;max-width:340px"><input placeholder="Buscar por nome, motivo…" value="${esc(S.auditQ || "")}"><button class="btn primary">Buscar</button></form></div><small class="hint" style="display:block;margin:-4px 0 10px">${r.entries.length} de ${r.total} registros</small>` + (r.entries.length ? `<div class="audit">${r.entries.map(e => `<div class="au-row"><small>${new Date(e.at).toLocaleString("pt-BR")}</small><b>${esc(e.adminName)}</b><span>${esc(NAMES[e.action] || e.action)}</span><span>→ ${esc(e.targetName === "?" && e.details && e.details.game ? e.details.game : e.targetName)}</span><small>${esc([(e.details || {}).tier, e.details && e.details.days ? e.details.days + " dias" : "", e.details.amount ? fmtMoney(e.details.amount) : "", e.details.server ? "“" + e.details.server + "”" : "", e.details.reason].filter(Boolean).join(" · "))}</small></div>`).join("")}</div>` : `<div class="empty">${ic("shield")}<p>Nenhuma ação encontrada.</p></div>`);
   }
@@ -2656,14 +2660,15 @@ function connect() {
     schedule("members", "side", "home");
   });
   sock.on("me:update", ({ me }) => {
-    const wasAdmin = S.me && S.me.admin;
+    const wasAdmin = S.me && S.me.admin, wasMod = S.me && S.me.mod;
     S.me = { ...S.me, ...me };
     S.users.set(me.id, { ...S.users.get(me.id), ...me });
     applyAccent();
     applyLimits();
-    $(".rail-item.admin").classList.toggle("hidden", !S.me.admin);
+    $(".rail-item.admin").classList.toggle("hidden", !(S.me.admin || S.me.mod));
+    if (S.me.mod && !wasMod) toast("Agora você é Moderador da Auryx Nexos 🛡️", "ok", 5000);
+    if (!S.me.admin && !S.me.mod && S.view === "admin") goHome();
     if (S.me.admin && !wasAdmin) toast("Agora você faz parte da equipe ADM da Auryx Nexos 🛡️", "ok", 5000);
-    if (!S.me.admin && wasAdmin && S.view === "admin") goHome();
     schedule("user", "members", "side", "rail", "top", "home");
     if (S.view === "premium") renderPremium();
   });
@@ -6274,6 +6279,12 @@ const ACTIONS = {
   "open-ticket": a => openTicket(a.dataset.id),
   "admin-tab": a => { S.adminTab = a.dataset.tab; renderAdmin(true); },
   "audit-a": a => { S.auditA = a.dataset.a; renderAdmin(true); },
+  "admin-mod-set": async a => {
+    const name = a.dataset.name;
+    if (!(await confirmBox({ title: "Tirar MOD", html: `<b>${esc(name)}</b> deixa de ser Moderador na hora.`, ok: "Tirar MOD", danger: true }))) return;
+    const r = await emit("admin:mod:set", { userId: a.dataset.uid, on: false });
+    if (r.error) toast(r.error, "error"); else { toast(`${name} não é mais Moderador.`, "ok"); renderAdmin(true); }
+  },
   "admin-adm-set": async a => {
     const give = a.dataset.on === "1", name = a.dataset.name;
     if (!(await confirmBox({ title: give ? "Tornar ADM" : "Tirar ADM", html: give ? `<b>${esc(name)}</b> vai poder aprovar pagamentos, dar planos, suspender contas e bloquear servidores. Só você (ADM Supremo) mexe no Sistema e na equipe.` : `<b>${esc(name)}</b> deixa de ser ADM na hora.`, ok: give ? "Tornar ADM" : "Tirar ADM", danger: !give }))) return;
@@ -6492,6 +6503,8 @@ function wire() {
   document.addEventListener("submit", e => {
     const ss = e.target.closest("[data-ssearch]");
     if (ss) { e.preventDefault(); S.adminSrvQ = ss.querySelector("input").value.trim(); renderAdmin(true); return; }
+    const ma = e.target.closest("[data-modadd]");
+    if (ma) { e.preventDefault(); const n = ma.querySelector("input").value.trim(); if (!n) return; emit("admin:mod:set", { name: n, on: true }).then(r => { if (r.error) toast(r.error, "error"); else { toast(n + " agora é Moderador. 🛡️", "ok"); renderAdmin(true); } }); return; }
     const as = e.target.closest("[data-asearch]");
     if (as) { e.preventDefault(); S.auditQ = as.querySelector("input").value.trim(); renderAdmin(true); return; }
     const f = e.target.closest("[data-usearch]");

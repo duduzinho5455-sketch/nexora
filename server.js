@@ -87,6 +87,7 @@ async function loadDb() {
   }
   db.audit = db.audit || [];
   db.admins = Array.isArray(db.admins) ? db.admins : [];
+  db.mods = Array.isArray(db.mods) ? db.mods : [];   // Moderadores: cargo básico (backups), nomeado pelo ADM Supremo
   db.migrations = Array.isArray(db.migrations) ? db.migrations : [];
   db.settings = Object.assign({ regOpen: true, maintenance: "", pixKey: "", links: {}, minApp: null, announce: null }, db.settings || {});
   db.metrics = Array.isArray(db.metrics) ? db.metrics : [];
@@ -249,7 +250,7 @@ function pubUser(u) {
     cs: off || r < NEED.cs ? null : u.cs || null, fx: r >= NEED.fx ? u.fx || "" : "", pfx: r >= NEED.pfx ? u.pfx || "" : "",
     ring: u.ring && r >= (RINGS[u.ring] || 9) ? u.ring : "",
     aura: r >= NEED.accent && u.accent ? u.accent[0] : "",
-    staff: isOwnerUser(u) ? "owner" : isAdmin(u) ? "adm" : ""
+    staff: isOwnerUser(u) ? "owner" : isAdmin(u) ? "adm" : isMod(u) ? "mod" : ""
   };
 }
 /* amigos e mensagens privadas */
@@ -402,6 +403,7 @@ function refreshAdmins() {
 }
 const isOwnerUser = u => !!(u && String(u.username).toLowerCase() === OWNER);
 const isAdmin = u => !!(u && ADMIN_SET.has(String(u.username).toLowerCase()));
+const isMod = u => !!(u && !isAdmin(u) && (db.mods || []).includes(u.id));
 const EMAIL_RE = /^[^\s@<>()"',;:]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}$/;
 const byEmail = new Map();
 const maskEmail = e => { const [a, d] = String(e || "").split("@"); return a && d ? `${a.slice(0, 2)}${"•".repeat(Math.max(1, a.length - 2))}@${d}` : ""; };
@@ -494,7 +496,7 @@ function userFromCookie(req) {
   const sess = m ? db.sessions[tokenKey(m[1])] : null;
   return sess ? db.users[sess.userId] : null;
 }
-const meView = u => ({ ...pubUser(u), statusPref: u.status || "online", email: maskEmail(u.email), emailVerified: !!u.emailVerified, admin: isAdmin(u), supreme: isOwnerUser(u),
+const meView = u => ({ ...pubUser(u), statusPref: u.status || "online", email: maskEmail(u.email), emailVerified: !!u.emailVerified, admin: isAdmin(u), supreme: isOwnerUser(u), mod: isMod(u),
   planInfo: u.plan && planOf(u) ? { tier: u.plan.tier, until: u.plan.until } : null,
   accent: rankOf(u) >= NEED.accent && u.accent ? u.accent : null, accentSaved: u.accent || null, ringPref: u.ring || "",
   msgMax: MSG_MAX[rankOf(u)] });
@@ -1878,6 +1880,8 @@ io.on("connection", socket => {
   const requireAdmin = () => { const u = me(); if (!isAdmin(u)) fail("Apenas ADMs podem fazer isso."); return u; };
   // ações críticas: só o ADM Supremo (dono do app)
   const requireSupreme = () => { const u = me(); if (!isOwnerUser(u)) fail("Só o ADM Supremo pode fazer isso."); return u; };
+  // equipe básica: ADMs e Moderadores
+  const requireStaff = () => { const u = me(); if (!isAdmin(u) && !isMod(u)) fail("Apenas a equipe pode fazer isso."); return u; };
   const ticketMsg = (o, authorId, kind, text, files) => {
     const cid = "t." + o.id;
     const list = db.messages[cid] || (db.messages[cid] = []);
@@ -2254,12 +2258,12 @@ io.on("connection", socket => {
     return { ok: true };
   });
   on("admin:backups", async () => {
-    requireSupreme();
+    if (!isOwnerUser(me()) && !isMod(me())) fail("Só o ADM Supremo e os Moderadores veem os backups.");
     const list = await backupList();
     return { list, running: backupState.running, mail: backupState.lastMail, every: BACKUP_EVERY, keep: BACKUP_KEEP };
   });
   on("admin:backup:now", async () => {
-    requireSupreme();
+    if (!isOwnerUser(me()) && !isMod(me())) fail("Só o ADM Supremo e os Moderadores fazem backup.");
     const b = await backupNow("manual");
     audit("backup:now", "", { size: b.size });
     save();
@@ -2285,7 +2289,24 @@ io.on("connection", socket => {
   /* --- ADM Supremo: equipe, sistema e desconexão geral --- */
   const admList = () => [...ADMIN_SET].map(n => db.users[byName.get(n)]).filter(Boolean)
     .map(u => ({ id: u.id, username: u.username, color: u.color, avatar: pubUser(u).avatar, supreme: isOwnerUser(u), env: ENV_ADMINS.includes(u.username.toLowerCase()), online: online.has(u.id) }));
-  on("admin:admins", () => { requireAdmin(); return { admins: admList() }; });
+  const modList = () => (db.mods || []).map(id => db.users[id]).filter(u => u && !isAdmin(u))
+    .map(u => ({ id: u.id, username: u.username, color: u.color, avatar: pubUser(u).avatar, online: online.has(u.id) }));
+  on("admin:admins", () => { requireStaff(); return { admins: admList(), mods: modList() }; });
+  on("admin:mod:set", ({ userId, name, on: give }) => {
+    requireSupreme();
+    const u = db.users[userId] || db.users[byName.get(String(name || "").trim().toLowerCase())];
+    if (!u) fail("Usuário não encontrado.");
+    if (give && isAdmin(u)) fail("Essa pessoa já é ADM.");
+    if (give && u.banned) fail("Reative a conta antes.");
+    db.mods = db.mods.filter(x => x !== u.id);
+    if (give) db.mods.push(u.id);
+    io.to("u:" + u.id).emit("me:update", { me: meView(u) });
+    emitToPeers(u.id, "user:update", { user: pubUser(u) });
+    io.to("u:" + u.id).emit("user:update", { user: pubUser(u), statusPref: u.status });
+    audit(give ? "mod:add" : "mod:remove", u.id, {});
+    save();
+    return { admins: admList(), mods: modList() };
+  });
   on("admin:admin:set", ({ userId, on: give }) => {
     requireSupreme();
     const u = db.users[userId];
@@ -2756,6 +2777,16 @@ loadDb().then(async () => {
   // cópia de segurança antes de mexer em tudo (só na primeira vez)
   if (!db.migrations.includes(NEXOS_MIGRATION)) { try { await backupNow("antes da atualização Nexos"); } catch (e) { console.error("Backup antes da migração:", e.message); } }
   try { runMigrations(); } catch (e) { console.error("Migração falhou:", e); }
+  // SanTHsz vira Moderador (uma vez só; se a conta ainda não existir, tenta de novo no próximo boot)
+  try {
+    const M = "2026-11-mod-santhsz", id = byName.get("santhsz");
+    if (!db.migrations.includes(M) && id && db.users[id]) {
+      if (!db.mods.includes(id)) db.mods.push(id);
+      db.migrations.push(M);
+      db.audit.push({ at: Date.now(), admin: "", action: "mod:add", target: id, details: { reason: "Cargo de Moderador" } });
+      save();
+    }
+  } catch (e) { console.error("Migração MOD:", e); }
   setTimeout(vipSweep, 30e3); setInterval(vipSweep, 3600e3).unref();
   setInterval(sampleMetrics, 300e3).unref();
   server.listen(PORT, HOST, () => {
