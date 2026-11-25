@@ -59,7 +59,7 @@ function getClient() {
   return client;
 }
 
-async function replyClaude({ system, messages, maxTokens, onText }) {
+async function replyClaude({ system, messages, maxTokens, onText, signal }) {
   const haiku = /haiku/.test(MODEL);
   const stream = getClient().beta.messages.stream({
     model: MODEL,
@@ -72,7 +72,7 @@ async function replyClaude({ system, messages, maxTokens, onText }) {
     ...(haiku ? {} : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" }),
     system,
     messages
-  });
+  }, signal ? { signal } : undefined);
   let full = "";
   stream.on("text", delta => {
     full += delta;
@@ -85,7 +85,7 @@ async function replyClaude({ system, messages, maxTokens, onText }) {
 }
 
 /* Gemini pela API REST oficial do Google, com a resposta chegando aos pedaços (SSE) */
-async function replyGemini({ system, messages, maxTokens, onText }) {
+async function replyGemini({ system, messages, maxTokens, onText, signal }) {
   const sys = Array.isArray(system) ? system.map(b => b.text || "").join("\n\n") : String(system || "");
   const body = {
     systemInstruction: { parts: [{ text: sys }] },
@@ -97,6 +97,7 @@ async function replyGemini({ system, messages, maxTokens, onText }) {
   // começa pelo último modelo que funcionou (não perde tempo com os aposentados)
   const models = [...new Set([geminiGood, ...GEMINI_MODELS].filter(Boolean))];
   for (let k = 0; k < models.length; k++) {
+    if (signal && signal.aborted) throw signal.reason || new Error("cancelado");
     const model = models[k];
     if (tried.has(model)) continue;
     tried.add(model);
@@ -110,8 +111,8 @@ async function replyGemini({ system, messages, maxTokens, onText }) {
       method: "POST",
       headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
       body: JSON.stringify(cfg ? { ...body, generationConfig: { ...body.generationConfig, thinkingConfig: cfg } } : body),
-      signal: AbortSignal.timeout(60 * 1000)
-    }).catch(e => { lastErr = e; return null; });
+      signal: signal || AbortSignal.timeout(60 * 1000)
+    }).catch(e => { lastErr = e; if (signal && signal.aborted) throw signal.reason || e; return null; });
     let step = thinkStep.get(model) || 0, res = await send(opts[step]), bad400 = "";
     while (res && res.status === 400 && opts[step]) {
       const t = await res.text().catch(() => "");
@@ -157,7 +158,7 @@ async function replyGemini({ system, messages, maxTokens, onText }) {
 /* Groq (plano grátis, modelos Llama) pela API REST, com a resposta chegando aos pedaços */
 const GROQ_MODELS = [process.env.GROQ_MODEL, "llama-3.3-70b-versatile", "llama-3.1-8b-instant"].filter(Boolean);
 const GROQ_BASE = (process.env.GROQ_BASE_URL || "https://api.groq.com/openai/v1").replace(/\/+$/, "");
-async function replyGroq({ system, messages, maxTokens, onText }) {
+async function replyGroq({ system, messages, maxTokens, onText, signal }) {
   const sys = Array.isArray(system) ? system.map(b => b.text || "").join("\n\n") : String(system || "");
   let lastErr = null;
   for (const model of GROQ_MODELS) {
@@ -165,8 +166,8 @@ async function replyGroq({ system, messages, maxTokens, onText }) {
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bearer " + process.env.GROQ_API_KEY },
       body: JSON.stringify({ model, stream: true, max_tokens: maxTokens, temperature: 0.8, messages: [{ role: "system", content: sys }, ...messages] }),
-      signal: AbortSignal.timeout(90 * 1000)
-    }).catch(e => { lastErr = e; return null; });
+      signal: signal || AbortSignal.timeout(90 * 1000)
+    }).catch(e => { lastErr = e; if (signal && signal.aborted) throw signal.reason || e; return null; });
     if (!res) continue;
     if (!res.ok) {
       const t = await res.text().catch(() => "");
@@ -202,7 +203,19 @@ async function replyGroq({ system, messages, maxTokens, onText }) {
  * @param {(full: string) => void} [o.onText] chamado com o texto acumulado até agora
  * @returns {Promise<{ text: string, refused: boolean }>}
  */
-async function reply({ system, messages, maxTokens = 2000, onText }) {
+// Limites de tempo de cada tentativa: um provedor que aceita a conexão e não manda nada
+// (sobrecarga) é abandonado em 20 s e o próximo assume — antes a pessoa esperava até 60–90 s.
+const FIRST_MS = Number(process.env.AI_FIRST_MS) || 20000, TOTAL_MS = Number(process.env.AI_TOTAL_MS) || 120000;
+function attempt(user) {
+  const ac = new AbortController();
+  const stop = why => { if (!ac.signal.aborted) ac.abort(why); };
+  const t1 = setTimeout(() => stop(new Error(`sem resposta em ${FIRST_MS / 1000} s`)), FIRST_MS);
+  const t2 = setTimeout(() => stop(new Error("resposta demorou demais")), TOTAL_MS);
+  const onUser = () => stop(new Error("cancelado"));
+  if (user) { if (user.aborted) onUser(); else user.addEventListener("abort", onUser, { once: true }); }
+  return { signal: ac.signal, first: () => clearTimeout(t1), done: () => { clearTimeout(t1); clearTimeout(t2); if (user) user.removeEventListener("abort", onUser); } };
+}
+async function reply({ system, messages, maxTokens = 2000, onText, signal }) {
   if (!configured()) throw new Error("IA não configurada");
   // tenta na ordem: Claude (pago) → Gemini (grátis) → Groq (grátis); se um falhar, o próximo assume
   // uma IA que falhou por conta/créditos fica 15 min de castigo (não atrasa cada resposta)
@@ -210,21 +223,27 @@ async function reply({ system, messages, maxTokens = 2000, onText }) {
   let chain = [hasClaude() && ["Claude", replyClaude], hasGemini() && ["Gemini", replyGemini], hasGroq() && ["Groq", replyGroq]].filter(Boolean);
   const ready = chain.filter(([n]) => !(cooldown[n] > now));
   if (ready.length) chain = ready;
-  let err = null;
+  let err = null, partial = "";
   for (const [name, fn] of chain) {
+    // a pessoa apertou "Parar": devolve o que já tinha chegado, sem tentar outro provedor
+    if (signal && signal.aborted) return { text: partial.trim(), refused: false, cancelled: true };
+    const at = attempt(signal);
+    partial = "";
+    const watch = full => { if (full) { at.first(); partial = full; } if (onText) onText(full); };
     try {
-      const r = await fn({ system, messages, maxTokens, onText });
+      const r = await fn({ system, messages, maxTokens, onText: watch, signal: at.signal });
       if (!r.refused && !r.text) throw new Error(name + " respondeu vazio");
       lastOk = { at: Date.now(), provider: name };
       return r;
     } catch (e) {
-      err = e;
-      const msg = String((e && e.message) || e);
+      if (signal && signal.aborted) return { text: partial.trim(), refused: false, cancelled: true };
+      err = at.signal.aborted && at.signal.reason instanceof Error ? at.signal.reason : e;
+      const msg = String((err && err.message) || err);
       console.warn("[ia] " + name + " falhou:", msg);
       lastError = { at: Date.now(), provider: name, msg: msg.slice(0, 300) };
       if (/credit|balance|billing|quota|401|403|invalid.*key|API key|authentication|permission/i.test(msg)) cooldown[name] = Date.now() + (/credit|balance|billing/i.test(msg) ? 6 * 3600e3 : 15 * 60e3);
       if (onText) { try { onText(""); } catch {} }
-    }
+    } finally { at.done(); }
   }
   throw err || new Error("IA indisponível");
 }

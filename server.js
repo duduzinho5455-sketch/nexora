@@ -1593,7 +1593,7 @@ function aiStore(uid) {
   if (st.day !== dayKey()) { st.day = dayKey(); st.n = 0; }
   return st;
 }
-const aiMsgView = m => ({ id: m.id, r: m.r, t: m.t, ts: m.ts });
+const aiMsgView = m => ({ id: m.id, r: m.r, t: m.t, ts: m.ts, ...(m.x ? { x: 1 } : {}) });
 
 /* --- atendimento de pagamento --- */
 function aiTicketPost(o, m, update) {
@@ -1662,7 +1662,8 @@ async function aiTicketRun(o) {
 }
 
 /* --- bate-papo exclusivo dos assinantes --- */
-async function aiChatRun(uid, replyId) {
+const aiAbort = new Map();                 // userId -> AbortController da resposta em andamento ("Parar")
+async function aiChatRun(uid, replyId, signal) {
   const u = db.users[uid], st = aiStore(uid), tier = aiTier(u);
   let chars = 0;
   const recent = [];
@@ -1688,12 +1689,13 @@ async function aiChatRun(uid, replyId) {
     sent = full.length; last = Date.now();
   };
   const r = await AI.reply({
-    system: sys, messages: history, maxTokens: 2500,
+    system: sys, messages: history, maxTokens: 2500, signal,
     // a IA trocou de provedor no meio (texto recomeçou): avisa na hora; senão, no máximo a cada 50 ms
     onText: full => { if (full.length < sent || Date.now() - last > 50) flush(full); }
   });
-  const text = r.refused || !r.text ? "Desculpa, sobre isso eu não consigo ajudar. Quer falar de outra coisa? 🙂" : r.text;
-  const m = { id: replyId, r: "a", t: text, ts: Date.now() };
+  // parada pela pessoa: guarda o que já tinha chegado, marcado como interrompido
+  const text = r.cancelled ? (r.text || "…") : r.refused || !r.text ? "Desculpa, sobre isso eu não consigo ajudar. Quer falar de outra coisa? 🙂" : r.text;
+  const m = { id: replyId, r: "a", t: text, ts: Date.now(), ...(r.cancelled ? { x: 1 } : {}) };
   st.msgs.push(m);
   // o app mostra só as últimas 80 e a IA lê só as últimas 20: guardar mais só inchava o banco
   // (que é regravado inteiro a cada segundo com mudanças)
@@ -1944,6 +1946,58 @@ io.on("connection", socket => {
     msgPut(c.id, m);
     save();
     io.to(rooms).emit("msg:update", { channelId: c.id, m });
+  });
+
+  /* ---------- mensagens fixadas e pesquisa na conversa ---------- */
+  // onde a lista de fixadas fica: no canal do servidor ou na conversa privada/grupo (atendimento não tem)
+  const pinHolder = t => (t.dm ? t.dm : t.s ? t.c : null);
+  const canPin = t => (t.dm ? true : t.s ? hasPerm(t.s, uid, "messages") : false);
+  on("pin", async ({ channelId, id, on: want }) => {
+    const t = await findMsg(channelId, id);
+    const holder = pinHolder(t);
+    if (!holder) fail("Não dá para fixar mensagens aqui.");
+    if (!canPin(t)) fail("Você não tem permissão para fixar mensagens neste canal.");
+    const pins = (holder.pins || []).filter(x => x !== t.m.id);
+    if (want !== false) {
+      if (pins.length >= 50) fail("Limite de 50 mensagens fixadas. Desafixe alguma antes.");
+      pins.unshift(t.m.id);
+    }
+    holder.pins = pins;
+    if (t.s) serverLog(t.s, want !== false ? "pin" : "unpin", t.m.a);
+    save();
+    io.to(t.rooms).emit("pins:update", { channelId: t.c.id, pins });
+    return { pins };
+  });
+  on("pins:list", async ({ channelId }) => {
+    const t = getTarget(channelId), holder = pinHolder(t);
+    const ids = (holder && holder.pins) || [], list = db.messages[t.c.id] || [], out = [];
+    for (const id of ids) {
+      const m = list.find(x => x.id === id) || (msgDb ? await msgFetch(t.c.id, id) : null);
+      if (m && !m.sys) out.push(m);
+    }
+    // fixada que foi apagada sai da lista sozinha
+    if (holder && out.length !== ids.length) { holder.pins = out.map(m => m.id); save(); }
+    return { pins: out, canPin: canPin(t) };
+  });
+  // pesquisa no histórico INTEIRO da conversa (na tabela), por texto e, se quiser, por autor
+  const searchLimit = mk(20, 30000);
+  on("search", async ({ channelId, q, from }) => {
+    const t = getTarget(channelId);
+    const text = str(q, 100), author = typeof from === "string" && db.users[from] ? from : "";
+    if (text.length < 2 && !author) fail("Digite pelo menos 2 letras.");
+    if (!searchLimit()) fail("Muitas pesquisas seguidas. Espere alguns segundos.");
+    let found;
+    if (msgDb) {
+      const like = "%" + text.replace(/[\\%_]/g, c => "\\" + c) + "%";
+      const r = await pg.query(
+        `SELECT data FROM nexora_msgs WHERE channel = $1 AND NOT (data ? 'sys') AND ($2 = '' OR data->>'t' ILIKE $3) AND ($4 = '' OR data->>'a' = $4) ORDER BY ts DESC, id DESC LIMIT 50`,
+        [t.c.id, text, like, author]);
+      found = r.rows.map(x => msgOverlay(t.c.id, x.data)).filter(Boolean);
+    } else {
+      const low = text.toLowerCase();
+      found = (db.messages[t.c.id] || []).filter(m => !m.sys && (!text || String(m.t || "").toLowerCase().includes(low)) && (!author || m.a === author)).reverse().slice(0, 50);
+    }
+    return { results: found };
   });
 
   socket.on("typing", data => {
@@ -2361,12 +2415,37 @@ io.on("connection", socket => {
     const m = { id: msgId(), r: "u", t: text, ts: Date.now() };
     st.msgs.push(m);
     save();
-    const replyId = msgId();
+    return { msg: aiMsgView(m), replyId: aiStart() };
+  });
+  // começa uma resposta (com o "Parar" ligado a ela)
+  const aiStart = () => {
+    const replyId = msgId(), ac = new AbortController();
     aiBusy.add("c." + uid);
-    aiChatRun(uid, replyId)
-      .catch(e => { console.warn("[ia] chat:", e && e.message); io.to("u:" + uid).emit("ai:error", { id: replyId, error: "A Aury não conseguiu responder agora. Tente de novo em instantes." }); })
-      .finally(() => aiBusy.delete("c." + uid));
-    return { msg: aiMsgView(m), replyId };
+    aiAbort.set(uid, ac);
+    aiChatRun(uid, replyId, ac.signal)
+      .catch(e => { console.warn("[ia] chat:", e && e.message); io.to("u:" + uid).emit("ai:error", { id: replyId, error: "A Aury não conseguiu responder agora. Toque em Tentar de novo em instantes." }); })
+      .finally(() => { aiBusy.delete("c." + uid); if (aiAbort.get(uid) === ac) aiAbort.delete(uid); });
+    return replyId;
+  };
+  on("ai:stop", () => {
+    const ac = aiAbort.get(uid);
+    if (ac) ac.abort();
+    return { ok: true, stopped: !!ac };
+  });
+  // gera de novo a resposta da última pergunta (depois de erro, resposta interrompida ou ruim)
+  on("ai:retry", () => {
+    const tier = aiTier(me());
+    if (!tier) fail("A Aury é exclusiva para assinantes (VIP, Pro ou Max).");
+    if (!AI.configured()) fail("A IA ainda não foi ligada pela equipe. Tente mais tarde.");
+    if (aiBusy.has("c." + uid)) fail("Espere a Aury terminar de responder.");
+    const st = aiStore(uid);
+    if (st.n >= AI_LIMIT[tier]) fail(`Você usou as ${AI_LIMIT[tier]} mensagens de hoje do plano ${PLANS[tier].name}. Amanhã tem mais!`);
+    if (!chat()) fail("Devagar! Espere um instante.");
+    let removed = null;
+    if (st.msgs.length && st.msgs[st.msgs.length - 1].r === "a") removed = st.msgs.pop().id;
+    if (!st.msgs.length || st.msgs[st.msgs.length - 1].r !== "u") fail("Não tem pergunta para responder de novo.");
+    save();
+    return { replyId: aiStart(), removed };
   });
   on("ai:clear", () => {
     const st = aiStore(uid);

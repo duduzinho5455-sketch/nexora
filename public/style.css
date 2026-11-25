@@ -1300,6 +1300,10 @@ html.reduce-motion .gp-spin { border-top-color: var(--accent); border-right-colo
 .ai-b { white-space: pre-wrap; max-width: min(640px, 84%); padding: 10px 14px; border-radius: 16px 16px 16px 4px; background: var(--bg-3); border: 1px solid var(--line); line-height: 1.5; overflow-wrap: anywhere; }
 .ai-msg.me .ai-b { border-radius: 16px 16px 4px 16px; background: color-mix(in srgb, var(--accent) 22%, var(--bg-3)); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
 .ai-msg.err .ai-b { color: var(--muted); font-style: italic; }
+.ai-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; white-space: normal; font-style: normal; }
+.ai-acts .btn { height: 26px; padding: 0 9px; font-size: 12px; opacity: .8; }
+.ai-acts .btn:hover { opacity: 1; }
+.ai-cut { color: var(--muted); font-size: 12px; margin-right: 4px; }
 .ai-dots { display: inline-flex; gap: 4px; padding: 4px 0; }
 .ai-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); animation: aiDot 1s infinite ease-in-out; }
 .ai-dots i:nth-child(2) { animation-delay: .15s; } .ai-dots i:nth-child(3) { animation-delay: .3s; }

@@ -53,6 +53,8 @@ const P = {
   maximize: '<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>',
   focus: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15h18"/>',
   send: '<path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/>',
+  pin: '<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>',
+  fileSearch: '<path d="M21 6H3M10 12H3M10 18H3"/><circle cx="17" cy="15" r="3"/><path d="m21 19-1.9-1.9"/>',
   crown: '<path d="m2 7 5 5 5-8 5 8 5-5-2 12H4z"/>',
   eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>',
   eyeOff: '<path d="M17.9 17.9A10.5 10.5 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.1-5.9M9.9 4.2A9.1 9.1 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2M1 1l22 22"/>',
@@ -527,6 +529,8 @@ function renderTop() {
   const icon = $("#topIcon"), title = $("#topTitle"), topic = $("#topTopic"), actions = $("#topActions");
   const c = chan();
   const search = `<button class="icon-btn" data-act="switcher" data-tip="Ir para… (Ctrl+K)">${ic("search")}</button>`;
+  // conversa de texto: mensagens fixadas e pesquisa no histórico inteiro
+  const convo = c ? `<button class="icon-btn" data-act="pins" data-tip="Mensagens fixadas">${ic("pin")}</button><button class="icon-btn" data-act="msg-search" data-tip="Pesquisar nesta conversa">${ic("fileSearch")}</button>` : "";
   if (S.view === "chat" && c && c.ticket) {
     const o = c.order, st = ORDER_STATUS[o.status];
     icon.innerHTML = ic("gem");
@@ -538,18 +542,18 @@ function renderTop() {
     icon.innerHTML = ic("users");
     title.textContent = groupTitle(c);
     topic.textContent = `${c.members.length} membros`;
-    actions.innerHTML = callBtn(c.id) + `<button class="icon-btn" data-act="group-add" data-id="${c.id}" data-tip="Adicionar pessoas">${ic("userPlus")}</button><button class="icon-btn${S.showMembers ? " on" : ""}" data-act="toggle-members" data-tip="Membros">${ic("users")}</button><button class="icon-btn" data-act="group-menu" data-id="${c.id}" data-tip="Opções do grupo">${ic("settings")}</button>${search}`;
+    actions.innerHTML = callBtn(c.id) + `<button class="icon-btn" data-act="group-add" data-id="${c.id}" data-tip="Adicionar pessoas">${ic("userPlus")}</button><button class="icon-btn${S.showMembers ? " on" : ""}" data-act="toggle-members" data-tip="Membros">${ic("users")}</button><button class="icon-btn" data-act="group-menu" data-id="${c.id}" data-tip="Opções do grupo">${ic("settings")}</button>${convo}${search}`;
   } else if (S.view === "chat" && c && c.dm) {
     const u = user(c.userId), f = S.friends.get(u.id);
     icon.innerHTML = ic("at");
     title.textContent = u.username;
     topic.textContent = u.game ? `🎮 Jogando ${u.game.name}` : STATUS[u.status] || "";
-    actions.innerHTML = callBtn(c.id) + `${f === "friend" ? "" : `<button class="icon-btn" data-act="add-friend" data-uid="${u.id}" data-tip="${f === "out" ? "Pedido enviado" : "Adicionar amigo"}">${ic(f === "out" ? "userCheck" : "userPlus")}</button>`}<button class="icon-btn" data-act="profile" data-uid="${u.id}" data-tip="Perfil">${ic("users")}</button>${search}`;
+    actions.innerHTML = callBtn(c.id) + `${f === "friend" ? "" : `<button class="icon-btn" data-act="add-friend" data-uid="${u.id}" data-tip="${f === "out" ? "Pedido enviado" : "Adicionar amigo"}">${ic(f === "out" ? "userCheck" : "userPlus")}</button>`}<button class="icon-btn" data-act="profile" data-uid="${u.id}" data-tip="Perfil">${ic("users")}</button>${convo}${search}`;
   } else if (S.view === "chat" && c) {
     icon.innerHTML = ic("hash");
     title.textContent = c.name;
     topic.textContent = c.topic || "";
-    actions.innerHTML = `<button class="icon-btn" data-act="invite" data-tip="Convidar pessoas">${ic("userPlus")}</button><button class="icon-btn${S.showMembers ? " on" : ""}" data-act="toggle-members" data-tip="Lista de membros">${ic("users")}</button>${search}`;
+    actions.innerHTML = `<button class="icon-btn" data-act="invite" data-tip="Convidar pessoas">${ic("userPlus")}</button><button class="icon-btn${S.showMembers ? " on" : ""}" data-act="toggle-members" data-tip="Lista de membros">${ic("users")}</button>${convo}${search}`;
   } else if (S.view === "stage" && c && c.dm) {
     const n = [...S.voice.values()].filter(v => v.channelId === c.id).length;
     icon.innerHTML = ic("phone");
@@ -1471,10 +1475,12 @@ async function goAI() {
   Object.assign(AIS, { loaded: true, on: r.on, tier: r.tier, limit: r.limit, limits: r.limits || AIS.limits, used: r.used, msgs: r.msgs || [], busy: !!r.busy });
   if (S.view === "ai") { renderAIView(true); renderSide(); }
 }
-function aiBubble(m) {
-  const mine = m.r === "u";
+function aiBubble(m, last) {
+  const mine = m.r === "u", done = !mine && m !== AIS.pending && m.t;
   const body = m.t ? renderText(m.t).html : `<span class="ai-dots"><i></i><i></i><i></i></span>`;
-  return `<div class="ai-msg${mine ? " me" : ""}${m.err ? " err" : ""}" data-id="${esc(m.id)}">${mine ? "" : `<span class="ai-av">🤖</span>`}<div class="ai-b">${body}</div></div>`;
+  // resposta pronta: copiar; a última (ou com erro / interrompida) pode ser gerada de novo
+  const acts = done ? `<div class="ai-acts">${m.x ? `<small class="ai-cut">resposta interrompida</small>` : ""}${m.err ? "" : `<button type="button" class="btn ghost sm" data-ai-copy="${esc(m.id)}">${ic("copy", "xs")}Copiar</button>`}${last && !AIS.busy ? `<button type="button" class="btn ghost sm" data-ai-retry>${ic("refresh", "xs")}Tentar de novo</button>` : ""}</div>` : "";
+  return `<div class="ai-msg${mine ? " me" : ""}${m.err ? " err" : ""}" data-id="${esc(m.id)}">${mine ? "" : `<span class="ai-av">🤖</span>`}<div class="ai-b">${body}${acts}</div></div>`;
 }
 function renderAIView(scroll) {
   const root = $("#aiView");
@@ -1488,18 +1494,45 @@ function renderAIView(scroll) {
     const inp = $("#aiInput");
     inp.addEventListener("input", () => { inp.style.height = "auto"; inp.style.height = Math.min(inp.scrollHeight, 180) + "px"; });
     inp.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendAI(); } });
-    $("#aiForm").onsubmit = e => { e.preventDefault(); sendAI(); };
-    root.addEventListener("click", e => { const b = e.target.closest("[data-ai-sug]"); if (b) { inp.value = b.dataset.aiSug; sendAI(); } });
+    $("#aiForm").onsubmit = e => { e.preventDefault(); if (AIS.busy) stopAI(); else sendAI(); };
+    root.addEventListener("click", e => {
+      const b = e.target.closest("[data-ai-sug]");
+      if (b) { inp.value = b.dataset.aiSug; sendAI(); return; }
+      const cp = e.target.closest("[data-ai-copy]");
+      if (cp) { const m = AIS.msgs.find(x => x.id === cp.dataset.aiCopy); if (m) navigator.clipboard.writeText(m.t).then(() => toast("Resposta copiada.", "ok"), () => toast("Não deu para copiar.", "error")); return; }
+      if (e.target.closest("[data-ai-retry]")) retryAI();
+    });
     scroll = true;
   }
   const list = $("#aiList");
   const msgs = AIS.pending ? [...AIS.msgs, AIS.pending] : AIS.msgs;
   list.innerHTML = (!AIS.on ? `<div class="hint" style="margin:12px auto;max-width:560px">⚠️ A Aury ainda não foi ligada pela equipe. Assim que for, ela aparece aqui.</div>` : "") +
-    (msgs.length ? msgs.map(aiBubble).join("") : `<div class="ai-hello"><div class="ai-orb">🤖</div><h2>Oi, ${esc(S.me.username)}! Eu sou a Aury.</h2><p>Sua IA exclusiva do VIP. Pergunte o que quiser 👇</p><div class="ai-sugs">${AI_SUGGEST.map(t => `<button type="button" class="ai-sug" data-ai-sug="${esc(t)}">${esc(t)}</button>`).join("")}</div></div>`);
+    (msgs.length ? msgs.map((m, i) => aiBubble(m, i === msgs.length - 1)).join("") : `<div class="ai-hello"><div class="ai-orb">🤖</div><h2>Oi, ${esc(S.me.username)}! Eu sou a Aury.</h2><p>Sua IA exclusiva do VIP. Pergunte o que quiser 👇</p><div class="ai-sugs">${AI_SUGGEST.map(t => `<button type="button" class="ai-sug" data-ai-sug="${esc(t)}">${esc(t)}</button>`).join("")}</div></div>`);
   $("#aiFoot").innerHTML = `<span>${AIS.used}/${AIS.limit} mensagens hoje · plano ${esc(PLAN_NAME[AIS.tier] || "")}</span><small>A Aury é uma IA e pode errar. Não envie senhas nem dados de pagamento.</small>`;
+  // enquanto a Aury responde, o botão de enviar vira "Parar"
   const send = $("#aiForm .send");
-  if (send) send.disabled = AIS.busy || !AIS.on;
+  if (send) {
+    send.disabled = !AIS.on;
+    send.innerHTML = ic(AIS.busy ? "x" : "send");
+    send.setAttribute("aria-label", AIS.busy ? "Parar resposta" : "Enviar");
+    send.dataset.tip = AIS.busy ? "Parar resposta" : "";
+  }
   if (scroll) list.scrollTop = list.scrollHeight;
+}
+async function stopAI() {
+  const r = await emit("ai:stop", {});
+  if (r.error) toast(r.error, "error");
+}
+async function retryAI() {
+  if (AIS.busy) return;
+  AIS.busy = true;
+  const r = await emit("ai:retry", {});
+  if (r.error) { AIS.busy = false; toast(r.error, "error", 6000); renderAIView(); return; }
+  // tira a resposta antiga (ou o aviso de erro) e espera a nova
+  const last = AIS.msgs[AIS.msgs.length - 1];
+  if (last && last.r === "a" && (last.err || last.id === r.removed)) AIS.msgs.pop();
+  AIS.pending = { id: r.replyId, r: "a", t: "" };
+  renderAIView(true);
 }
 async function sendAI() {
   const inp = $("#aiInput");
@@ -1510,6 +1543,8 @@ async function sendAI() {
   inp.value = ""; inp.style.height = "auto";
   const r = await emit("ai:send", { text });
   if (r.error) { AIS.busy = false; inp.value = text; toast(r.error, "error", 6000); renderAIView(); return; }
+  // mensagem de erro anterior some (a pergunta nova recomeça a conversa)
+  if (AIS.msgs.length && AIS.msgs[AIS.msgs.length - 1].err) AIS.msgs.pop();
   AIS.msgs.push(r.msg);
   AIS.pending = { id: r.replyId, r: "a", t: "" };
   renderAIView(true);
@@ -2817,6 +2852,7 @@ function connect() {
     schedule("side");
   });
   sock.on("msg", onMsg);
+  sock.on("pins:update", ({ channelId, pins }) => { if (Array.isArray(pins)) S.pins.set(channelId, pins); });
   sock.on("msg:update", ({ channelId, m }) => {
     const b = S.msgs.get(channelId);
     if (!b) return;
@@ -6529,6 +6565,77 @@ function channelMenu(cid, at) {
     canDo(s, "channels") && { label: "Excluir canal", icon: "trash", danger: true, run: () => channelSettings(cid) }
   ]);
 }
+/* ---------- mensagens fixadas e pesquisa na conversa ---------- */
+S.pins = new Map();   // canal -> ids fixados (vem do servidor ao abrir a lista ou quando alguém fixa)
+const canPinHere = () => { const c = chan(); if (!c || c.ticket) return false; return c.dm ? true : canDo(srv(), "messages"); };
+const pinnedHere = id => (S.pins.get(S.channelId) || []).includes(id);
+async function pinMsg(id, want) {
+  const r = await emit("pin", { channelId: S.channelId, id, on: want });
+  if (r.error) { toast(r.error, "error"); return; }
+  S.pins.set(S.channelId, r.pins);
+  toast(want ? "Mensagem fixada." : "Mensagem desafixada.", "ok");
+}
+// mensagem em formato de lista (fixadas e resultados da pesquisa)
+function msgCard(m, extra = "") {
+  const u = user(m.a);
+  const when = new Date(m.ts).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const files = m.f && m.f.length ? `<small>📎 ${m.f.map(f => esc(f.n)).join(", ")}</small>` : "";
+  return `<div class="step"><b>${avatar(u, 28)}</b><div style="min-width:0;flex:1"><b style="color:${esc(u.color)}">${esc(u.username)}</b> <small style="display:inline">${when}</small><div class="msg-text">${m.t ? renderText(m.t).html : ""}</div>${files}<div style="display:flex;gap:6px;margin-top:6px"><button type="button" class="btn ghost sm" data-go="${esc(m.id)}">Ir até a mensagem</button>${extra}</div></div></div>`;
+}
+// leva até a mensagem: carrega páginas mais antigas até achar (no máximo ~1.000 mensagens para trás)
+async function goToMsg(id) {
+  const cid = S.channelId;
+  for (let i = 0; i < 20 && !msgNode(id); i++) {
+    const b = S.msgs.get(cid);
+    if (!b || !b.more || S.channelId !== cid) break;
+    const n = b.list.length;
+    await loadHistory(cid, true);
+    if (b.list.length === n) break;
+  }
+  const n = msgNode(id);
+  if (!n) { toast("Não deu para chegar nessa mensagem — ela é muito antiga.", "info"); return; }
+  n.scrollIntoView({ behavior: S.settings.reduceMotion ? "auto" : "smooth", block: "center" });
+  n.classList.remove("highlight"); void n.offsetWidth; n.classList.add("highlight");
+}
+async function pinsModal() {
+  const cid = S.channelId;
+  const r = await emit("pins:list", { channelId: cid });
+  if (r.error) { toast(r.error, "error"); return; }
+  S.pins.set(cid, r.pins.map(m => m.id));
+  modal({
+    title: "Mensagens fixadas", sub: r.canPin ? "Fixe pelo menu de qualquer mensagem (até 50)." : "Só quem pode gerenciar mensagens fixa e desafixa.",
+    body: r.pins.length ? `<div class="steps">${r.pins.map(m => msgCard(m, r.canPin ? `<button type="button" class="btn ghost sm" data-unpin="${esc(m.id)}">Desafixar</button>` : "")).join("")}</div>` : `<div class="empty">${ic("pin")}<p>Nenhuma mensagem fixada aqui ainda.</p></div>`,
+    onMount(m, close) {
+      m.addEventListener("click", async e => {
+        const go = e.target.closest("[data-go]"), un = e.target.closest("[data-unpin]");
+        if (go) { close(); goToMsg(go.dataset.go); }
+        if (un) { await pinMsg(un.dataset.unpin, false); un.closest(".step").remove(); }
+      });
+    }
+  });
+}
+function searchModal() {
+  const cid = S.channelId;
+  modal({
+    title: "Pesquisar nesta conversa", sub: "Procura no histórico inteiro, inclusive nas mensagens antigas.",
+    body: `<div class="invite-box"><input data-sq maxlength="100" placeholder="O que você procura?" autocomplete="off"><button class="btn primary sm" data-sgo>Pesquisar</button></div><div data-sres style="margin-top:12px"></div>`,
+    onMount(m, close) {
+      const inp = m.querySelector("[data-sq]"), out = m.querySelector("[data-sres]");
+      const run = async () => {
+        const q = inp.value.trim();
+        if (q.length < 2) { toast("Digite pelo menos 2 letras.", "warn"); return; }
+        out.innerHTML = `<small style="color:var(--muted)">Procurando…</small>`;
+        const r = await emit("search", { channelId: cid, q });
+        if (r.error) { out.innerHTML = ""; toast(r.error, "error"); return; }
+        out.innerHTML = r.results.length ? `<small style="color:var(--muted)">${r.results.length >= 50 ? "50 mais recentes" : r.results.length + (r.results.length === 1 ? " resultado" : " resultados")}</small><div class="steps" style="margin-top:8px">${r.results.map(x => msgCard(x)).join("")}</div>` : `<div class="empty">${ic("fileSearch")}<p>Nada encontrado.</p></div>`;
+      };
+      m.querySelector("[data-sgo]").onclick = run;
+      inp.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); run(); } });
+      out.addEventListener("click", e => { const go = e.target.closest("[data-go]"); if (go) { close(); goToMsg(go.dataset.go); } });
+      setTimeout(() => inp.focus(), 50);
+    }
+  });
+}
 function messageMenu(id, at) {
   const m = findMsg(id);
   if (!m || m.pending || m.sys) return;
@@ -6538,6 +6645,7 @@ function messageMenu(id, at) {
     { label: "Responder", icon: "reply", run: () => startReply(id) },
     mine && { label: "Editar mensagem", icon: "edit", run: () => startEdit(id) },
     { label: "Copiar texto", icon: "copy", run: () => navigator.clipboard.writeText(m.t).then(() => toast("Texto copiado.", "ok")).catch(() => {}) },
+    canPinHere() && { label: pinnedHere(id) ? "Desafixar mensagem" : "Fixar mensagem", icon: "pin", run: () => pinMsg(id, !pinnedHere(id)) },
     (mine || canDo(s, "messages")) && "-",
     (mine || canDo(s, "messages")) && { label: "Apagar mensagem", icon: "trash", danger: true, run: e => deleteMsg(id, e && e.shiftKey) }
   ]);
@@ -6755,12 +6863,10 @@ const ACTIONS = {
   "quick-react": a => react(msgIdOf(a), a.dataset.emoji),
   "react-toggle": a => { a.classList.add("bump"); react(msgIdOf(a), a.dataset.emoji); },
   "reply-cancel": cancelReply,
-  "jump-to": a => {
-    const n = msgNode(a.dataset.ref);
-    if (!n) { toast("Essa mensagem é antiga demais para aparecer aqui.", "info"); return; }
-    n.scrollIntoView({ behavior: S.settings.reduceMotion ? "auto" : "smooth", block: "center" });
-    n.classList.remove("highlight"); void n.offsetWidth; n.classList.add("highlight");
-  },
+  // resposta a uma mensagem antiga: carrega o histórico até chegar nela
+  "jump-to": a => goToMsg(a.dataset.ref),
+  pins: () => pinsModal(),
+  "msg-search": () => searchModal(),
   lightbox: a => {
     const lb = document.createElement("div");
     lb.className = "lightbox";
