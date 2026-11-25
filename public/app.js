@@ -1064,6 +1064,19 @@ function openTicket(orderId) {
 }
 
 /* --- painel ADM --- */
+// E-mail: remetente, último envio, motivo exato da última falha (com o que fazer) e botão de teste
+function admMail(d, on) {
+  const ok = (b, t) => `<span class="ost ${b ? "st-ok" : "st-bad"}">${t}</span>`;
+  if (!d) return ok(on, on ? "ligado" : "desligado");
+  if (!d.on) return ok(false, "desligado") + `<small style="display:block;color:var(--muted)">Falta a RESEND_API_KEY no Render: sem ela nenhum código de confirmação ou de "Esqueci a senha" é enviado.</small>`;
+  const when = t => new Date(t).toLocaleString("pt-BR");
+  const bad = d.lastErr && (!d.lastOk || d.lastErr.at > d.lastOk.at);
+  return ok(!bad && !d.testSender, bad ? "falhando" : d.testSender ? "remetente de teste" : "ligado") +
+    `<small style="display:block;color:var(--muted);margin-top:4px">Remetente: ${esc(d.from)}${d.lastOk ? `<br>Último envio ok: ${when(d.lastOk.at)} (${esc(d.lastOk.to)})` : ""}</small>` +
+    (bad ? `<small style="display:block;color:var(--red);margin-top:4px">Última falha (${when(d.lastErr.at)}, para ${esc(d.lastErr.to)}): Resend ${d.lastErr.status || "sem resposta"} — ${esc(d.lastErr.text)}</small>` : "") +
+    (bad || d.testSender ? `<small style="display:block;margin-top:4px">👉 ${esc(bad ? d.lastErr.hint : "O remetente onboarding@resend.dev é o de TESTE do Resend e só entrega para o dono da conta Resend. Verifique o domínio auryxnexos.com.br em resend.com › Domains e defina MAIL_FROM no Render (ex.: Auryx Nexos <nao-responda@auryxnexos.com.br>).")}</small>` : "") +
+    `<button class="btn sm" style="margin-top:8px" data-act="admin-mail-test">${ic("send", "sm")}Enviar e-mail de teste para mim</button>`;
+}
 // Monitoramento ao vivo: banco, gravação, lentidão, memória, tempo de resposta, erros e alertas
 function admHealth(h) {
   if (!h) return "";
@@ -1130,7 +1143,7 @@ async function renderAdmin(soft) {
       <div><b>Banco de dados</b>${ok(true, r.db)}</div>
       ${r.storage && r.storage.total ? `<div><b>Espaço usado</b>${ok(r.storage.total < 0.8 * r.storage.limit, fmtSize(r.storage.total) + " de " + fmtSize(r.storage.limit) + " (" + (r.storage.total / r.storage.limit * 100).toFixed(1) + "%)")}<small style="display:block;color:var(--muted)">Mensagens e contas ${fmtSize(r.storage.state)} · Arquivos ${fmtSize(r.storage.files)} (${r.storage.nFiles}) · Backups ${fmtSize(r.storage.backups)}${r.storage.gc && r.storage.gc.removed ? ` · Limpeza já apagou ${r.storage.gc.removed} arquivos sem uso (${fmtSize(r.storage.gc.bytes)})` : ""}</small></div>` : ""}
       <div><b>Último backup</b>${r.lastBackup ? ok(Date.now() - r.lastBackup < 2 * 86400e3, new Date(r.lastBackup).toLocaleString("pt-BR")) : ok(false, "nenhum ainda")}</div>
-      <div><b>E-mail (Resend)</b>${ok(r.mail, r.mail ? "ligado" : "desligado")}</div>
+      <div><b>E-mail (Resend)</b>${admMail(r.mailDiag, r.mail)}</div>
       <div><b>Aury (IA)</b>${ok(r.ai, r.ai ? (r.aiName || "ligada") : "sem chave")}</div>
       ${r.aiStatus && (r.aiStatus.lastError || r.aiStatus.lastOk) ? `<div class="ai-diag"><b>Aury · diagnóstico</b><small>${r.aiStatus.lastOk ? `✅ Última resposta: ${esc(r.aiStatus.lastOk.provider)} em ${new Date(r.aiStatus.lastOk.at).toLocaleString("pt-BR")}` : "Nenhuma resposta desde que o servidor ligou"}${r.aiStatus.lastError ? `<br>⚠️ Último erro (${esc(r.aiStatus.lastError.provider)}, ${new Date(r.aiStatus.lastError.at).toLocaleString("pt-BR")}): ${esc(r.aiStatus.lastError.msg)}` : ""}${Object.keys(r.aiStatus.cooldown || {}).length ? `<br>⏸️ Pausado por 15 min (conta/créditos): ${esc(Object.keys(r.aiStatus.cooldown).join(", "))}` : ""}</small></div>` : ""}
       <div><b>Servidor TURN (voz em 4G)</b>${ok(r.turn, r.turn ? "ligado" : "não configurado")}</div>
@@ -6776,6 +6789,15 @@ const ACTIONS = {
   "plan-cycle": a => { S.cycle = a.dataset.c; renderPremium(); },
   "open-ticket": a => openTicket(a.dataset.id),
   "admin-tab": a => { S.adminTab = a.dataset.tab; renderAdmin(true); },
+  "admin-mail-test": async a => {
+    a.disabled = true;
+    const r = await emit("admin:mail:test", {});
+    a.disabled = false;
+    if (r.error) { toast(r.error, "error", 7000); return; }
+    if (r.ok) toast(`E-mail de teste enviado para ${r.to}. Confira a caixa de entrada (e o spam).`, "ok", 7000);
+    else toast(`O Resend recusou: ${r.error && r.error.hint ? r.error.hint : "veja o motivo no painel."}`, "error", 12000);
+    renderAdmin(true);
+  },
   "admin-rep-tab": a => { S.repTab = a.dataset.tab; renderAdmin(true); },
   "admin-rep": async a => {
     const del = a.dataset.do === "delete";

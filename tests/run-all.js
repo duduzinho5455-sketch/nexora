@@ -24,6 +24,7 @@ const suites = [
   ["aury-fixadas-pesquisa.test.js", "Aury (parar, tentar de novo, troca de provedor), fixadas e pesquisa"],
   ["denuncias-dados-saude.test.js", "Denúncias, Baixar meus dados e saúde do servidor"],
   ["controle-mapeamento.test.js", "Controle do navegador -> controle de Xbox"],
+  ["email.test.js", "E-mail: Esqueci a senha, diagnóstico do Resend e e-mail de teste"],
   win && ["agente-seguranca.test.js", "Agente Auryx: segurança"],
   vigem && ["agente-controles.test.js", "Agente Auryx: controles virtuais (ViGEmBus)"]
 ].filter(Boolean);

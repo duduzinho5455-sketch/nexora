@@ -757,8 +757,24 @@ async function sendMail(to, subject, title, line, code) {
   if (!r || !r.ok) {
     const t = r ? await r.text().catch(() => "") : "sem resposta";
     console.error("Resend:", r && r.status, String(t).slice(0, 300));
+    mailState.lastErr = { at: Date.now(), status: r ? r.status : 0, text: String(t).slice(0, 300), hint: mailHint(r ? r.status : 0, t), to: maskEmail(to) };
     throw new HttpError(502, "Não foi possível enviar o e-mail agora. Confira o endereço ou tente de novo em alguns minutos.");
   }
+  mailState.lastOk = { at: Date.now(), to: maskEmail(to) };
+}
+// Diagnóstico do e-mail para o painel: o motivo real que o Resend devolveu, traduzido em o que fazer
+const mailState = { lastOk: null, lastErr: null };
+const MAIL_TEST_SENDER = /onboarding@resend\.dev/i.test(MAIL_FROM);
+function mailHint(status, text) {
+  const t = String(text || "");
+  if (/testing emails to your own|own email address|verify a domain/i.test(t) || (MAIL_TEST_SENDER && status === 403))
+    return "O remetente é o de TESTE do Resend (onboarding@resend.dev), que só entrega para o dono da conta Resend. Verifique o domínio auryxnexos.com.br em resend.com › Domains e defina MAIL_FROM no Render (ex.: Auryx Nexos <nao-responda@auryxnexos.com.br>).";
+  if (/domain.*not verified|not verified/i.test(t)) return "O domínio do remetente (MAIL_FROM) ainda não está verificado no Resend. Confira os registros DNS em resend.com › Domains até aparecer Verified.";
+  if (status === 401 || /api key|unauthorized/i.test(t)) return "A RESEND_API_KEY no Render está errada ou foi apagada. Gere outra em resend.com › API Keys.";
+  if (status === 422 || /invalid.*from|from.*invalid/i.test(t)) return "O MAIL_FROM está num formato inválido. Use: Auryx Nexos <nao-responda@auryxnexos.com.br>";
+  if (status === 429 || /rate|quota|limit/i.test(t)) return "Limite de envios do Resend atingido (no plano grátis: 100 por dia). Espere ou mude de plano.";
+  if (!status) return "O servidor não conseguiu falar com o Resend (rede). Tente de novo em alguns minutos.";
+  return "O Resend recusou o envio. Veja a mensagem acima.";
 }
 async function sendCode(user, kind, email) {
   const code = newCode();
@@ -2198,6 +2214,17 @@ io.on("connection", socket => {
       against: Object.values(db.reports).filter(x => x.msg.a === r.msg.a).length,           // muitas denúncias contra a mesma pessoa = sinal de alerta
       decidedByName: r.decidedBy ? (db.users[r.decidedBy] || {}).username || "?" : "" };
   };
+  // e-mail de teste: manda para o e-mail do próprio ADM e devolve o motivo exato se falhar
+  const mailTestLimit = mk(3, 60e3);
+  on("admin:mail:test", async () => {
+    const u = requireAdmin();
+    if (!MAIL_ON) fail("O envio de e-mails está desligado: falta RESEND_API_KEY no Render.");
+    if (!u.email) fail("Sua conta não tem e-mail. Adicione em Configurações › Minha conta.");
+    if (!mailTestLimit()) fail("Espere um minuto para testar de novo.");
+    try { await sendMail(u.email, `Teste de e-mail da ${APP_NAME}`, "E-mail de teste", "Se você recebeu isto, os códigos de confirmação e de recuperação de senha estão chegando. Código de exemplo:", "123456"); }
+    catch (e) { return { ok: false, to: maskEmail(u.email), error: mailState.lastErr }; }
+    return { ok: true, to: maskEmail(u.email) };
+  });
   on("admin:reports", ({ status }) => {
     requireAdmin();
     const want = ["open", "done", "all"].includes(status) ? status : "open";
@@ -2956,6 +2983,7 @@ io.on("connection", socket => {
       voiceNow: voice.size, rooms: new Set([...voice.values()].map(v => v.cid)).size,
       msgs, msgsDay, subs, pending: orders.filter(o => o.status === "pending" || o.status === "review").length,
       revenueMonth: paid.filter(o => (o.decided || o.updated) >= monthStart.getTime()).reduce((a, o) => a + o.amount, 0), revenueTotal: paid.reduce((a, o) => a + o.amount, 0), paidCount: paid.length,
+      mailDiag: { on: MAIL_ON, from: MAIL_FROM, testSender: MAIL_TEST_SENDER, lastOk: mailState.lastOk, lastErr: mailState.lastErr },
       health: healthView(), reportsOpen: Object.values(db.reports || {}).filter(x => x.status === "open").length,
       ai: AI.configured(), aiName: AI.provider(), aiStatus: AI.status(), mail: MAIL_ON, turn: !!process.env.TURN_URLS, db: pg ? "PostgreSQL" : "arquivo", lastBackup: bl[0] ? bl[0].at : 0,
       uptime: Math.round(process.uptime()), mem: Math.round(process.memoryUsage().rss / 1048576),
