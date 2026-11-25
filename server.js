@@ -53,10 +53,35 @@ const chanIndex = new Map();       // id do canal -> id do servidor
 async function loadDb() {
   if (DATABASE_URL) {
     const { Pool } = require("pg");
-    const ssl = process.env.NODE_ENV === "production" || /render\.com|sslmode=require/.test(DATABASE_URL) ? { rejectUnauthorized: false } : false;
+    const sslOf = url => process.env.NODE_ENV === "production" || /render\.com|neon\.tech|supabase|sslmode=require/.test(url) ? { rejectUnauthorized: false } : false;
+    const ssl = sslOf(DATABASE_URL);
     pg = new Pool({ connectionString: DATABASE_URL, ssl, max: 3 });
     await pg.query("CREATE TABLE IF NOT EXISTS nexora_state (id INT PRIMARY KEY, data JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
     await pg.query("CREATE TABLE IF NOT EXISTS nexora_files (id TEXT PRIMARY KEY, data BYTEA NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
+    // Troca de banco: com OLD_DATABASE_URL definido e o banco novo vazio, copia tudo do antigo (uma vez só)
+    const OLD = process.env.OLD_DATABASE_URL || "";
+    if (OLD && OLD !== DATABASE_URL && !(await pg.query("SELECT 1 FROM nexora_state WHERE id = 1")).rows.length) {
+      const old = new Pool({ connectionString: OLD, ssl: sslOf(OLD), max: 2 });
+      try {
+        console.log("  Transferência: copiando o banco antigo para o novo…");
+        const st = await old.query("SELECT data FROM nexora_state WHERE id = 1");
+        if (!st.rows[0]) throw new Error("o banco antigo está vazio");
+        const ids = (await old.query("SELECT id FROM nexora_files")).rows.map(x => x.id);
+        let n = 0;
+        for (let i = 0; i < ids.length; i += 20) {
+          const part = await old.query("SELECT id, data, created_at FROM nexora_files WHERE id = ANY($1)", [ids.slice(i, i + 20)]);
+          for (const f of part.rows) { await pg.query("INSERT INTO nexora_files (id, data, created_at) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING", [f.id, f.data, f.created_at]); n++; }
+        }
+        await pg.query("CREATE TABLE IF NOT EXISTS nexora_backups (id TEXT PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), size INT NOT NULL, reason TEXT NOT NULL DEFAULT '', data BYTEA NOT NULL)");
+        let nb = 0;
+        if ((await old.query("SELECT to_regclass('nexora_backups') AS t")).rows[0].t) {
+          for (const b of (await old.query("SELECT * FROM nexora_backups")).rows) { await pg.query("INSERT INTO nexora_backups (id, created_at, size, reason, data) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING", [b.id, b.created_at, b.size, b.reason, b.data]); nb++; }
+        }
+        // o estado vai por último: se algo falhar antes, o próximo boot tenta de novo do zero
+        await pg.query("INSERT INTO nexora_state (id, data, updated_at) VALUES (1, $1::jsonb, NOW())", [JSON.stringify(st.rows[0].data)]);
+        console.log(`  Transferência concluída: ${n} arquivos, ${nb} backups e todas as contas e mensagens.`);
+      } finally { await old.end().catch(() => {}); }
+    }
     const r = await pg.query("SELECT data FROM nexora_state WHERE id = 1");
     if (r.rows[0]) Object.assign(db, r.rows[0].data);
     console.log("  Banco: PostgreSQL");
