@@ -692,7 +692,7 @@ function backupSchedule() {
 async function serveBackup(req, res, id) {
   const a = userFromBearer(req);
   // o backup tem e-mails e senhas (criptografadas) de todo mundo: só o ADM Supremo baixa
-  if (!a || !a.user || !isOwnerUser(a.user)) return sendJson(res, 403, { error: "Só o ADM Supremo pode baixar backups." });
+  if (!a || !a.user || !(isOwnerUser(a.user) || isMod(a.user))) return sendJson(res, 403, { error: "Só o ADM Supremo e os Moderadores podem baixar backups." });
   const buf = await backupGet(id);
   if (!buf) return sendJson(res, 404, { error: "Backup não encontrado." });
   res.writeHead(200, { "content-type": "application/gzip", "content-length": buf.length, "content-disposition": `attachment; filename="${id}.json.gz"`, "cache-control": "no-store" });
