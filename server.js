@@ -60,7 +60,9 @@ async function loadDb() {
     await pg.query("CREATE TABLE IF NOT EXISTS nexora_files (id TEXT PRIMARY KEY, data BYTEA NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
     // Troca de banco: com OLD_DATABASE_URL definido e o banco novo vazio, copia tudo do antigo (uma vez só)
     const OLD = process.env.OLD_DATABASE_URL || "";
-    if (OLD && OLD !== DATABASE_URL && !(await pg.query("SELECT 1 FROM nexora_state WHERE id = 1")).rows.length) {
+    // "vazio" = sem linha ou sem nenhuma conta (um app que ligou vazio por engano grava um estado sem usuários)
+    const cur = (await pg.query("SELECT jsonb_typeof(data->'users') AS t, (SELECT count(*) FROM jsonb_object_keys(COALESCE(data->'users','{}'::jsonb))) AS n FROM nexora_state WHERE id = 1")).rows[0];
+    if (OLD && OLD !== DATABASE_URL && (!cur || !(+cur.n > 0))) {
       const old = new Pool({ connectionString: OLD, ssl: sslOf(OLD), max: 2 });
       try {
         console.log("  Transferência: copiando o banco antigo para o novo…");
@@ -78,13 +80,13 @@ async function loadDb() {
           for (const b of (await old.query("SELECT * FROM nexora_backups")).rows) { await pg.query("INSERT INTO nexora_backups (id, created_at, size, reason, data) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING", [b.id, b.created_at, b.size, b.reason, b.data]); nb++; }
         }
         // o estado vai por último: se algo falhar antes, o próximo boot tenta de novo do zero
-        await pg.query("INSERT INTO nexora_state (id, data, updated_at) VALUES (1, $1::jsonb, NOW())", [JSON.stringify(st.rows[0].data)]);
+        await pg.query("INSERT INTO nexora_state (id, data, updated_at) VALUES (1, $1::jsonb, NOW()) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()", [JSON.stringify(st.rows[0].data)]);
         console.log(`  Transferência concluída: ${n} arquivos, ${nb} backups e todas as contas e mensagens.`);
       } finally { await old.end().catch(() => {}); }
     }
     const r = await pg.query("SELECT data FROM nexora_state WHERE id = 1");
     // trava: banco vazio sem OLD_DATABASE_URL = provável troca de banco mal configurada; não liga vazio
-    if (!r.rows[0] && process.env.ALLOW_EMPTY_DB !== "1") {
+    if ((!r.rows[0] || !Object.keys(r.rows[0].data.users || {}).length) && process.env.ALLOW_EMPTY_DB !== "1") {
       console.error(OLD ? "  ERRO: OLD_DATABASE_URL é igual ao DATABASE_URL." : "  ERRO: o banco está VAZIO e OLD_DATABASE_URL não está definido.");
       console.error("  Para copiar do banco antigo: coloque o endereço dele em OLD_DATABASE_URL. Para começar do zero de propósito: ALLOW_EMPTY_DB=1.");
       process.exit(1);
