@@ -120,6 +120,51 @@ async function putFileData(id, buf) {
   if (pg) await pg.query("INSERT INTO nexora_files (id, data) VALUES ($1, $2)", [id, buf]);
   else { await fsp.mkdir(FILES_DIR, { recursive: true }); await fsp.writeFile(path.join(FILES_DIR, id), buf); }
 }
+/* Limpeza diária: apaga arquivos que nada mais usa (mensagem apagada, servidor excluído, avatar trocado).
+   Só mexe em arquivos com mais de 2 dias; comprovantes de pagamento nunca são apagados. */
+const fileGc = { last: 0, removed: 0, bytes: 0 };
+async function cleanOrphanFiles() {
+  const used = new Set();
+  const skip = new Set(["files", "sessions", "metrics", "audit"]);
+  for (const [k, v] of Object.entries(db)) {
+    if (skip.has(k)) continue;
+    const str = JSON.stringify(v) || "";
+    for (const t of str.match(/[A-Za-z0-9_-]{20,}/g) || []) used.add(t);
+  }
+  const old = Date.now() - 2 * 86400e3, dead = [];
+  let bytes = 0;
+  for (const [id, f] of Object.entries(db.files)) {
+    if (f.p || (f.c || 0) > old || used.has(id)) continue;
+    dead.push(id); bytes += f.s || 0;
+  }
+  if (!dead.length) { fileGc.last = Date.now(); return 0; }
+  if (pg) {
+    for (let i = 0; i < dead.length; i += 200) await pg.query("DELETE FROM nexora_files WHERE id = ANY($1)", [dead.slice(i, i + 200)]);
+    pg.query("VACUUM nexora_files").catch(() => {});
+  } else for (const id of dead) try { fs.unlinkSync(path.join(FILES_DIR, id)); } catch {}
+  for (const id of dead) { delete db.files[id]; fileCacheMem.delete(id); }
+  Object.assign(fileGc, { last: Date.now(), removed: fileGc.removed + dead.length, bytes: fileGc.bytes + bytes });
+  save();
+  console.log(`  Limpeza: ${dead.length} arquivos sem uso apagados (${(bytes / 1048576).toFixed(1)} MB).`);
+  return dead.length;
+}
+/* uso do banco, para o painel (guardado por 10 min) */
+let storageCache = null;
+async function storageInfo() {
+  if (storageCache && Date.now() - storageCache.at < 600e3) return storageCache;
+  const out = { at: Date.now(), total: 0, state: 0, files: 0, backups: 0, nFiles: Object.keys(db.files).length, gc: { ...fileGc } };
+  try {
+    if (pg) {
+      const r = await pg.query("SELECT pg_database_size(current_database()) AS total, pg_total_relation_size('nexora_state') AS state, pg_total_relation_size('nexora_files') AS files, COALESCE(pg_total_relation_size(to_regclass('nexora_backups')), 0) AS backups");
+      for (const k of ["total", "state", "files", "backups"]) out[k] = +r.rows[0][k] || 0;
+    } else {
+      out.state = fs.statSync(DB_FILE).size;
+      out.files = Object.values(db.files).reduce((a, f) => a + (f.s || 0), 0);
+      out.total = out.state + out.files;
+    }
+  } catch (e) { out.error = e.message; }
+  return (storageCache = out);
+}
 async function getFileData(id) {
   if (fileCacheMem.has(id)) return fileCacheMem.get(id);
   let buf = null;
@@ -619,7 +664,7 @@ async function handleAccountApi(req, res, route) {
 /* data/backups) e também é enviada por e-mail ao dono, quando possível. */
 /* Os ADMs baixam qualquer cópia pelo Painel ADM.                       */
 /* ------------------------------------------------------------------ */
-const BACKUP_KEEP = 7, BACKUP_EVERY = 24 * 3600e3;
+const BACKUP_KEEP = 3, BACKUP_EVERY = 24 * 3600e3;
 const BACKUP_DIR = path.join(DATA_DIR, "backups");
 const backupState = { last: 0, running: false, lastMail: null };
 async function backupInit() {
@@ -2204,7 +2249,9 @@ io.on("connection", socket => {
     let msgs = 0, msgsDay = 0;
     for (const list of Object.values(db.messages)) { msgs += list.length; for (let i = list.length - 1; i >= 0 && list[i].ts > now - day; i--) msgsDay++; }
     const bl = await backupList().catch(() => []);
+    const storage = await storageInfo();
     return {
+      storage,
       users: users.length, online: online.size, newDay: users.filter(u => u.created > now - day).length, newWeek: users.filter(u => u.created > now - 7 * day).length,
       verified: users.filter(u => u.emailVerified).length, banned: users.filter(u => u.banned).length,
       servers: servers.length, publicServers: servers.filter(s => s.public && !s.blocked).length, blocked: servers.filter(s => s.blocked).length,
@@ -2788,6 +2835,8 @@ loadDb().then(async () => {
     }
   } catch (e) { console.error("Migração MOD:", e); }
   setTimeout(vipSweep, 30e3); setInterval(vipSweep, 3600e3).unref();
+  setTimeout(() => cleanOrphanFiles().catch(e => console.error("Limpeza:", e.message)), 120e3);
+  setInterval(() => cleanOrphanFiles().catch(e => console.error("Limpeza:", e.message)), 86400e3).unref();
   setInterval(sampleMetrics, 300e3).unref();
   server.listen(PORT, HOST, () => {
     console.log(`\n  ${APP_NAME} rodando em http://localhost:${PORT}`);

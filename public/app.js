@@ -1101,6 +1101,7 @@ async function renderAdmin(soft) {
     <div class="section-title">${ic("settings", "sm")} Estado dos serviços</div>
     <div class="svc-list">
       <div><b>Banco de dados</b>${ok(true, r.db)}</div>
+      ${r.storage && r.storage.total ? `<div><b>Espaço usado</b>${ok(r.storage.total < 0.8 * 1024 ** 3, fmtSize(r.storage.total) + " de 1 GB (" + (r.storage.total / 1024 ** 3 * 100).toFixed(1) + "%)")}<small style="display:block;color:var(--muted)">Mensagens e contas ${fmtSize(r.storage.state)} · Arquivos ${fmtSize(r.storage.files)} (${r.storage.nFiles}) · Backups ${fmtSize(r.storage.backups)}${r.storage.gc && r.storage.gc.removed ? ` · Limpeza já apagou ${r.storage.gc.removed} arquivos sem uso (${fmtSize(r.storage.gc.bytes)})` : ""}</small></div>` : ""}
       <div><b>Último backup</b>${r.lastBackup ? ok(Date.now() - r.lastBackup < 2 * 86400e3, new Date(r.lastBackup).toLocaleString("pt-BR")) : ok(false, "nenhum ainda")}</div>
       <div><b>E-mail (Resend)</b>${ok(r.mail, r.mail ? "ligado" : "desligado")}</div>
       <div><b>Aury (IA)</b>${ok(r.ai, r.ai ? (r.aiName || "ligada") : "sem chave")}</div>
@@ -2086,7 +2087,26 @@ function addFiles(list) {
   renderTray();
   $("#input").focus();
 }
-function startUpload(up) {
+/* Comprime fotos antes de enviar (WebP, até 1920 px). GIF, vídeo e arquivos pequenos vão como estão. */
+async function shrinkImage(file) {
+  try {
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size < 350 * 1024 || !window.createImageBitmap) return file;
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 1920 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    bmp.close && bmp.close();
+    let blob = await new Promise(r => c.toBlob(r, "image/webp", 0.82));
+    if (!blob || blob.type !== "image/webp") blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.84));
+    if (!blob || blob.size >= file.size) return file;
+    const ext = blob.type === "image/webp" ? ".webp" : ".jpg";
+    return new File([blob], (file.name || "imagem").replace(/\.[^.]*$/, "") + ext, { type: blob.type });
+  } catch { return file; }
+}
+async function startUpload(up) {
+  const small = await shrinkImage(up.file);
+  if (small !== up.file) { up.file = small; up.name = small.name; up.type = small.type; up.size = small.size; }
   const xhr = new XMLHttpRequest();
   up.xhr = xhr;
   xhr.open("POST", "/api/upload");
