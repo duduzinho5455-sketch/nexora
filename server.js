@@ -83,6 +83,13 @@ async function loadDb() {
       } finally { await old.end().catch(() => {}); }
     }
     const r = await pg.query("SELECT data FROM nexora_state WHERE id = 1");
+    // trava: banco vazio sem OLD_DATABASE_URL = provável troca de banco mal configurada; não liga vazio
+    if (!r.rows[0] && process.env.ALLOW_EMPTY_DB !== "1") {
+      console.error(OLD ? "  ERRO: OLD_DATABASE_URL é igual ao DATABASE_URL." : "  ERRO: o banco está VAZIO e OLD_DATABASE_URL não está definido.");
+      console.error("  Para copiar do banco antigo: coloque o endereço dele em OLD_DATABASE_URL. Para começar do zero de propósito: ALLOW_EMPTY_DB=1.");
+      process.exit(1);
+    }
+    if (OLD) console.log(OLD === DATABASE_URL ? "  Aviso: OLD_DATABASE_URL igual ao DATABASE_URL." : "  OLD_DATABASE_URL definido (já transferido; pode remover).");
     if (r.rows[0]) Object.assign(db, r.rows[0].data);
     console.log("  Banco: PostgreSQL");
   } else {
