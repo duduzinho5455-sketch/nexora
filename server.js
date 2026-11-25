@@ -434,6 +434,7 @@ function healthView() {
     mem: { rss: process.memoryUsage().rss, heap: process.memoryUsage().heapUsed, limit: MEM_LIMIT },
     errorsHour: health.errors.filter(e => e.at > now - 3600e3).length,
     errors: health.errors.slice(-15).reverse(),
+    csp: [...cspSeen].sort((a, b) => b[1].n - a[1].n).slice(0, 20).map(([k, v]) => ({ what: k, n: v.n, last: v.last })),
     alerts: Object.entries(health.alerts).filter(([, a]) => a.active).map(([k, a]) => ({ key: k, text: a.text, since: a.since }))
   };
 }
@@ -663,6 +664,9 @@ async function serveStatic(req, res, pathname) {
     // ninguém pode embutir a Auryx num site falso (proteção contra clickjacking)
     "x-frame-options": "SAMEORIGIN", "content-security-policy": "frame-ancestors 'self'; base-uri 'self'; object-src 'none'",
     "cross-origin-opener-policy": "same-origin-allow-popups",
+    // Proteção contra script injetado em MODO DE OBSERVAÇÃO: não bloqueia nada, só avisa (/api/csp)
+    // o que seria bloqueado. Depois de um tempo sem avisos estranhos, dá para trocar para a proteção de verdade.
+    ...(/html/.test(entry.type) ? { "content-security-policy-report-only": CSP_WATCH } : {}),
     ...(process.env.RENDER || process.env.NODE_ENV === "production" ? { "strict-transport-security": "max-age=15552000" } : {})
   };
   if (req.headers["if-none-match"] === entry.etag) { res.writeHead(304, headers); res.end(); return; }
@@ -1174,6 +1178,40 @@ async function serveBackup(req, res, id) {
   res.end(buf);
 }
 
+/* ---------- Proteção do navegador (CSP) em modo de observação ---------- */
+const CSP_WATCH = [
+  "default-src 'self'",
+  "script-src 'self' 'wasm-unsafe-eval' https://sdk.scdn.co https://www.youtube.com https://s.ytimg.com",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https:",
+  "media-src 'self' data: blob: https:",
+  "font-src 'self' data:",
+  "connect-src 'self' ws: wss: https: ws://127.0.0.1:47800",
+  "frame-src https:",
+  "worker-src 'self' blob:",
+  "report-uri /api/csp"
+].join("; ");
+const cspSeen = new Map();                  // "diretiva | origem | arquivo:linha" -> { n, first, last }
+let cspClock = { t: 0, n: 0 };
+async function handleCsp(req, res) {
+  res.writeHead(204); res.end();
+  const now = Date.now();
+  if (now - cspClock.t > 60e3) cspClock = { t: now, n: 0 };
+  if (++cspClock.n > 200) return;            // no máximo 200 avisos por minuto (ninguém enche a memória)
+  let j;
+  try { j = await readJson(req); } catch { return; }
+  const r = (j && (j["csp-report"] || j)) || {};
+  const dir = str(String(r["effective-directive"] || r["violated-directive"] || ""), 60).split(" ")[0];
+  const blocked = str(String(r["blocked-uri"] || ""), 120).replace(/^(https?:\/\/[^/]+).*$/, "$1");
+  const src = str(String(r["source-file"] || "").replace(/^https?:\/\/[^/]+/, ""), 80) + (r["line-number"] ? ":" + r["line-number"] : "");
+  if (!dir) return;
+  const key = `${dir} | ${blocked || "inline"} | ${src || "?"}`;
+  const e = cspSeen.get(key);
+  if (e) { e.n++; e.last = now; return; }
+  if (cspSeen.size >= 50) return;
+  cspSeen.set(key, { n: 1, first: now, last: now });
+}
+
 /* ---------- "Baixar meus dados" (LGPD): tudo o que a conta tem, em JSON ---------- */
 // Só as mensagens que a PRÓPRIA pessoa escreveu (as dos outros são dados dos outros). Sem senha, sem códigos.
 const exportClock = new Map();             // userId -> horários dos pedidos (no máximo 3 por hora)
@@ -1321,6 +1359,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && acct) return await handleAccountApi(req, res, acct[1]);
     if (pathname.startsWith("/f/") && (req.method === "GET" || req.method === "HEAD")) return await serveFile(req, res, u.pathname);
     if (req.method === "GET" && pathname === "/api/account/export") return await handleExport(req, res);
+    if (req.method === "POST" && pathname === "/api/csp") return await handleCsp(req, res);
     const bk = req.method === "GET" && pathname.match(/^\/api\/admin\/backup\/(nexora-\d+-\w+)$/);
     if (bk) return await serveBackup(req, res, bk[1]);
     if (pathname.startsWith("/api/")) return sendJson(res, 404, { error: "Rota inexistente." });
@@ -1700,7 +1739,7 @@ const ORDER_STATUS = {
   rejected: "RECUSADO pela equipe",
   expired: "EXPIRADO — ficou 7 dias sem resposta; se o Pix caiu, um ADM ainda pode aprovar"
 };
-const AI_BASE = `Você é a Aury, assistente com IA da Auryx Nexos, uma plataforma brasileira de comunidade: servidores com canais de texto, salas de voz com transmissão de tela e câmera, chat dentro da call, atividades na call (ouvir juntos, lousa, jogo da velha), jogos dentro do app (como o Bunker 9), mensagens e chamadas privadas, sobreposição de jogo no app de PC e planos VIP (Plus, Pro e Max). Funciona no app para Windows, no app para Android e no navegador (https://nexora-ujw6.onrender.com — o site com os downloads fica em /site).
+const AI_BASE = `Você é a Aury, assistente com IA da Auryx Nexos, uma plataforma brasileira de comunidade: servidores com canais de texto, salas de voz com transmissão de tela e câmera, chat dentro da call, atividades na call (ouvir juntos, lousa, jogo da velha), jogos dentro do app (como o Bunker 9), mensagens e chamadas privadas, sobreposição de jogo no app de PC e planos VIP (Plus, Pro e Max). Funciona no app para Windows, no app para Android e no navegador (https://auryxnexos.com.br — o site com os downloads fica em https://auryxnexos.com.br/site).
 Fale sempre em português do Brasil, num tom leve, simpático e direto, com frases curtas. No máximo um emoji por mensagem. Pode usar **negrito** e listas simples.
 Nunca peça senha, código de verificação, dados de cartão, CPF ou dados bancários; se alguém oferecer, diga para não enviar.
 Não invente funções que o app não tem. Se não souber algo, diga que não sabe.`;

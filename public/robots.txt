@@ -5,4 +5,4 @@ Disallow: /f/
 Disallow: /socket.io/
 Disallow: /agente/
 
-Sitemap: https://nexora-ujw6.onrender.com/sitemap.xml
+Sitemap: https://auryxnexos.com.br/sitemap.xml

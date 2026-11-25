@@ -1,0 +1,13 @@
+{
+  "name": "auryx-nexos-testes",
+  "private": true,
+  "description": "Testes de ponta a ponta do Auryx Nexos (servidor real + PostgreSQL local PGlite). Separado do package.json principal para não afetar a instalação no Render.",
+  "scripts": {
+    "test": "node run-all.js"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.16",
+    "@electric-sql/pglite-socket": "0.2.19",
+    "socket.io-client": "4.8.1"
+  }
+}

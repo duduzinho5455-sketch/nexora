@@ -1079,6 +1079,7 @@ function admHealth(h) {
       <div><b>Lentidão do servidor</b>${ok(h.loop.p99 < 200, `atraso de até ${h.loop.p99} ms (média ${h.loop.mean} ms)`)}</div>
       <div><b>Tempo de resposta</b>${ok(h.http.p95 < 1000, h.http.n ? `metade em até ${h.http.p50} ms · 95% em até ${h.http.p95} ms` : "sem dados ainda")}</div>
       <div><b>Memória</b>${ok(memPct < 85, `${Math.round(h.mem.rss / 1048576)} MB de ${Math.round(h.mem.limit / 1048576)} MB (${memPct.toFixed(0)}%)`)}</div>
+      <div><b>Proteção contra scripts (observando)</b>${ok(true, h.csp && h.csp.length ? `${h.csp.length} tipo(s) de aviso` : "nenhum aviso")}${h.csp && h.csp.length ? `<details style="margin-top:6px"><summary style="cursor:pointer;color:var(--muted)">O que seria bloqueado</summary><small style="display:block;color:var(--muted);white-space:pre-wrap">${h.csp.map(c => `${c.n}× ${esc(c.what)}`).join("\n")}</small></details>` : ""}</div>
       <div><b>Erros na última hora</b>${ok(h.errorsHour < 10, String(h.errorsHour))}${h.errors.length ? `<details style="margin-top:6px"><summary style="cursor:pointer;color:var(--muted)">Ver os últimos erros</summary><small style="display:block;color:var(--muted);white-space:pre-wrap">${h.errors.map(e => `${new Date(e.at).toLocaleString("pt-BR")} — ${esc(e.text)}`).join("\n")}</small></details>` : ""}</div>
     </div>`;
 }
