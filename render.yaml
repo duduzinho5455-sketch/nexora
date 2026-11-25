@@ -21,6 +21,16 @@ services:
       # IA Aury (Claude): chave da API da Anthropic
       - key: ANTHROPIC_API_KEY
         sync: false
+      # Backups: senha que criptografa as cópias (guarde também fora do Render — sem ela o backup não abre)
+      - key: BACKUP_KEY
+        sync: false
+      # Backups no Google Drive (gere com: node scripts/google-drive-token.js)
+      - key: GDRIVE_CLIENT_ID
+        sync: false
+      - key: GDRIVE_CLIENT_SECRET
+        sync: false
+      - key: GDRIVE_REFRESH_TOKEN
+        sync: false
       - key: DATABASE_URL
         fromDatabase:
           name: nexora-db

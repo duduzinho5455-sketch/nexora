@@ -1190,14 +1190,19 @@ async function renderAdmin(soft) {
   } else if (tab === "backup") {
     const r = await emit("admin:backups", {});
     if (r.error) { body.innerHTML = esc(r.error); return; }
-    const mail = r.mail ? (r.mail.ok ? `<span class="ost st-ok">enviado</span> em ${new Date(r.mail.at).toLocaleString("pt-BR")}` : `<span class="ost st-bad">não enviado</span> — ${esc(r.mail.error || "")}`) : "ainda não enviado";
-    body.innerHTML = `<div class="adm-games-head"><p>Uma cópia completa (contas, servidores, mensagens e pedidos) é feita <b>todo dia</b> automaticamente. Ficam guardadas as <b>${r.keep} últimas</b>. Baixe e guarde no seu PC de vez em quando — se o banco do Render sumir, é com ela que tudo volta. <small style="display:block;margin-top:6px;color:var(--muted)">Cópia por e-mail para o dono: ${mail}. Imagens e vídeos enviados não entram no backup.</small></p><button class="btn primary" data-act="admin-backup-now" ${r.running ? "disabled" : ""}>${ic("download", "sm")}Fazer backup agora</button></div>` +
-      (r.list.length ? r.list.map(b => `<div class="adm-user"><span class="ag-ico">${ic("receipt")}</span><div class="who"><b>${new Date(b.at).toLocaleString("pt-BR")}</b><small>${b.reason === "manual" ? "Feito na mão" : "Automático"} · ${fmtSize(b.size)}</small></div><div class="ao-acts">${sup || modOnly ? `<button class="btn sm" data-act="admin-backup-dl" data-id="${esc(b.id)}">${ic("download", "sm")}Baixar</button>` : ""}</div></div>`).join("")
+    const when = t => new Date(t).toLocaleString("pt-BR");
+    const mail = r.mail ? (r.mail.ok ? `<span class="ost st-ok">enviado</span> em ${when(r.mail.at)}` : `<span class="ost st-bad">não enviado</span> — ${esc(r.mail.error || "")}`) : "ainda não enviado";
+    const drv = r.drive && r.drive.on ? (r.drive.last ? (r.drive.last.ok ? `<span class="ost st-ok">enviado</span> em ${when(r.drive.last.at)} (guarda as ${r.drive.keep} últimas; as antigas vão para a lixeira do Drive)` : `<span class="ost st-bad">falhou</span> — ${esc(r.drive.last.error || "")}`) : "ligado, aguardando o próximo backup") : "não configurado (veja GDRIVE_* no Render)";
+    const encTxt = r.enc ? `<span class="ost st-ok">criptografado</span> (guarde a senha BACKUP_KEY fora do Render: sem ela o backup não abre)` : `<span class="ost st-bad">sem criptografia</span> — defina BACKUP_KEY no Render`;
+    const errTxt = r.lastError ? `<small style="display:block;margin-top:6px;color:var(--red)">Último erro (${when(r.lastError.at)}): ${esc(r.lastError.error)}</small>` : "";
+    const why = b => (b.reason === "manual" ? "Feito na mão" : /^antes/.test(b.reason) ? "Antes de uma atualização (fica 30 dias)" : "Automático");
+    body.innerHTML = `<div class="adm-games-head"><p>Uma cópia completa (contas, servidores, pedidos e <b>todas</b> as mensagens) é feita <b>todo dia</b> automaticamente e conferida depois de gravada. Ficam guardadas as <b>${r.keep} últimas</b>. Baixe e guarde no seu PC de vez em quando — se o banco sumir, é com ela que tudo volta (script <span class="kbd">scripts/restaurar-backup.js</span>). <small style="display:block;margin-top:6px;color:var(--muted)">Proteção: ${encTxt}.<br>Google Drive: ${drv}.<br>Cópia por e-mail para o dono: ${mail}. Imagens e vídeos enviados não entram no backup.</small>${errTxt}</p><button class="btn primary" data-act="admin-backup-now" ${r.running ? "disabled" : ""}>${ic("download", "sm")}Fazer backup agora</button></div>` +
+      (r.list.length ? r.list.map(b => `<div class="adm-user"><span class="ag-ico">${ic("receipt")}</span><div class="who"><b>${when(b.at)}</b><small>${why(b)} · ${fmtSize(b.size)} · ${b.ok ? `<span class="ost st-ok">conferido</span>` : `<span class="ost st-pend">não conferido</span>`}${b.enc ? " · 🔒 criptografado" : ""}</small></div><div class="ao-acts">${sup || modOnly ? `<button class="btn sm" data-act="admin-backup-dl" data-id="${esc(b.id)}" data-enc="${b.enc ? 1 : 0}">${ic("download", "sm")}Baixar</button>` : ""}</div></div>`).join("")
         : `<div class="empty">${ic("receipt")}<p>Nenhum backup ainda. O primeiro é feito alguns minutos depois que o servidor liga — ou clique em <b>Fazer backup agora</b>.</p></div>`);
   } else {
     const r = await emit("admin:audit", { q: S.auditQ || "", action: S.auditA || "" });
     if (r.error) { body.innerHTML = esc(r.error); return; }
-    const NAMES = { "order:approve": "Aprovou pedido", "order:reject": "Recusou pedido", "order:review": "Pôs em análise", "plan:grant": "Deu plano", "plan:revoke": "Revogou plano", "game:save": "Salvou jogo", "game:delete": "Removeu jogo", "server:block": "Bloqueou servidor de", "server:unblock": "Desbloqueou servidor de", "server:delete": "Excluiu servidor de", "user:ban": "Suspendeu", "user:unban": "Reativou", "broadcast": "Enviou aviso geral", "backup:now": "Fez backup do banco", "user:setpass": "Trocou a senha de", "user:logout": "Desconectou de tudo", "user:verify": "Confirmou o e-mail de", "admin:add": "Tornou ADM", "mod:add": "Tornou Moderador", "mod:remove": "Tirou o MOD de", "admin:remove": "Tirou o ADM de", "settings": "Mudou o sistema", "logout:all": "Desconectou todo mundo", "announce:clear": "Tirou o aviso fixado", "migration": "Atualização automática" };
+    const NAMES = { "order:approve": "Aprovou pedido", "order:reject": "Recusou pedido", "order:review": "Pôs em análise", "plan:grant": "Deu plano", "plan:revoke": "Revogou plano", "game:save": "Salvou jogo", "game:delete": "Removeu jogo", "server:block": "Bloqueou servidor de", "server:unblock": "Desbloqueou servidor de", "server:delete": "Excluiu servidor de", "user:ban": "Suspendeu", "user:unban": "Reativou", "broadcast": "Enviou aviso geral", "backup:now": "Fez backup do banco", "user:setpass": "Trocou a senha de", "user:logout": "Desconectou de tudo", "user:verify": "Confirmou o e-mail de", "admin:add": "Tornou ADM", "mod:add": "Tornou Moderador", "mod:remove": "Tirou o MOD de", "admin:remove": "Tirou o ADM de", "settings": "Mudou o sistema", "logout:all": "Desconectou todo mundo", "announce:clear": "Tirou o aviso fixado", "migration": "Atualização automática", "backup:fail": "Backup com problema" };
     const ACTS = [["", "Tudo"], ["order", "Pedidos"], ["plan", "Planos"], ["user", "Contas"], ["server", "Servidores"], ["admin", "Equipe"], ["settings", "Sistema"], ["broadcast", "Avisos"], ["game", "Jogos"]];
     body.innerHTML = `<div class="adm-games-head"><div class="chips">${ACTS.map(([k, n]) => `<button class="chip${(S.auditA || "") === k ? " on" : ""}" data-act="audit-a" data-a="${k}">${n}</button>`).join("")}</div><form class="add-box" data-asearch style="flex:1;max-width:340px"><input placeholder="Buscar por nome, motivo…" value="${esc(S.auditQ || "")}"><button class="btn primary">Buscar</button></form></div><small class="hint" style="display:block;margin:-4px 0 10px">${r.entries.length} de ${r.total} registros</small>` + (r.entries.length ? `<div class="audit">${r.entries.map(e => `<div class="au-row"><small>${new Date(e.at).toLocaleString("pt-BR")}</small><b>${esc(e.adminName)}</b><span>${esc(NAMES[e.action] || e.action)}</span><span>→ ${esc(e.targetName === "?" && e.details && e.details.game ? e.details.game : e.targetName)}</span><small>${esc([(e.details || {}).tier, e.details && e.details.days ? e.details.days + " dias" : "", e.details.amount ? fmtMoney(e.details.amount) : "", e.details.server ? "“" + e.details.server + "”" : "", e.details.reason].filter(Boolean).join(" · "))}</small></div>`).join("")}</div>` : `<div class="empty">${ic("shield")}<p>Nenhuma ação encontrada.</p></div>`);
   }
@@ -2165,7 +2170,18 @@ async function sendMessage() {
   if (S.newMarker) { S.newMarker = null; $("#msgList .new-line")?.remove(); }
   b.list.push(m);
   appendMsg(m);
-  const r = await emit("send", { channelId: cid, text, replyTo: re ? re.id : undefined, nonce, files: fileIds });
+  // Conexão caiu no meio do envio: tenta de novo com o MESMO nonce (o servidor reconhece e não duplica)
+  const payload = { channelId: cid, text, replyTo: re ? re.id : undefined, nonce, files: fileIds };
+  let r = await emit("send", payload);
+  for (let i = 0; i < 3 && r.error && NET_ERRORS.has(r.error); i++) {
+    await waitOnline(20000);
+    r = await emit("send", payload);
+  }
+  if (!r.error && r.id && m.pending) {
+    // o servidor já tinha a mensagem (aviso perdido durante a queda): troca a provisória pela verdadeira
+    const i = b.list.indexOf(m);
+    if (i >= 0) { const real = { ...m, id: r.id }; delete real.pending; delete real.nonce; b.list[i] = real; if (S.channelId === cid) rerenderMsg(real, m.id); }
+  }
   if (r.error) {
     const i = b.list.indexOf(m);
     if (i >= 0) b.list.splice(i, 1);
@@ -2652,6 +2668,15 @@ function localSocket(token) {
 /* ------------------------------------------------------------------ */
 /* Socket                                                              */
 /* ------------------------------------------------------------------ */
+const NET_ERRORS = new Set(["Sem conexão com o servidor.", "O servidor demorou para responder."]);
+// espera a conexão voltar (no máximo "ms")
+function waitOnline(ms) {
+  return new Promise(res => {
+    const t0 = Date.now();
+    const tick = () => (S.socket && S.socket.connected) || Date.now() - t0 > ms ? res() : setTimeout(tick, 300);
+    tick();
+  });
+}
 function emit(ev, data) {
   return new Promise(res => {
     if (!S.socket || !S.socket.connected) return res({ error: "Sem conexão com o servidor." });
@@ -6627,7 +6652,7 @@ const ACTIONS = {
       const res = await fetch("/api/admin/backup/" + encodeURIComponent(a.dataset.id), { headers: { authorization: "Bearer " + S.token } });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Não deu para baixar.");
       const url = URL.createObjectURL(await res.blob()), link = document.createElement("a");
-      link.href = url; link.download = a.dataset.id + ".json.gz"; document.body.append(link); link.click(); link.remove();
+      link.href = url; link.download = a.dataset.id + (a.dataset.enc === "1" ? ".axb" : ".json.gz"); document.body.append(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast(e.message, "error"); }
     a.disabled = false;

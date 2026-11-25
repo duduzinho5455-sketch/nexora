@@ -26,7 +26,9 @@ const VOICE_LIMIT = 12;        // pessoas por sala de voz (malha P2P)
 const MAX_SERVERS_PER_USER = 100;
 const MAX_CHANNELS = 60;
 const MAX_MEMBERS = 1000;
-const SESSION_TTL = 60 * 24 * 3600e3;
+// Sessão (login) vale enquanto for usada: cai depois de 60 dias sem abrir o app e, de qualquer jeito, depois de 1 ano
+const SESSION_IDLE = 60 * 24 * 3600e3, SESSION_MAX = 365 * 24 * 3600e3;
+const sessionAlive = s => { const now = Date.now(); return !!s && now - (s.last || s.created || 0) < SESSION_IDLE && now - (s.created || 0) < SESSION_MAX; };
 
 const ICE_SERVERS = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun.cloudflare.com:3478"] }];
 // TURN: retransmite a voz quando as duas pessoas não conseguem se ligar direto (4G, Wi-Fi de empresa/escola)
@@ -56,7 +58,10 @@ async function loadDb() {
     const { Pool } = require("pg");
     const sslOf = url => process.env.NODE_ENV === "production" || /render\.com|neon\.tech|supabase|sslmode=require/.test(url) ? { rejectUnauthorized: false } : false;
     const ssl = sslOf(DATABASE_URL);
-    pg = new Pool({ connectionString: DATABASE_URL, ssl, max: 3 });
+    pg = new Pool({ connectionString: DATABASE_URL, ssl, max: 3, idleTimeoutMillis: 30000 });
+    // O Neon/Render fecham conexões paradas. Sem este aviso, o "pg" dispara um erro não tratado e o
+    // servidor inteiro cai (chat, voz, tudo). Com ele, a conexão ruim é descartada e o pool abre outra.
+    pg.on("error", e => console.error("[banco] conexão parada caiu (o servidor abre outra):", e.message));
     await pg.query("CREATE TABLE IF NOT EXISTS nexora_state (id INT PRIMARY KEY, data JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
     await pg.query("CREATE TABLE IF NOT EXISTS nexora_files (id TEXT PRIMARY KEY, data BYTEA NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
     // Troca de banco: com OLD_DATABASE_URL definido e o banco novo vazio, copia tudo do antigo (uma vez só)
@@ -65,6 +70,7 @@ async function loadDb() {
     const cur = (await pg.query("SELECT jsonb_typeof(data->'users') AS t, (SELECT count(*) FROM jsonb_object_keys(COALESCE(data->'users','{}'::jsonb))) AS n FROM nexora_state WHERE id = 1")).rows[0];
     if (OLD && OLD !== DATABASE_URL && (!cur || !(+cur.n > 0))) {
       const old = new Pool({ connectionString: OLD, ssl: sslOf(OLD), max: 2 });
+      old.on("error", e => console.error("[banco antigo]", e.message));
       try {
         console.log("  Transferência: copiando o banco antigo para o novo…");
         const st = await old.query("SELECT data FROM nexora_state WHERE id = 1");
@@ -132,12 +138,152 @@ async function loadDb() {
   refreshAdmins();
   for (const u of Object.values(db.users)) { byName.set(u.username.toLowerCase(), u.id); if (u.email) byEmail.set(u.email, u.id); }
   for (const s of Object.values(db.servers)) for (const c of s.channels) chanIndex.set(c.id, s.id);
-  const now = Date.now();
-  for (const [k, v] of Object.entries(db.sessions)) if (!db.users[v.userId] || now - v.created > SESSION_TTL) delete db.sessions[k];
+  purgeSessions();
+}
+// apaga sessões vencidas (no boot e de hora em hora)
+function purgeSessions() {
+  let n = 0;
+  for (const [k, v] of Object.entries(db.sessions)) if (!v || !db.users[v.userId] || !sessionAlive(v)) { delete db.sessions[k]; n++; }
+  if (n) save();
+  return n;
 }
 
+/* ------------------------------------------------------------------ */
+/* Mensagens em tabela própria (PostgreSQL)                            */
+/* Antes: todas as mensagens ficavam no JSON único (regravado inteiro a */
+/* cada segundo) e as mais antigas que 500 por canal eram APAGADAS.     */
+/* Agora: cada mensagem é uma linha de nexora_msgs (histórico completo),*/
+/* gravada só quando muda, em lote e numa transação. A memória guarda as*/
+/* últimas de cada canal; páginas antigas vêm da tabela.                */
+/* O estado continua com as últimas 50 de cada canal: se for preciso    */
+/* voltar para uma versão antiga do servidor, os chats não aparecem vazios.*/
+/* ------------------------------------------------------------------ */
+const MSG_MIG = "2026-11-msgs-table";
+const MSG_STATE_KEEP = 50;
+let msgDb = false;                         // true depois que a migração terminou e foi conferida
+const msgDirty = new Map();                // "canal\nid" -> { c, id, m } (m = null: apagar)
+const chanDrop = new Set();                // canais apagados (some tudo da tabela)
+const msgKey = (cid, id) => cid + "\n" + id;
+function msgPut(cid, m) { if (msgDb && m && m.id) msgDirty.set(msgKey(cid, m.id), { c: cid, id: m.id, m }); }
+function msgDel(cid, id) { if (msgDb && id) msgDirty.set(msgKey(cid, id), { c: cid, id, m: null }); }
+function chanDel(cid) {
+  if (!msgDb) return;
+  for (const k of [...msgDirty.keys()]) if (k.startsWith(cid + "\n")) msgDirty.delete(k);
+  chanDrop.add(cid);
+}
+// versão mais nova de uma mensagem: a que ainda vai ser gravada ganha da que está na tabela
+function msgOverlay(cid, m) { const d = m && msgDirty.get(msgKey(cid, m.id)); return d ? d.m : m; }
+async function msgFetch(cid, id) {
+  if (!msgDb || typeof id !== "string") return null;
+  const d = msgDirty.get(msgKey(cid, id));
+  if (d) return d.m;
+  const r = await pg.query("SELECT data FROM nexora_msgs WHERE channel = $1 AND id = $2", [cid, id]);
+  return r.rows[0] ? r.rows[0].data : null;
+}
+// até "limit" mensagens mais antigas que "anchor", da mais velha para a mais nova
+async function msgOlder(cid, anchor, limit) {
+  if (!msgDb || !anchor || limit <= 0) return [];
+  const r = await pg.query("SELECT data FROM nexora_msgs WHERE channel = $1 AND (ts < $2 OR (ts = $2 AND id < $3)) ORDER BY ts DESC, id DESC LIMIT $4",
+    [cid, Number(anchor.ts) || 0, String(anchor.id), limit]);
+  return r.rows.map(x => msgOverlay(cid, x.data)).filter(Boolean).reverse();
+}
+async function msgUpsert(client, rows) {
+  for (let i = 0; i < rows.length; i += 500) {
+    const part = rows.slice(i, i + 500);
+    await client.query(
+      `INSERT INTO nexora_msgs (channel, id, ts, data)
+       SELECT * FROM UNNEST($1::text[], $2::text[], $3::bigint[], $4::jsonb[])
+       ON CONFLICT (channel, id) DO UPDATE SET ts = EXCLUDED.ts, data = EXCLUDED.data`,
+      [part.map(x => x.c), part.map(x => x.id), part.map(x => Number(x.m.ts) || 0), part.map(x => JSON.stringify(x.m))]);
+  }
+}
+async function flushMsgs() {
+  if (!msgDb || (!msgDirty.size && !chanDrop.size)) return;
+  // conecta ANTES de tirar da fila: com o banco fora do ar, nada sai da fila (antes a mensagem se perdia)
+  const client = await pg.connect();
+  const items = [...msgDirty.values()], drops = [...chanDrop];
+  msgDirty.clear(); chanDrop.clear();
+  try {
+    await client.query("BEGIN");
+    if (drops.length) await client.query("DELETE FROM nexora_msgs WHERE channel = ANY($1::text[])", [drops]);
+    await msgUpsert(client, items.filter(x => x.m));
+    const dels = items.filter(x => !x.m);
+    for (let i = 0; i < dels.length; i += 500) {
+      const part = dels.slice(i, i + 500);
+      await client.query("DELETE FROM nexora_msgs t USING UNNEST($1::text[], $2::text[]) AS d(c, i) WHERE t.channel = d.c AND t.id = d.i", [part.map(x => x.c), part.map(x => x.id)]);
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    // volta para a fila sem passar por cima do que mudou enquanto gravava
+    for (const x of items) { const k = msgKey(x.c, x.id); if (!msgDirty.has(k)) msgDirty.set(k, x); }
+    for (const c of drops) chanDrop.add(c);
+    throw e;
+  } finally { client.release(); }
+}
+// estado gravado no JSON: tudo, mas só as últimas 50 mensagens de cada canal (o resto está na tabela)
+function stateForDb() {
+  const out = Object.assign({}, db), msgs = {};
+  for (const [c, l] of Object.entries(db.messages || {})) if (Array.isArray(l) && l.length) msgs[c] = l.length > MSG_STATE_KEEP ? l.slice(-MSG_STATE_KEEP) : l;
+  out.messages = msgs;
+  return out;
+}
+// Boot: cria a tabela, faz a migração UMA vez (com backup antes e conferência depois) e carrega a memória
+async function msgInit() {
+  if (!pg) return;
+  await pg.query("CREATE TABLE IF NOT EXISTS nexora_msgs (channel TEXT NOT NULL, id TEXT NOT NULL, ts BIGINT NOT NULL, data JSONB NOT NULL, PRIMARY KEY (channel, id))");
+  await pg.query("CREATE INDEX IF NOT EXISTS nexora_msgs_ch_ts_id ON nexora_msgs (channel, ts, id)");
+  if (!db.migrations.includes(MSG_MIG)) {
+    // 1) cópia de segurança completa ANTES (sem backup, não migra: tenta de novo no próximo boot)
+    try { await backupNow("antes-msgs"); }
+    catch (e) { console.error("  Mensagens: backup antes da migração falhou — continua no formato antigo:", e.message); return; }
+    // 2) copia todas as mensagens numa transação só
+    const byKey = new Map();               // sem repetidos (o mesmo id duas vezes quebraria o INSERT)
+    for (const [c, l] of Object.entries(db.messages || {})) for (const m of Array.isArray(l) ? l : []) if (m && m.id) byKey.set(msgKey(c, String(m.id)), { c, id: String(m.id), m });
+    const rows = [...byKey.values()];
+    const client = await pg.connect();
+    try { await client.query("BEGIN"); await msgUpsert(client, rows); await client.query("COMMIT"); }
+    catch (e) { await client.query("ROLLBACK").catch(() => {}); console.error("  Mensagens: migração desfeita, nada mudou:", e.message); return; }
+    finally { client.release(); }
+    // 3) confere canal por canal antes de mudar de formato
+    const r = await pg.query("SELECT channel, count(*)::int AS n FROM nexora_msgs GROUP BY channel");
+    const got = new Map(r.rows.map(x => [x.channel, x.n]));
+    for (const [c, l] of Object.entries(db.messages || {})) {
+      const want = new Set((Array.isArray(l) ? l : []).filter(m => m && m.id).map(m => String(m.id))).size;
+      if ((got.get(c) || 0) < want) { console.error(`  Mensagens: conferência falhou no canal ${c} (${got.get(c) || 0} de ${want}) — continua no formato antigo.`); return; }
+    }
+    db.migrations.push(MSG_MIG);
+    db.audit.push({ at: Date.now(), admin: "", action: "migration", target: "", details: { reason: `Mensagens movidas para tabela própria: ${rows.length} mensagens em ${got.size} conversas (backup antes)` } });
+    msgDb = true;
+    save();
+    console.log(`  Mensagens: ${rows.length} copiadas e conferidas na tabela nexora_msgs.`);
+  } else msgDb = true;
+  // 4) memória: as últimas de cada canal vêm da tabela (é ela que manda agora)
+  const r = await pg.query(
+    `SELECT channel, data FROM (
+       SELECT channel, data, ts, id, row_number() OVER (PARTITION BY channel ORDER BY ts DESC, id DESC) AS rn FROM nexora_msgs
+     ) x WHERE rn <= $1 ORDER BY channel, ts, id`, [HISTORY_KEEP]);
+  const fresh = {};
+  for (const row of r.rows) (fresh[row.channel] || (fresh[row.channel] = [])).push(row.data);
+  db.messages = fresh;
+}
+// envios repetidos (mesmo "nonce"): o app tenta de novo quando a conexão cai; a mensagem não pode duplicar
+const nonces = new Map();                  // userId -> Map(canal\nnonce -> { id, at })
+function sentNonce(uid, cid, nonce) {
+  const m = nonces.get(uid), x = m && m.get(cid + "\n" + nonce);
+  return x && Date.now() - x.at < 15 * 60e3 ? x.id : null;
+}
+function rememberNonce(uid, cid, nonce, id) {
+  let m = nonces.get(uid);
+  if (!m) nonces.set(uid, (m = new Map()));
+  m.set(cid + "\n" + nonce, { id, at: Date.now() });
+  if (m.size > 300) m.delete(m.keys().next().value);
+}
+setInterval(() => { const old = Date.now() - 15 * 60e3; for (const [u, m] of nonces) { for (const [k, x] of m) if (x.at < old) m.delete(k); if (!m.size) nonces.delete(u); } }, 5 * 60e3).unref();
+
 async function writeDb() {
-  const json = JSON.stringify(db);
+  if (pg) await flushMsgs();
+  const json = JSON.stringify(msgDb ? stateForDb() : db);
   if (pg) {
     // nunca troca um banco com contas por um sem contas (ex.: uma instância antiga que ligou vazia sendo desligada)
     const empty = !Object.keys(db.users || {}).length;
@@ -169,6 +315,18 @@ async function cleanOrphanFiles() {
     const str = JSON.stringify(v) || "";
     for (const t of str.match(/[A-Za-z0-9_-]{20,}/g) || []) used.add(t);
   }
+  // mensagens antigas ficam só na tabela: anexos e links /f/ delas também contam como "em uso"
+  if (msgDb) {
+    try {
+      await flushMsgs();
+      const r = await pg.query(`SELECT DISTINCT x FROM (
+          SELECT jsonb_array_elements(data->'f')->>'id' AS x FROM nexora_msgs WHERE jsonb_typeof(data->'f') = 'array'
+          UNION ALL
+          SELECT (regexp_matches(data->>'t', '[A-Za-z0-9_-]{20,}', 'g'))[1] FROM nexora_msgs WHERE (data->>'t') LIKE '%/f/%'
+        ) q WHERE x IS NOT NULL`);
+      for (const row of r.rows) used.add(row.x);
+    } catch (e) { console.error("  Limpeza adiada (não deu para ler as mensagens):", e.message); return 0; }
+  }
   const old = Date.now() - 2 * 86400e3, dead = [];
   let bytes = 0;
   for (const [id, f] of Object.entries(db.files)) {
@@ -193,8 +351,12 @@ async function storageInfo() {
   const out = { at: Date.now(), limit: (Number(process.env.DB_LIMIT_GB) || (/neon.tech/.test(DATABASE_URL) ? 0.5 : 1)) * 1024 ** 3, total: 0, state: 0, files: 0, backups: 0, nFiles: Object.keys(db.files).length, gc: { ...fileGc } };
   try {
     if (pg) {
-      const r = await pg.query("SELECT pg_database_size(current_database()) AS total, pg_total_relation_size('nexora_state') AS state, pg_total_relation_size('nexora_files') AS files, COALESCE(pg_total_relation_size(to_regclass('nexora_backups')), 0) AS backups");
-      for (const k of ["total", "state", "files", "backups"]) out[k] = +r.rows[0][k] || 0;
+      const r = await pg.query("SELECT pg_database_size(current_database()) AS total, pg_total_relation_size('nexora_state') AS state, pg_total_relation_size('nexora_files') AS files, COALESCE(pg_total_relation_size(to_regclass('nexora_backups')), 0) AS backups, COALESCE(pg_total_relation_size(to_regclass('nexora_msgs')), 0) AS msgtable");
+      for (const k of ["total", "state", "files", "backups", "msgtable"]) out[k] = +r.rows[0][k] || 0;
+      if (msgDb) {
+        const c = await pg.query("SELECT count(*)::bigint AS n, count(*) FILTER (WHERE ts > $1)::bigint AS d FROM nexora_msgs", [Date.now() - 86400e3]);
+        out.msgs = +c.rows[0].n || 0; out.msgsDay = +c.rows[0].d || 0;
+      }
     } else {
       out.state = fs.statSync(DB_FILE).size;
       out.files = Object.values(db.files).reduce((a, f) => a + (f.s || 0), 0);
@@ -460,6 +622,10 @@ setInterval(() => { const now = Date.now(); for (const [k, v] of attempts) if (v
 const TRUST_PROXY = !!(process.env.RENDER || process.env.TRUST_PROXY);
 function clientIp(req) {
   if (TRUST_PROXY) {
+    // Cloudflare (domínio próprio) põe o IP real aqui e apaga o que o visitante mandar;
+    // o 1º item do x-forwarded-for pode ser inventado por quem quer fugir do limite de tentativas
+    const cf = String(req.headers["cf-connecting-ip"] || "").trim();
+    if (/^[0-9A-Fa-f:.]{3,45}$/.test(cf)) return cf;
     const f = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
     if (f) return f;
   }
@@ -569,15 +735,27 @@ function newSession(req, res, user) {
 function setSessionCookie(req, res, token) {
   res.setHeader("set-cookie", `ax_s=${token}; Path=/f/; HttpOnly; SameSite=Lax; Max-Age=${60 * 24 * 3600}${secureReq(req) ? "; Secure" : ""}`);
 }
+// Sessão válida do token: confere se existe, se a conta existe e se não venceu (vencida é apagada na hora)
+function sessionOf(token) {
+  if (typeof token !== "string" || !token || token.length >= 100) return null;
+  const key = tokenKey(token), sess = db.sessions[key];
+  if (!sess) return null;
+  const user = db.users[sess.userId];
+  if (!user || !sessionAlive(sess)) { delete db.sessions[key]; save(); return null; }
+  return { key, sess, user };
+}
+// conta suspensa não usa nada (nem envio de arquivo, nem comprovante, nem backup)
 function userFromBearer(req) {
   const t = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-  const sess = t && t.length < 100 ? db.sessions[tokenKey(t)] : null;
-  return sess ? { user: db.users[sess.userId], token: t } : null;
+  const a = sessionOf(t);
+  if (!a || a.user.banned) return null;
+  a.sess.last = Date.now();
+  return { user: a.user, token: t };
 }
 function userFromCookie(req) {
   const m = /(?:^|;\s*)ax_s=([A-Za-z0-9_-]{20,100})/.exec(String(req.headers.cookie || ""));
-  const sess = m ? db.sessions[tokenKey(m[1])] : null;
-  return sess ? db.users[sess.userId] : null;
+  const a = m ? sessionOf(m[1]) : null;
+  return a && !a.user.banned ? a.user : null;
 }
 const meView = u => ({ ...pubUser(u), statusPref: u.status || "online", email: maskEmail(u.email), emailVerified: !!u.emailVerified, admin: isAdmin(u), supreme: isOwnerUser(u), mod: isMod(u),
   planInfo: u.plan && planOf(u) ? { tier: u.plan.tier, until: u.plan.until } : null,
@@ -697,88 +875,220 @@ async function handleAccountApi(req, res, route) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Backup automático: uma cópia completa (compactada) por dia, guardando */
-/* as 7 últimas. Fica numa tabela própria do banco (ou na pasta         */
-/* data/backups) e também é enviada por e-mail ao dono, quando possível. */
-/* Os ADMs baixam qualquer cópia pelo Painel ADM.                       */
+/* Backup automático: uma cópia completa por dia (contas, servidores,   */
+/* pedidos e TODAS as mensagens, inclusive as da tabela), compactada e, */
+/* com BACKUP_KEY, criptografada (AES-256-GCM) antes de sair do servidor.*/
+/* Cada cópia é conferida depois de gravada (abre, descompacta e compara */
+/* o SHA-256); só então as antigas são apagadas. Cópias externas: Google */
+/* Drive (GDRIVE_*) e e-mail do dono. Restauração: scripts/restaurar-backup.js */
 /* ------------------------------------------------------------------ */
-const BACKUP_KEEP = 3, BACKUP_EVERY = 24 * 3600e3;
+const BK = require("./backup");
+const BACKUP_KEEP = 3, BACKUP_EVERY = 24 * 3600e3, BACKUP_PIN_DAYS = 30;   // "antes-…" (antes de migrações) ficam 30 dias
 const BACKUP_DIR = path.join(DATA_DIR, "backups");
-const backupState = { last: 0, running: false, lastMail: null };
+const backupKey = BK.keyOf(process.env.BACKUP_KEY || "");
+const backupState = { last: 0, running: false, lastMail: null, lastError: null, drive: null };
 async function backupInit() {
-  if (pg) await pg.query("CREATE TABLE IF NOT EXISTS nexora_backups (id TEXT PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), size INT NOT NULL, reason TEXT NOT NULL DEFAULT '', data BYTEA NOT NULL)");
-  else fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  if (pg) {
+    await pg.query("CREATE TABLE IF NOT EXISTS nexora_backups (id TEXT PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), size INT NOT NULL, reason TEXT NOT NULL DEFAULT '', data BYTEA NOT NULL)");
+    // integridade: SHA-256 do conteúdo, se está criptografado e se passou na conferência
+    await pg.query("ALTER TABLE nexora_backups ADD COLUMN IF NOT EXISTS sha TEXT NOT NULL DEFAULT '', ADD COLUMN IF NOT EXISTS enc BOOLEAN NOT NULL DEFAULT FALSE, ADD COLUMN IF NOT EXISTS ok BOOLEAN NOT NULL DEFAULT FALSE");
+  } else fs.mkdirSync(BACKUP_DIR, { recursive: true });
   const list = await backupList();
   backupState.last = list.length ? list[0].at : 0;
 }
+const BK_FILE_RE = /^(nexora-\d+-\w+)\.(json\.gz|axb)$/;
 async function backupList() {
   if (pg) {
-    const r = await pg.query("SELECT id, created_at, size, reason FROM nexora_backups ORDER BY created_at DESC");
-    return r.rows.map(x => ({ id: x.id, at: new Date(x.created_at).getTime(), size: x.size, reason: x.reason }));
+    const r = await pg.query("SELECT id, created_at, size, reason, sha, enc, ok FROM nexora_backups ORDER BY created_at DESC");
+    return r.rows.map(x => ({ id: x.id, at: new Date(x.created_at).getTime(), size: x.size, reason: x.reason, enc: !!x.enc, ok: !!x.ok, sha: x.sha ? x.sha.slice(0, 12) : "" }));
   }
   let names = [];
-  try { names = fs.readdirSync(BACKUP_DIR).filter(n => /^nexora-[\w.-]+\.json\.gz$/.test(n)); } catch {}
-  return names.map(n => { const st = fs.statSync(path.join(BACKUP_DIR, n)); const m = n.match(/^nexora-(\d+)-(\w+)/); return { id: n.replace(/\.json\.gz$/, ""), at: m ? +m[1] : st.mtimeMs, size: st.size, reason: m ? m[2] : "" }; })
-    .sort((a, b) => b.at - a.at);
+  try { names = fs.readdirSync(BACKUP_DIR).filter(n => BK_FILE_RE.test(n)); } catch {}
+  return names.map(n => {
+    const [, id, ext] = BK_FILE_RE.exec(n), st = fs.statSync(path.join(BACKUP_DIR, n)), m = id.match(/^nexora-(\d+)-(\w+)/);
+    let sha = ""; try { sha = fs.readFileSync(path.join(BACKUP_DIR, id + ".ok"), "utf8").trim(); } catch {}
+    return { id, at: +m[1] || st.mtimeMs, size: st.size, reason: m[2], enc: ext === "axb", ok: !!sha, sha: sha.slice(0, 12), file: n };
+  }).sort((a, b) => b.at - a.at);
 }
 async function backupGet(id) {
   if (typeof id !== "string" || !/^nexora-\d+-\w+$/.test(id)) return null;
   if (pg) { const r = await pg.query("SELECT data FROM nexora_backups WHERE id = $1", [id]); return r.rows[0] ? r.rows[0].data : null; }
-  try { return fs.readFileSync(path.join(BACKUP_DIR, id + ".json.gz")); } catch { return null; }
+  for (const ext of [".axb", ".json.gz"]) { try { return fs.readFileSync(path.join(BACKUP_DIR, id + ext)); } catch {} }
+  return null;
+}
+// Monta o JSON do backup aos pedaços (as mensagens vêm da tabela em lotes): não precisa caber tudo na memória
+async function backupPayload(at) {
+  if (msgDb) await flushMsgs();
+  const gz = zlib.createGzip({ level: 9 }), out = [], hash = crypto.createHash("sha256");
+  gz.on("data", c => out.push(c));
+  const ended = new Promise((ok, no) => { gz.on("end", ok); gz.on("error", no); });
+  const w = s => { hash.update(s); return gz.write(s) ? null : new Promise(ok => gz.once("drain", ok)); };
+  const { messages, ...rest } = db;
+  const restJson = JSON.stringify(rest);
+  await w(`{"app":"auryx-nexos","version":2,"at":${at},"db":${restJson === "{}" ? "{" : restJson.slice(0, -1) + ","}"messages":{`);
+  let cur = null, first = true, n = 0;
+  const row = async (cid, json) => {
+    if (cid !== cur) { await w((cur === null ? "" : "],") + JSON.stringify(cid) + ":["); cur = cid; first = true; }
+    await w((first ? "" : ",") + json); first = false; n++;
+  };
+  if (msgDb) {
+    let last = null;
+    for (;;) {
+      const r = last
+        ? await pg.query("SELECT channel, ts, id, data::text AS j FROM nexora_msgs WHERE (channel, ts, id) > ($1, $2, $3) ORDER BY channel, ts, id LIMIT 2000", [last.channel, last.ts, last.id])
+        : await pg.query("SELECT channel, ts, id, data::text AS j FROM nexora_msgs ORDER BY channel, ts, id LIMIT 2000");
+      if (!r.rows.length) break;
+      for (const x of r.rows) await row(x.channel, x.j);
+      last = r.rows[r.rows.length - 1];
+    }
+  } else for (const [cid, list] of Object.entries(messages || {})) for (const m of Array.isArray(list) ? list : []) await row(cid, JSON.stringify(m));
+  await w((cur === null ? "" : "]") + "}}}");
+  gz.end();
+  await ended;
+  return { gz: Buffer.concat(out), sha: hash.digest("hex"), msgs: n };
+}
+function backupNotify(text) {
+  const owner = db.users[byName.get(OWNER)];
+  if (owner) pushTo(owner.id, { title: "⚠️ Backup da Auryx com problema", body: text.slice(0, 180), url: "/?abrir=admin", tag: "backup" });
+  db.audit.push({ at: Date.now(), admin: "", action: "backup:fail", target: "", details: { reason: text.slice(0, 300) } });
+  save();
 }
 async function backupNow(reason) {
   if (backupState.running) throw new Error("Já tem um backup sendo feito. Espere terminar.");
   backupState.running = true;
   try {
-    const at = Date.now(), id = `nexora-${at}-${reason === "manual" ? "manual" : "auto"}`;
-    const gz = zlib.gzipSync(Buffer.from(JSON.stringify({ app: "auryx-nexavoria", version: 1, at, db })), { level: 9 });
-    if (pg) {
-      await pg.query("INSERT INTO nexora_backups (id, size, reason, data) VALUES ($1, $2, $3, $4)", [id, gz.length, reason, gz]);
-      await pg.query("DELETE FROM nexora_backups WHERE id NOT IN (SELECT id FROM nexora_backups ORDER BY created_at DESC LIMIT $1)", [BACKUP_KEEP]);
-    } else {
-      fs.mkdirSync(BACKUP_DIR, { recursive: true });
-      fs.writeFileSync(path.join(BACKUP_DIR, id + ".json.gz"), gz);
-      const old = (await backupList()).slice(BACKUP_KEEP);
-      for (const b of old) try { fs.unlinkSync(path.join(BACKUP_DIR, b.id + ".json.gz")); } catch {}
+    const at = Date.now(), tag = reason === "manual" ? "manual" : /^antes/.test(reason) ? "antes" : "auto";
+    const id = `nexora-${at}-${tag}`, enc = !!backupKey;
+    const { gz, sha, msgs } = await backupPayload(at);
+    const blob = enc ? BK.encrypt(gz, backupKey) : gz;
+    if (pg) await pg.query("INSERT INTO nexora_backups (id, size, reason, data, sha, enc) VALUES ($1, $2, $3, $4, $5, $6)", [id, blob.length, reason, blob, sha, enc]);
+    else { fs.mkdirSync(BACKUP_DIR, { recursive: true }); fs.writeFileSync(path.join(BACKUP_DIR, id + (enc ? ".axb" : ".json.gz")), blob); }
+    // conferência: lê de volta do banco, abre, descompacta e compara com o que foi gerado
+    const back = await backupGet(id);
+    const chk = back ? await BK.plainHash(back, backupKey).catch(e => ({ error: e.message })) : { error: "a cópia não foi encontrada depois de gravada" };
+    const ok = chk.sha === sha;
+    if (pg) await pg.query("UPDATE nexora_backups SET ok = $2 WHERE id = $1", [id, ok]);
+    else if (ok) fs.writeFileSync(path.join(BACKUP_DIR, id + ".ok"), sha);
+    if (!ok) {
+      const err = "O backup foi gravado mas não passou na conferência: " + (chk.error || "conteúdo diferente do original") + ". As cópias antigas foram mantidas.";
+      backupState.lastError = { at: Date.now(), error: err };
+      backupNotify(err);
+      throw new Error(err);
     }
-    backupState.last = at;
-    console.log(`  Backup ${id}: ${(gz.length / 1024).toFixed(0)} KB`);
-    backupMail(id, gz).catch(e => { backupState.lastMail = { at: Date.now(), ok: false, error: String(e.message || e).slice(0, 200) }; });
-    return { id, at, size: gz.length, reason };
+    // só depois de conferido, as cópias antigas saem (as de "antes de migração" ficam 30 dias)
+    if (pg) {
+      await pg.query("DELETE FROM nexora_backups WHERE reason NOT LIKE 'antes%' AND id NOT IN (SELECT id FROM nexora_backups WHERE reason NOT LIKE 'antes%' ORDER BY created_at DESC LIMIT $1)", [BACKUP_KEEP]);
+      await pg.query(`DELETE FROM nexora_backups WHERE reason LIKE 'antes%' AND created_at < NOW() - INTERVAL '${BACKUP_PIN_DAYS} days'`);
+    } else {
+      const all = await backupList(), normal = all.filter(b => b.reason !== "antes");
+      const drop = [...normal.slice(BACKUP_KEEP), ...all.filter(b => b.reason === "antes" && b.at < Date.now() - BACKUP_PIN_DAYS * 86400e3)];
+      for (const b of drop) for (const f of [b.file, b.id + ".ok"]) try { fs.unlinkSync(path.join(BACKUP_DIR, f)); } catch {}
+    }
+    backupState.last = at; backupState.lastError = null;
+    console.log(`  Backup ${id}: ${(blob.length / 1024).toFixed(0)} KB, ${msgs} mensagens, ${enc ? "criptografado" : "SEM criptografia (defina BACKUP_KEY)"}, conferido.`);
+    backupSend(id, blob, enc).catch(e => console.error("  Backup: envio externo falhou:", e.message));
+    return { id, at, size: blob.length, reason, enc, ok, msgs };
+  } catch (e) {
+    if (!backupState.lastError || backupState.lastError.error !== e.message) { backupState.lastError = { at: Date.now(), error: String(e.message || e).slice(0, 300) }; }
+    throw e;
   } finally { backupState.running = false; }
 }
+// cópias fora do banco: Google Drive e e-mail do dono (cada uma com o próprio resultado no painel)
+async function backupSend(id, blob, enc) {
+  const name = id + (enc ? ".axb" : ".json.gz"), fails = [];
+  if (driveOn()) {
+    try { const f = await driveUpload(name, blob); backupState.drive = { at: Date.now(), ok: true, name, id: f.id }; }
+    catch (e) { backupState.drive = { at: Date.now(), ok: false, error: String(e.message || e).slice(0, 200) }; fails.push("Google Drive: " + backupState.drive.error); }
+  }
+  await backupMail(name, blob).catch(e => { backupState.lastMail = { at: Date.now(), ok: false, error: String(e.message || e).slice(0, 200) }; });
+  if (backupState.lastMail && !backupState.lastMail.ok && MAIL_ON) fails.push("e-mail: " + backupState.lastMail.error);
+  if (fails.length) backupNotify("A cópia externa do backup falhou — " + fails.join("; "));
+}
 // cópia fora do Render: vai por e-mail para o dono (se o e-mail estiver confirmado e o envio configurado)
-async function backupMail(id, gz) {
+async function backupMail(name, blob) {
   if (!MAIL_ON) { backupState.lastMail = { at: Date.now(), ok: false, error: "E-mail não configurado no servidor." }; return; }
   const owner = db.users[byName.get(OWNER)];
   if (!owner || !owner.email || !owner.emailVerified) { backupState.lastMail = { at: Date.now(), ok: false, error: "A conta do dono não tem e-mail confirmado." }; return; }
-  if (gz.length > 20 * 1024 * 1024) { backupState.lastMail = { at: Date.now(), ok: false, error: "Backup grande demais para e-mail (baixe pelo painel)." }; return; }
+  if (blob.length > 20 * 1024 * 1024) { backupState.lastMail = { at: Date.now(), ok: false, error: "Backup grande demais para e-mail (use o Google Drive ou baixe pelo painel)." }; return; }
   const day = new Date().toLocaleDateString("pt-BR");
   const r = await fetch(process.env.RESEND_API_URL || "https://api.resend.com/emails", {
     method: "POST",
     headers: { authorization: `Bearer ${RESEND_KEY}`, "content-type": "application/json" },
     body: JSON.stringify({
       from: MAIL_FROM, to: [owner.email], subject: `Backup da ${APP_NAME} — ${day}`,
-      text: `Backup automático da ${APP_NAME} (${day}). Guarde este arquivo: ele tem contas, servidores e mensagens. Os arquivos enviados (imagens, vídeos) ficam fora do backup.`,
-      attachments: [{ filename: id + ".json.gz", content: gz.toString("base64") }]
-    })
+      text: `Backup automático da ${APP_NAME} (${day}). Guarde este arquivo: ele tem contas, servidores e todas as mensagens.${backupKey ? " Ele está criptografado: para restaurar, use a mesma senha BACKUP_KEY do servidor." : ""} Os arquivos enviados (imagens, vídeos) ficam fora do backup.`,
+      attachments: [{ filename: name, content: blob.toString("base64") }]
+    }),
+    signal: AbortSignal.timeout(60000)
   });
   backupState.lastMail = r.ok ? { at: Date.now(), ok: true } : { at: Date.now(), ok: false, error: `Envio recusado (${r.status}).` };
 }
+/* Google Drive como armazenamento EXTERNO de backup (não substitui o PostgreSQL).
+   Precisa de GDRIVE_CLIENT_ID, GDRIVE_CLIENT_SECRET e GDRIVE_REFRESH_TOKEN (escopo drive.file:
+   o app só enxerga os arquivos que ele mesmo criou). Opcional: GDRIVE_FOLDER_ID, GDRIVE_KEEP (padrão 14).
+   As cópias antigas vão para a LIXEIRA do Drive (o Google guarda 30 dias), nunca são apagadas de vez. */
+const GD = {
+  id: process.env.GDRIVE_CLIENT_ID || "", secret: process.env.GDRIVE_CLIENT_SECRET || "", refresh: process.env.GDRIVE_REFRESH_TOKEN || "",
+  folder: process.env.GDRIVE_FOLDER_ID || "", keep: Math.max(1, Number(process.env.GDRIVE_KEEP) || 14),
+  tokenUrl: process.env.GDRIVE_TOKEN_URL || "https://oauth2.googleapis.com/token",
+  api: (process.env.GDRIVE_API_URL || "https://www.googleapis.com").replace(/\/+$/, "")
+};
+const driveOn = () => !!(GD.id && GD.secret && GD.refresh);
+let driveTok = null;
+async function driveToken() {
+  if (driveTok && driveTok.exp > Date.now() + 60e3) return driveTok.t;
+  const r = await fetch(GD.tokenUrl, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: GD.id, client_secret: GD.secret, refresh_token: GD.refresh, grant_type: "refresh_token" }), signal: AbortSignal.timeout(15000) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.access_token) throw new Error(`o login no Google falhou (${r.status}${j.error ? ": " + j.error : ""})`);
+  driveTok = { t: j.access_token, exp: Date.now() + (Number(j.expires_in) || 3600) * 1000 };
+  return driveTok.t;
+}
+async function driveUpload(name, buf) {
+  const tk = await driveToken();
+  const meta = { name, mimeType: "application/octet-stream", appProperties: { auryx: "backup" }, ...(GD.folder ? { parents: [GD.folder] } : {}) };
+  // envio "retomável" (aceita arquivos grandes; o simples para em 5 MB)
+  const start = await fetch(`${GD.api}/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,md5Checksum`, {
+    method: "POST", signal: AbortSignal.timeout(30000),
+    headers: { authorization: "Bearer " + tk, "content-type": "application/json; charset=UTF-8", "x-upload-content-type": "application/octet-stream", "x-upload-content-length": String(buf.length) },
+    body: JSON.stringify(meta)
+  });
+  const loc = start.headers.get("location");
+  if (!start.ok || !loc) throw new Error(`o Google Drive recusou o envio (${start.status})`);
+  const up = await fetch(loc, { method: "PUT", headers: { "content-type": "application/octet-stream" }, body: buf, signal: AbortSignal.timeout(300000) });
+  const j = await up.json().catch(() => ({}));
+  if (!up.ok || !j.id) throw new Error(`o Google Drive não terminou o envio (${up.status})`);
+  // integridade: o Drive devolve o MD5 e o tamanho do que guardou
+  if (j.md5Checksum && j.md5Checksum !== crypto.createHash("md5").update(buf).digest("hex")) throw new Error("o arquivo guardado no Drive ficou diferente do original");
+  if (j.size && Number(j.size) !== buf.length) throw new Error("o arquivo guardado no Drive ficou com outro tamanho");
+  await driveRetention(tk).catch(e => console.warn("  [drive] limpeza das cópias antigas falhou:", e.message));
+  return j;
+}
+async function driveRetention(tk) {
+  const q = "appProperties has { key='auryx' and value='backup' } and trashed = false";
+  const r = await fetch(`${GD.api}/drive/v3/files?q=${encodeURIComponent(q)}&orderBy=${encodeURIComponent("createdTime desc")}&fields=${encodeURIComponent("files(id,name,createdTime)")}&pageSize=100`,
+    { headers: { authorization: "Bearer " + tk }, signal: AbortSignal.timeout(20000) });
+  if (!r.ok) throw new Error(`listagem recusada (${r.status})`);
+  const files = (await r.json()).files || [];
+  for (const f of files.slice(GD.keep)) {
+    const t = await fetch(`${GD.api}/drive/v3/files/${encodeURIComponent(f.id)}`, { method: "PATCH", headers: { authorization: "Bearer " + tk, "content-type": "application/json" }, body: JSON.stringify({ trashed: true }), signal: AbortSignal.timeout(20000) });
+    if (!t.ok) throw new Error(`não deu para mover ${f.name} para a lixeira (${t.status})`);
+  }
+}
 function backupSchedule() {
   const tick = () => {
-    if (Date.now() - backupState.last >= BACKUP_EVERY && !backupState.running) backupNow("auto").catch(e => console.error("Backup falhou:", e.message));
+    if (Date.now() - backupState.last >= BACKUP_EVERY && !backupState.running) backupNow("auto").catch(e => { console.error("Backup falhou:", e.message); if (!/conferência/.test(e.message)) backupNotify("O backup automático falhou: " + e.message); });
   };
   setTimeout(tick, 2 * 60e3);                // logo depois de ligar (se o último tiver mais de 1 dia)
   setInterval(tick, 30 * 60e3).unref();
 }
 async function serveBackup(req, res, id) {
   const a = userFromBearer(req);
-  // o backup tem e-mails e senhas (criptografadas) de todo mundo: só o ADM Supremo baixa
+  // o backup tem e-mails e senhas (criptografadas) de todo mundo: só o ADM Supremo e os Moderadores baixam
   if (!a || !a.user || !(isOwnerUser(a.user) || isMod(a.user))) return sendJson(res, 403, { error: "Só o ADM Supremo e os Moderadores podem baixar backups." });
   const buf = await backupGet(id);
   if (!buf) return sendJson(res, 404, { error: "Backup não encontrado." });
-  res.writeHead(200, { "content-type": "application/gzip", "content-length": buf.length, "content-disposition": `attachment; filename="${id}.json.gz"`, "cache-control": "no-store" });
+  const enc = BK.isEncrypted(buf);
+  res.writeHead(200, { "content-type": enc ? "application/octet-stream" : "application/gzip", "content-length": buf.length, "content-disposition": `attachment; filename="${id}${enc ? ".axb" : ".json.gz"}"`, "cache-control": "no-store" });
   res.end(buf);
 }
 
@@ -904,8 +1214,8 @@ const io = new Server(server, {
 
 io.use((socket, next) => {
   const t = socket.handshake.auth && socket.handshake.auth.token;
-  const sess = typeof t === "string" && t.length < 100 ? db.sessions[tokenKey(t)] : null;
-  const user = sess && db.users[sess.userId];
+  const a = sessionOf(t);
+  const sess = a && a.sess, user = a && a.user;
   if (!user) return next(new Error("auth"));
   if (user.banned) { const e = new Error("banned"); e.data = { reason: user.banned.reason || "" }; return next(e); }
   // app de PC antigo (NEXORA) foi desativado: só conecta o app novo ou o navegador
@@ -1087,6 +1397,7 @@ function orderSysMsg(o, kind, text) {
   const cid = "t." + o.id, list = db.messages[cid] || (db.messages[cid] = []);
   const m = { id: msgId(), a: o.uid, t: text || "", ts: Date.now(), sys: kind };
   list.push(m);
+  msgPut(cid, m);
   io.to(["u:" + o.uid, "admins"]).emit("msg", { channelId: cid, serverId: null, m });
 }
 /* Rotina de hora em hora: pedidos esquecidos expiram e quem está perto de vencer recebe aviso */
@@ -1188,6 +1499,7 @@ function systemMsg(s, userId, kind) {
   const list = db.messages[ch.id] || (db.messages[ch.id] = []);
   const m = { id: msgId(), a: userId, t: "", ts: Date.now(), sys: kind };
   list.push(m);
+  msgPut(ch.id, m);
   if (list.length > HISTORY_KEEP) list.splice(0, list.length - HISTORY_KEEP);
   io.to("s:" + s.id).emit("msg", { channelId: ch.id, serverId: s.id, m });
 }
@@ -1213,7 +1525,7 @@ function deleteServer(s, reason) {
   for (const [k, v] of voice) if (v.sid === s.id) { leaveVoice(k); io.to(k).emit("voice:kicked", {}); }
   io.to("s:" + s.id).emit("server:remove", { serverId: s.id, reason });
   io.in("s:" + s.id).socketsLeave("s:" + s.id);
-  for (const c of s.channels) { delete db.messages[c.id]; chanIndex.delete(c.id); }
+  for (const c of s.channels) { delete db.messages[c.id]; chanDel(c.id); chanIndex.delete(c.id); }
   for (const [code, inv] of Object.entries(db.invites)) if (inv.serverId === s.id) delete db.invites[code];
   delete db.servers[s.id];
   save();
@@ -1342,6 +1654,7 @@ async function aiTicketRun(o) {
     const text = r.refused || !r.text ? "Essa eu não consigo responder por aqui — um ADM da equipe vai te ajudar neste atendimento. 🙏" : r.text;
     if (!m) { m = { id: msgId(), a: AI_ID, t: text, ts: Date.now() }; list.push(m); db.messages[cid] = list; aiTicketPost(o, m, false); }
     else { m.t = text; aiTicketPost(o, m, true); }
+    msgPut(cid, m);
     if (list.length > HISTORY_KEEP) list.splice(0, list.length - HISTORY_KEEP);
     o.aiN = (o.aiN || 0) + 1;
     save();
@@ -1489,9 +1802,11 @@ io.on("connection", socket => {
     if (c.type !== "text" && c.type !== "voice") fail("Canal não encontrado.");   // sala de voz também tem chat (chat da call)
     return { s, c, rooms: "s:" + s.id, dm: null };
   };
-  const findMsg = (channelId, id) => {
+  // mensagem na memória (as mais recentes) ou, se for antiga, na tabela de mensagens
+  const findMsg = async (channelId, id) => {
     const t = getTarget(channelId);
-    const m = (db.messages[t.c.id] || []).find(x => x.id === id);
+    let m = (db.messages[t.c.id] || []).find(x => x.id === id);
+    if (!m && msgDb && typeof id === "string") m = await msgFetch(t.c.id, id);
     if (!m || m.sys) fail("Mensagem não encontrada.");
     return { ...t, m };
   };
@@ -1502,17 +1817,41 @@ io.on("connection", socket => {
   };
 
   /* ---------- Mensagens ---------- */
-  on("history", ({ channelId, before }) => {
+  on("history", async ({ channelId, before }) => {
     const { c } = getTarget(channelId);
     const list = db.messages[c.id] || [];
     let end = list.length;
-    if (typeof before === "string") { const i = list.findIndex(m => m.id === before); if (i >= 0) end = i; }
+    if (typeof before === "string") {
+      const i = list.findIndex(m => m.id === before);
+      if (i >= 0) end = i;
+      else if (msgDb) {
+        // página mais antiga que a memória: vem da tabela (histórico completo, sem limite de 500)
+        const anchor = await msgFetch(c.id, before);
+        if (!anchor) return { messages: [], more: false };
+        const older = await msgOlder(c.id, anchor, PAGE_SIZE + 1);
+        return { messages: older.slice(-PAGE_SIZE), more: older.length > PAGE_SIZE };
+      }
+    }
     const start = Math.max(0, end - PAGE_SIZE);
-    return { messages: list.slice(start, end), more: start > 0 };
+    let messages = list.slice(start, end), more = start > 0;
+    // chegou no começo da memória: completa a página com as mais antigas da tabela
+    // (âncora = a mais antiga desta página ou, se a página ficou vazia, a própria mensagem "before")
+    const anchor = messages[0] || list[end];
+    if (start === 0 && msgDb && anchor) {
+      const need = PAGE_SIZE - messages.length;
+      const older = await msgOlder(c.id, anchor, need + 1);
+      more = older.length > need;
+      if (need > 0) messages = [...older.slice(-need), ...messages];
+    }
+    return { messages, more };
   });
 
-  on("send", ({ channelId, text, replyTo, nonce, files }) => {
+  on("send", async ({ channelId, text, replyTo, nonce, files }) => {
     const { s, c, rooms, dm } = getTarget(channelId);
+    // mesmo envio repetido (o app tenta de novo quando a conexão cai no meio): devolve a mensagem que já existe
+    nonce = str(nonce, 40);
+    const dup = nonce && sentNonce(uid, c.id, nonce);
+    if (dup) return { id: dup, dup: true };
     text = typeof text === "string" ? text.replace(/\r\n?/g, "\n").replace(/\n{4,}/g, "\n\n\n").trim().slice(0, MSG_MAX[rankOf(me())]) : "";
     const att = [];
     if (Array.isArray(files)) for (const fid of files.slice(0, 10)) {
@@ -1525,8 +1864,14 @@ io.on("connection", socket => {
     const m = { id: msgId(), a: uid, t: text, ts: Date.now() };
     if (att.length) m.f = att.map(({ id, n, t, s: size }) => ({ id, n, t, s: size }));
     if (typeof replyTo === "string") {
-      const r = list.find(x => x.id === replyTo && !x.sys);
-      if (r) m.re = { id: r.id, a: r.a, t: r.t.slice(0, 140) };
+      // resposta a uma mensagem antiga (fora da memória): busca na tabela
+      const r = list.find(x => x.id === replyTo && !x.sys) || (msgDb ? await msgFetch(c.id, replyTo) : null);
+      if (r && !r.sys) m.re = { id: r.id, a: r.a, t: String(r.t || "").slice(0, 140) };
+    }
+    if (nonce) {
+      const again = sentNonce(uid, c.id, nonce);   // o mesmo envio chegou enquanto buscava a resposta
+      if (again) return { id: again, dup: true };
+      rememberNonce(uid, c.id, nonce, m.id);
     }
     if (dm && !dm.group && !list.length) {
       // primeira mensagem: a conversa aparece para a outra pessoa
@@ -1536,10 +1881,11 @@ io.on("connection", socket => {
       }
     }
     list.push(m);
+    msgPut(c.id, m);
     countMsg();
     if (list.length > HISTORY_KEEP) list.splice(0, list.length - HISTORY_KEEP);
     save();
-    io.to(rooms).emit("msg", { channelId: c.id, serverId: s ? s.id : null, m, nonce: str(nonce, 40) });
+    io.to(rooms).emit("msg", { channelId: c.id, serverId: s ? s.id : null, m, nonce });
     // push para quem está com o app fechado: privado, grupo, atendimento e menções
     const author = me().username, preview = (text || "📎 Anexo").slice(0, 140), url = "/?c=" + encodeURIComponent(c.id);
     if (dm) for (const id of dm.members) { if (id !== uid) pushTo(id, { title: dm.group ? `${author} em ${dm.name || "grupo"}` : author, body: preview, url, tag: c.id }); }
@@ -1558,28 +1904,31 @@ io.on("connection", socket => {
     return { id: m.id };
   });
 
-  on("edit", ({ channelId, id, text }) => {
-    const { c, m, rooms } = findMsg(channelId, id);
+  on("edit", async ({ channelId, id, text }) => {
+    const { c, m, rooms } = await findMsg(channelId, id);
     if (m.a !== uid) fail("Você só pode editar suas mensagens.");
     text = typeof text === "string" ? text.replace(/\r\n?/g, "\n").trim().slice(0, MSG_MAX[rankOf(me())]) : "";
     if (!text) fail("A mensagem está vazia.");
     if (text === m.t) return { ok: true };
     m.t = text; m.e = Date.now();
+    msgPut(c.id, m);
     save();
     io.to(rooms).emit("msg:update", { channelId: c.id, m });
   });
 
-  on("delete", ({ channelId, id }) => {
-    const { s, c, m, rooms } = findMsg(channelId, id);
+  on("delete", async ({ channelId, id }) => {
+    const { s, c, m, rooms } = await findMsg(channelId, id);
     if (m.a !== uid && !(s && hasPerm(s, uid, "messages"))) fail("Sem permissão para apagar esta mensagem.");
-    const list = db.messages[c.id];
-    list.splice(list.indexOf(m), 1);
+    const list = db.messages[c.id] || [];
+    const i = list.indexOf(m);
+    if (i >= 0) list.splice(i, 1);           // antes: indexOf -1 apagava a ÚLTIMA mensagem do canal
+    msgDel(c.id, m.id);
     save();
     io.to(rooms).emit("msg:delete", { channelId: c.id, id: m.id });
   });
 
-  on("react", ({ channelId, id, emoji }) => {
-    const { c, m, rooms } = findMsg(channelId, id);
+  on("react", async ({ channelId, id, emoji }) => {
+    const { c, m, rooms } = await findMsg(channelId, id);
     emoji = str(emoji, 32);
     if (!emoji || /[\s<>&"'`]/.test(emoji) || /^[\x20-\x7e]+$/.test(emoji)) fail("Reação inválida.");
     m.r = m.r || {};
@@ -1592,6 +1941,7 @@ io.on("connection", socket => {
       m.r[emoji] = [...ids, uid];
     }
     if (!Object.keys(m.r).length) delete m.r;
+    msgPut(c.id, m);
     save();
     io.to(rooms).emit("msg:update", { channelId: c.id, m });
   });
@@ -1879,6 +2229,7 @@ io.on("connection", socket => {
     s.channels = s.channels.filter(x => x.id !== c.id);
     chanIndex.delete(c.id);
     delete db.messages[c.id];
+    chanDel(c.id);
     save();
     io.to("s:" + s.id).emit("channel:remove", { serverId: s.id, channelId: c.id });
   });
@@ -1972,6 +2323,7 @@ io.on("connection", socket => {
     if (kind) m.sys = kind;
     if (files) m.f = files;
     list.push(m);
+    msgPut(cid, m);
     if (list.length > HISTORY_KEEP) list.splice(0, list.length - HISTORY_KEEP);
     io.to(["u:" + o.uid, "admins"]).emit("msg", { channelId: cid, serverId: null, m });
   };
@@ -2205,6 +2557,8 @@ io.on("connection", socket => {
     if (u.id === adm.id) fail("Você não pode suspender a si mesmo.");
     reason = str(reason, 300);
     u.banned = { at: Date.now(), by: uid, reason };
+    // tira a conta de todos os aparelhos (se for reativada, a pessoa entra de novo com a senha)
+    for (const [k, v] of Object.entries(db.sessions)) if (v.userId === u.id) delete db.sessions[k];
     io.to("u:" + u.id).emit("banned", { reason });
     setTimeout(() => io.in("u:" + u.id).disconnectSockets(true), 300);
     audit("user:ban", u.id, { reason });
@@ -2288,6 +2642,7 @@ io.on("connection", socket => {
     for (const list of Object.values(db.messages)) { msgs += list.length; for (let i = list.length - 1; i >= 0 && list[i].ts > now - day; i--) msgsDay++; }
     const bl = await backupList().catch(() => []);
     const storage = await storageInfo();
+    if (typeof storage.msgs === "number") { msgs = storage.msgs; msgsDay = storage.msgsDay; }   // histórico completo da tabela
     return {
       storage,
       users: users.length, online: online.size, newDay: users.filter(u => u.created > now - day).length, newWeek: users.filter(u => u.created > now - 7 * day).length,
@@ -2345,7 +2700,8 @@ io.on("connection", socket => {
   on("admin:backups", async () => {
     if (!isOwnerUser(me()) && !isMod(me())) fail("Só o ADM Supremo e os Moderadores veem os backups.");
     const list = await backupList();
-    return { list, running: backupState.running, mail: backupState.lastMail, every: BACKUP_EVERY, keep: BACKUP_KEEP };
+    return { list, running: backupState.running, mail: backupState.lastMail, every: BACKUP_EVERY, keep: BACKUP_KEEP,
+      enc: !!backupKey, drive: { on: driveOn(), last: backupState.drive, keep: GD.keep }, lastError: backupState.lastError };
   });
   on("admin:backup:now", async () => {
     if (!isOwnerUser(me()) && !isMod(me())) fail("Só o ADM Supremo e os Moderadores fazem backup.");
@@ -2552,6 +2908,7 @@ io.on("connection", socket => {
     const list = db.messages[d.id] || (db.messages[d.id] = []);
     const m = { id: msgId(), a: userId, t: extra || "", ts: Date.now(), sys: kind };
     list.push(m);
+    msgPut(d.id, m);
     if (list.length > HISTORY_KEEP) list.splice(0, list.length - HISTORY_KEEP);
     io.to(d.members.map(x => "u:" + x)).emit("msg", { channelId: d.id, serverId: null, m });
   };
@@ -2593,7 +2950,7 @@ io.on("connection", socket => {
     for (const [k, v] of voice) if (v.uid === uid && v.cid === d.id) { leaveVoice(k); io.to(k).emit("voice:kicked", {}); }
     d.members = d.members.filter(x => x !== uid);
     io.to("u:" + uid).emit("dm:remove", { id: d.id });
-    if (!d.members.length) { delete db.dms[d.id]; delete db.messages[d.id]; save(); return; }
+    if (!d.members.length) { delete db.dms[d.id]; delete db.messages[d.id]; chanDel(d.id); save(); return; }
     if (d.owner === uid) d.owner = d.members[0];
     groupSys(d, uid, "gleave");
     save();
@@ -2859,6 +3216,9 @@ function runMigrations() {
 
 loadDb().then(async () => {
   try { await backupInit(); backupSchedule(); } catch (e) { console.error("Backup indisponível:", e.message); }
+  // mensagens em tabela própria (migração única, com backup antes e conferência depois)
+  try { await msgInit(); } catch (e) { console.error("Mensagens: tabela indisponível, seguindo no formato antigo:", e.message); }
+  setInterval(purgeSessions, 3600e3).unref();
   // cópia de segurança antes de mexer em tudo (só na primeira vez)
   if (!db.migrations.includes(NEXOS_MIGRATION)) { try { await backupNow("antes da atualização Nexos"); } catch (e) { console.error("Backup antes da migração:", e.message); } }
   try { runMigrations(); } catch (e) { console.error("Migração falhou:", e); }
@@ -2875,7 +3235,7 @@ loadDb().then(async () => {
   // depois da transferência, regrava algumas vezes: a instância antiga (vazia) pode gravar por cima ao ser desligada
   if (migratedAt) for (const t of [20e3, 60e3, 120e3, 300e3]) setTimeout(save, t).unref();
   setTimeout(vipSweep, 30e3); setInterval(vipSweep, 3600e3).unref();
-  setTimeout(() => cleanOrphanFiles().catch(e => console.error("Limpeza:", e.message)), 120e3);
+  setTimeout(() => cleanOrphanFiles().catch(e => console.error("Limpeza:", e.message)), Number(process.env.GC_FIRST_MS) || 120e3);
   setInterval(() => cleanOrphanFiles().catch(e => console.error("Limpeza:", e.message)), 86400e3).unref();
   setInterval(sampleMetrics, 300e3).unref();
   server.listen(PORT, HOST, () => {
@@ -2892,17 +3252,22 @@ loadDb().then(async () => {
 });
 
 let stopping = false;
-async function shutdown() {
+async function shutdown(code) {
   if (stopping) return;
   stopping = true;
-  setTimeout(() => process.exit(0), 5000).unref();
+  code = typeof code === "number" ? code : 0;
+  setTimeout(() => process.exit(code), 5000).unref();
   if (saveTimer) clearTimeout(saveTimer);
   dirty = true;
   while (saving) await new Promise(r => setTimeout(r, 50));
   await flush();
-  io.close();
+  try { io.close(); } catch {}
   if (pg) await pg.end().catch(() => {});
-  process.exit(0);
+  process.exit(code);
 }
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+process.on("SIGINT", () => shutdown(0));
+process.on("SIGTERM", () => shutdown(0));
+// Erro que escapou de tudo: registra, grava o que estiver pendente e sai (o Render liga de novo).
+// Antes o processo morria na hora e perdia o último segundo de mudanças.
+process.on("uncaughtException", e => { console.error("[erro fatal]", e && e.stack || e); shutdown(1); });
+process.on("unhandledRejection", e => console.error("[erro] promessa sem tratamento:", e && e.stack || e));
