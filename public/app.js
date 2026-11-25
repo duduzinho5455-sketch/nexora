@@ -1101,7 +1101,7 @@ async function renderAdmin(soft) {
     <div class="section-title">${ic("settings", "sm")} Estado dos serviços</div>
     <div class="svc-list">
       <div><b>Banco de dados</b>${ok(true, r.db)}</div>
-      ${r.storage && r.storage.total ? `<div><b>Espaço usado</b>${ok(r.storage.total < 0.8 * 1024 ** 3, fmtSize(r.storage.total) + " de 1 GB (" + (r.storage.total / 1024 ** 3 * 100).toFixed(1) + "%)")}<small style="display:block;color:var(--muted)">Mensagens e contas ${fmtSize(r.storage.state)} · Arquivos ${fmtSize(r.storage.files)} (${r.storage.nFiles}) · Backups ${fmtSize(r.storage.backups)}${r.storage.gc && r.storage.gc.removed ? ` · Limpeza já apagou ${r.storage.gc.removed} arquivos sem uso (${fmtSize(r.storage.gc.bytes)})` : ""}</small></div>` : ""}
+      ${r.storage && r.storage.total ? `<div><b>Espaço usado</b>${ok(r.storage.total < 0.8 * r.storage.limit, fmtSize(r.storage.total) + " de " + fmtSize(r.storage.limit) + " (" + (r.storage.total / r.storage.limit * 100).toFixed(1) + "%)")}<small style="display:block;color:var(--muted)">Mensagens e contas ${fmtSize(r.storage.state)} · Arquivos ${fmtSize(r.storage.files)} (${r.storage.nFiles}) · Backups ${fmtSize(r.storage.backups)}${r.storage.gc && r.storage.gc.removed ? ` · Limpeza já apagou ${r.storage.gc.removed} arquivos sem uso (${fmtSize(r.storage.gc.bytes)})` : ""}</small></div>` : ""}
       <div><b>Último backup</b>${r.lastBackup ? ok(Date.now() - r.lastBackup < 2 * 86400e3, new Date(r.lastBackup).toLocaleString("pt-BR")) : ok(false, "nenhum ainda")}</div>
       <div><b>E-mail (Resend)</b>${ok(r.mail, r.mail ? "ligado" : "desligado")}</div>
       <div><b>Aury (IA)</b>${ok(r.ai, r.ai ? (r.aiName || "ligada") : "sem chave")}</div>

@@ -190,7 +190,7 @@ async function cleanOrphanFiles() {
 let storageCache = null;
 async function storageInfo() {
   if (storageCache && Date.now() - storageCache.at < 600e3) return storageCache;
-  const out = { at: Date.now(), total: 0, state: 0, files: 0, backups: 0, nFiles: Object.keys(db.files).length, gc: { ...fileGc } };
+  const out = { at: Date.now(), limit: (Number(process.env.DB_LIMIT_GB) || (/neon.tech/.test(DATABASE_URL) ? 0.5 : 1)) * 1024 ** 3, total: 0, state: 0, files: 0, backups: 0, nFiles: Object.keys(db.files).length, gc: { ...fileGc } };
   try {
     if (pg) {
       const r = await pg.query("SELECT pg_database_size(current_database()) AS total, pg_total_relation_size('nexora_state') AS state, pg_total_relation_size('nexora_files') AS files, COALESCE(pg_total_relation_size(to_regclass('nexora_backups')), 0) AS backups");
