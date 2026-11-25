@@ -50,6 +50,7 @@ const db = { users: {}, sessions: {}, servers: {}, invites: {}, messages: {}, dm
 const byName = new Map();          // nome em minúsculas -> id do usuário
 const chanIndex = new Map();       // id do canal -> id do servidor
 
+let migratedAt = 0;
 async function loadDb() {
   if (DATABASE_URL) {
     const { Pool } = require("pg");
@@ -81,6 +82,7 @@ async function loadDb() {
         }
         // o estado vai por último: se algo falhar antes, o próximo boot tenta de novo do zero
         await pg.query("INSERT INTO nexora_state (id, data, updated_at) VALUES (1, $1::jsonb, NOW()) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()", [JSON.stringify(st.rows[0].data)]);
+        migratedAt = Date.now();
         console.log(`  Transferência concluída: ${n} arquivos, ${nb} backups e todas as contas e mensagens.`);
       } finally { await old.end().catch(() => {}); }
     }
@@ -137,7 +139,9 @@ async function loadDb() {
 async function writeDb() {
   const json = JSON.stringify(db);
   if (pg) {
-    await pg.query("INSERT INTO nexora_state (id, data, updated_at) VALUES (1, $1::jsonb, NOW()) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()", [json]);
+    // nunca troca um banco com contas por um sem contas (ex.: uma instância antiga que ligou vazia sendo desligada)
+    const empty = !Object.keys(db.users || {}).length;
+    await pg.query("INSERT INTO nexora_state (id, data, updated_at) VALUES (1, $1::jsonb, NOW()) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()" + (empty ? " WHERE (SELECT count(*) FROM jsonb_object_keys(COALESCE(nexora_state.data->'users','{}'::jsonb))) = 0" : ""), [json]);
   } else {
     const tmp = DB_FILE + ".tmp";
     await fsp.writeFile(tmp, json);
@@ -2868,6 +2872,8 @@ loadDb().then(async () => {
       save();
     }
   } catch (e) { console.error("Migração MOD:", e); }
+  // depois da transferência, regrava algumas vezes: a instância antiga (vazia) pode gravar por cima ao ser desligada
+  if (migratedAt) for (const t of [20e3, 60e3, 120e3, 300e3]) setTimeout(save, t).unref();
   setTimeout(vipSweep, 30e3); setInterval(vipSweep, 3600e3).unref();
   setTimeout(() => cleanOrphanFiles().catch(e => console.error("Limpeza:", e.message)), 120e3);
   setInterval(() => cleanOrphanFiles().catch(e => console.error("Limpeza:", e.message)), 86400e3).unref();
