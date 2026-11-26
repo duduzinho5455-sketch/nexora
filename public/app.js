@@ -3962,6 +3962,20 @@ async function padInstall() {
   toast(good ? "🎮 Controles ativados! Cada amigo vai aparecer no jogo como um controle de Xbox (Jogador 2, 3…)." : "Driver instalado, mas o agente ainda não enxergou. Reinicie o PC se não funcionar.", good ? "ok" : "warn", 8000);
   if (V.remoteRerender && $("[data-pad-check]")) V.remoteRerender();   // tela Configurações › Controle remoto aberta
 }
+function padAskActivate(name) {
+  if (V.padAsked) return;
+  V.padAsked = true;
+  modal({
+    title: "Ativar controles neste PC?", sub: `Para o controle de ${esc(name)} funcionar no jogo como outro jogador.`,
+    body: `<p style="margin:0 0 10px">O driver de controles já vem dentro do app. Clique em <b>Ativar</b> e responda <b>Sim</b> quando o Windows perguntar. É uma vez só — nos próximos co-ops já está pronto.</p>
+      <div class="hint" style="margin:0">Sem isso, o controle do amigo não funciona (só o teclado dele).</div>
+      <div class="modal-foot"><button class="btn ghost" data-no>Agora não</button><button class="btn primary" data-yes>${ic("gamepad", "sm")}Ativar</button></div>`,
+    onMount(m, close) {
+      m.querySelector("[data-no]").onclick = close;
+      m.querySelector("[data-yes]").onclick = () => { close(); padInstall(); };
+    }
+  });
+}
 // quem já está jogando sem controle passa a ter controle de verdade na hora
 function padDriverReady() {
   for (const [sock, g] of V.granted) {
@@ -4313,6 +4327,7 @@ function askControl(p) {
         sig(p.sock, { ctrlGrant: mode, pad: pad ? 2 : 0 });
         toast(`${u.username} agora pode ${mode === "full" ? "controlar seu PC" : "jogar com você"}.`, "ok");
         if (agentOld() && !V.oldWarned) { V.oldWarned = true; toast(agentOldMsg(), "warn", 12000); }
+        else if (!pad && mode === "coop" && padCanInstall() && AG.pad === "nodriver") padAskActivate(u.username);
         else if (!pad && mode === "coop") toast(`Sem o driver ViGEmBus neste PC, o controle de ${u.username} não funciona — só o teclado dele. Veja Configurações › Controle remoto.`, "warn", 9000);
         renderCtrlBar();
       };
@@ -6486,7 +6501,7 @@ function remotePads() {
   const old = agentOld();
   const status = old ? `<small style="color:var(--yellow)">⚠️ ${esc(agentOldMsg())}</small>`
     : st === "ok" ? `<small style="color:var(--green)">✅ Driver pronto — cada amigo vira um controle de Xbox (Jogador 2, 3, 4).</small>`
-    : st === "nodriver" ? `<small style="color:var(--yellow)">⚠️ Driver não encontrado neste PC.</small>`
+    : st === "nodriver" ? `<small style="color:var(--yellow)">⚠️ Os controles ainda não foram ativados neste PC.${padCanInstall() ? " Clique em <b>Ativar controles</b> (o Windows pede um Sim, uma vez só)." : " Instale o ViGEmBus e reinicie o PC — ou use o app de PC, que ativa com um clique."}</small>`
     : st === "erro" ? `<small style="color:var(--yellow)">⚠️ O driver respondeu com erro. Reinstale o ViGEmBus e reinicie o PC.</small>`
     : "";
   return `<span class="label" style="margin-top:18px;display:block">Co-op com controle (Jogador 2, 3, 4)</span>
@@ -6526,7 +6541,8 @@ function mountRemote(p, rerender) {
     try { await agentConnect(); }
     catch (e) { chk.classList.remove("loading"); toast(e.message, "error", 6000); return; }
     const okPad = AG.pad === "ok";
-    toast(okPad ? "Driver de controle virtual pronto! Seus amigos vão aparecer como Jogador 2, 3 e 4." : AG.ver < 3 ? agentOldMsg() : "Driver ViGEmBus não encontrado neste PC. Instale e reinicie o PC.", okPad ? "ok" : "warn", 10000);
+    if (!okPad && AG.ver >= 3 && AG.pad === "nodriver" && padCanInstall()) { chk.classList.remove("loading"); padInstall(); return; }
+    toast(okPad ? "Driver de controle virtual pronto! Seus amigos vão aparecer como Jogador 2, 3 e 4." : AG.ver < 3 ? agentOldMsg() : (padCanInstall() ? "Os controles ainda não foram ativados neste PC: clique em Ativar controles." : "Driver ViGEmBus não encontrado neste PC. Instale e reinicie o PC — ou use o app de PC, que ativa com um clique."), okPad ? "ok" : "warn", 10000);
     ctrlWatch();
     rerender();
   };

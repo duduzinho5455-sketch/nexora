@@ -54,6 +54,18 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
+      # Garante que o "Ativar controles" vai funcionar: driver e agente dentro do app montado
+      - name: Conferir o que foi embutido
+        shell: pwsh
+        run: |
+          $r = "dist/win-unpacked/resources"
+          foreach ($f in "vigem/ViGEmBus-Setup.exe", "vigem/LICENCA-ViGEmBus.txt", "agente/nexora-agente.ps1") {
+            if (-not (Test-Path "$r/$f")) { throw "Faltou no app: $f" }
+          }
+          if ((Get-FileHash "$r/vigem/ViGEmBus-Setup.exe" -Algorithm SHA256).Hash -ne "89220A7865076B342892F98865F3499FB7C4CFD673159E89D352C360FD014C6A") { throw "Instalador do driver diferente dentro do app" }
+          if (-not (Select-String -Path "$r/agente/nexora-agente.ps1" -SimpleMatch 'hello 3' -Quiet)) { throw "Agente antigo dentro do app" }
+          Write-Host "OK: driver, licença e agente v3 dentro do app"
+
       - name: Copiar com o nome antigo
         shell: pwsh
         run: Copy-Item dist/Auryx-Nexos-Setup.exe dist/Auryx-Nexavoria-Setup.exe -Force   # links velhos também baixam o app novo
