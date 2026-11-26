@@ -147,6 +147,7 @@ public static class NxPad {
       Submit(slot, 0, 0, 0, 7, -7, 7, -7);
       for (int t = 0; t < 20 && idx < 0; t++) { idx = FindMarked(); if (idx < 0) System.Threading.Thread.Sleep(50); }
       Submit(slot, 0, 0, 0, 0, 0, 0, 0);
+      xidx[slot] = idx;
       return idx;
     }
     Error = "nao foi possivel criar o controle";
@@ -182,6 +183,49 @@ public static class NxPad {
     byte[] u = new byte[8]; P32(u, 0, 8); P32(u, 4, serial[slot]);
     Io(UNPLUG, u, null);
     serial[slot] = 0;
+    xidx[slot] = -1;
+  }
+  // vaga do XInput (jogador 0-3) de cada controle virtual nosso; -1 = desconhecida
+  static int[] xidx = new int[] { -1, -1, -1, -1 };
+  // "pads a b c d": o que o Windows (XInput) tem em cada numero de jogador:
+  //   "-" vazio · "v<vaga>" controle virtual nosso · "f<botoes>" outro controle (o de quem transmite);
+  //   em "f" o bit 0x10000 marca analogico ou gatilho mexendo (para a tela mostrar atividade)
+  public static string List() {
+    string[] o = new string[4];
+    for (uint i = 0; i < 4; i++) {
+      XSTATE st;
+      uint r;
+      try { r = XInputGetState(i, out st); } catch { o[i] = "-"; continue; }
+      if (r != 0) { o[i] = "-"; continue; }
+      int mine = -1;
+      for (int s = 0; s < 4; s++) if (serial[s] != 0 && xidx[s] == (int)i) mine = s;
+      if (mine >= 0) { o[i] = "v" + mine; continue; }
+      XGAMEPAD g = st.Gamepad;
+      int b = g.wButtons;
+      if (Math.Abs((int)g.sThumbLX) > 9000 || Math.Abs((int)g.sThumbLY) > 9000 || Math.Abs((int)g.sThumbRX) > 9000 || Math.Abs((int)g.sThumbRY) > 9000 || g.bLeftTrigger > 40 || g.bRightTrigger > 40) b |= 0x10000;
+      o[i] = "f" + b;
+    }
+    return "pads " + string.Join(" ", o);
+  }
+  // "po <vaga> <vaga> ...": tira esses controles virtuais e liga de novo NESSA ordem.
+  // O Windows da a cada controle novo o menor numero de jogador livre, entao a ordem vira Jogador 2, 3...
+  // (ou Jogador 1, 2... se nao houver controle fisico ligado). Devolve uma linha "pad <vaga> ok <jogador>" por controle.
+  public static string Order(string[] p) {
+    var slots = new System.Collections.Generic.List<int>();
+    for (int i = 1; i < p.Length && slots.Count < 4; i++) {
+      int s;
+      if (int.TryParse(p[i], out s) && s >= 0 && s <= 3 && !slots.Contains(s)) slots.Add(s);
+    }
+    if (slots.Count == 0) return null;
+    foreach (int s in slots) { Unplug(s); failed[s] = false; }
+    System.Threading.Thread.Sleep(350);                   // o Windows libera os numeros de jogador
+    var o = new System.Collections.Generic.List<string>();
+    foreach (int s in slots) {
+      int idx = Plug(s);
+      if (idx < -1) { failed[s] = true; o.Add("pad " + s + " erro " + Error); }
+      else o.Add("pad " + s + " ok " + idx);
+    }
+    return string.Join("\n", o);
   }
   public static void UnplugAll() { for (int s = 0; s < 4; s++) { Unplug(s); failed[s] = false; } }
   public static int Count() { int n = 0; for (int s = 0; s < 4; s++) if (serial[s] != 0) n++; return n; }
@@ -339,7 +383,8 @@ try {
     # conta para a pagina o que este agente sabe fazer: versao 2 = controles virtuais + mouse relativo
     $padSt = if ([NxPad]::Open()) { "ok" } elseif ([NxPad]::Error -eq "sem driver") { "nodriver" } else { "erro" }
     if ($padSt -ne "ok") { Avisar ("Controle virtual indisponivel: " + [NxPad]::Error + " (instale o ViGEmBus para jogar co-op com controle).") "DarkYellow" }
-    Enviar "hello 2 pad=$padSt"
+    # versao 3 = tambem lista os controles do PC ("pl") e reordena os jogadores ("po")
+    Enviar "hello 3 pad=$padSt"
     try {
       while ($ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
         $leitura = $ws.ReceiveAsync($seg, [Threading.CancellationToken]::None)
@@ -374,6 +419,14 @@ try {
                     if ($q[2] -eq "ok") { Registrar ("controle virtual " + $num + " conectado (jogador " + ([int]$q[3] + 1) + ")"); Avisar ("Controle virtual " + $num + " conectado.") "Green" }
                     else { Registrar ("controle virtual " + $num + " falhou: " + [NxPad]::Error); Avisar ("Controle virtual " + $num + " falhou: " + [NxPad]::Error) "Red" }
                   }
+                }
+              }
+              "pl" { Enviar ([NxPad]::List()) }
+              "po" {
+                $resp = [NxPad]::Order([string[]]$p)
+                if ($resp) {
+                  Enviar $resp
+                  Registrar ("ordem dos controles virtuais: " + (($resp -split "`n") -join " | "))
                 }
               }
               "k" {

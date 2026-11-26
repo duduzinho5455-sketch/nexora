@@ -1720,3 +1720,27 @@ html.aurys .rail-item.home .srv-icon { box-shadow: 0 0 0 2px color-mix(in srgb, 
 .sp-now { position: absolute; inset: 0; display: flex; align-items: center; gap: 16px; padding: 16px; background: linear-gradient(135deg, #1db95433, #12121288); }
 .sp-now img, .sp-now .sp-ph { width: 96px; height: 96px; border-radius: 10px; object-fit: cover; flex: none; box-shadow: 0 8px 24px rgba(0,0,0,.4); display: grid; place-items: center; background: #1db95455; }
 .sp-now b { display: block; font-size: 16px; } .sp-now small { color: #1ed760; }
+
+/* Aba Controles do co-op (quem transmite) */
+.modal.padp { width: min(680px, 100%); }
+.padp .label { display: block; margin-bottom: 8px; }
+.padp-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--bg-1); border: 1px solid var(--line); margin-bottom: 8px; }
+.padp-row.me { border-color: var(--accent); }
+.padp-row.off { opacity: .55; }
+.padp-row > span:not(.padp-btns) { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.padp-row > span > span { display: grid; min-width: 0; }
+.padp-row small { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.padp-row b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.padp-pl { flex: none; min-width: 92px; padding: 4px 10px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 12.5px; text-align: center; }
+.padp-pl.dim { background: var(--bg-4); color: var(--muted); }
+.padp-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--bg-4); transition: background .08s, box-shadow .08s; }
+.padp-dot.on { background: var(--green); box-shadow: 0 0 0 4px rgba(35, 209, 139, .25); }
+.padp-btns { display: flex; align-items: center; gap: 4px; flex: none; }
+.padp-btns .icon-btn:disabled { opacity: .3; pointer-events: none; }
+.padp-empty { padding: 10px 12px; border-radius: 12px; background: var(--bg-1); color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+.padp-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+.padp-note { color: var(--muted); font-size: 12.5px; }
+@media (max-width: 560px) {
+  .padp-row { flex-wrap: wrap; }
+  .padp-btns { width: 100%; justify-content: flex-end; }
+}

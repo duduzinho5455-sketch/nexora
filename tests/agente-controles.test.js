@@ -38,7 +38,7 @@ const waitMsg = async (ws, re, ms = 8000) => { for (let t = 0; t < ms; t += 100)
   const ws = await wsOpen();
   ok(!!ws, "página conectou no agente");
   const hello = await waitMsg(ws, /^hello /);
-  ok(hello === "hello 2 pad=ok", `agente encontrou o driver: "${hello}"`);
+  ok(hello === "hello 3 pad=ok", `agente encontrou o driver: "${hello}"`);
 
   console.log("1) Amigo 1: X apertado, RT pela metade, analógico esquerdo para a direita e para cima");
   ws.send("p 0 16384 0 128 20000 15000 0 0");
@@ -72,6 +72,37 @@ const waitMsg = async (ws, re, ms = 8000) => { for (let t = 0; t < ms; t += 100)
   await sleep(1200);
   s = on(xinput()).filter(x => !antes.some(a => a.slot === x.slot));
   ok(s.length === 1 && s[0].slot === p2.slot, `controle 1 removido do Windows; sobrou só o 2 (slot ${s.map(x => x.slot)})`);
+
+  console.log("3b) Aba Controles: listar o que o Windows tem e trocar a ordem dos jogadores");
+  ws.send("p 0 0 0 0 0 0 0 0");
+  const r0b = await waitMsg(ws, /^pad 0 ok/);
+  const pl0 = +String(r0b).split(" ")[3], pl1 = p2.slot;
+  ws.msgs.length = 0;
+  ws.send("pl");
+  let lst = await waitMsg(ws, /^pads /);
+  let it = lst ? lst.split(" ").slice(1) : [];
+  ok(it.length === 4 && it[pl0] === "v0" && it[pl1] === "v1", `lista mostra os 2 virtuais nos números certos: "${lst}"`);
+  ok(antes.every(a => /^f\d+$/.test(it[a.slot] || "")), "controles que já estavam no PC aparecem como do dono (f)");
+  const menor = Math.min(pl0, pl1), maior = Math.max(pl0, pl1), primeiro = pl0 < pl1 ? 0 : 1, segundo = 1 - primeiro;
+  ws.msgs.length = 0;
+  ws.send(`po ${segundo} ${primeiro}`);                       // inverte: quem era o segundo vira o primeiro
+  const a1 = await waitMsg(ws, new RegExp(`^pad ${segundo} ok`)), a2 = await waitMsg(ws, new RegExp(`pad ${primeiro} ok`));
+  const novo = m => { const x = /pad (\d) ok (-?\d)/g, o = {}; let k; while ((k = x.exec(m))) o[k[1]] = +k[2]; return o; };
+  const n = novo(ws.msgs.join("\n"));
+  ok(a1 && a2 && n[segundo] === menor && n[primeiro] === maior, `ordem invertida: controle virtual ${segundo + 1} agora é Jogador ${n[segundo] + 1}, o ${primeiro + 1} é Jogador ${n[primeiro] + 1}`);
+  await sleep(300);
+  ws.send(`p ${segundo} 4096 0 0 0 0 0 0`);
+  await sleep(300);
+  s = on(xinput());
+  ok((s.find(x => x.slot === menor) || {}).btn === 4096, "depois de reordenar, o botão do controle chega no novo número de jogador");
+  ws.send(`p ${segundo} 0 0 0 0 0 0 0`);
+  ws.msgs.length = 0;
+  ws.send("pl");
+  lst = await waitMsg(ws, /^pads /);
+  it = lst ? lst.split(" ").slice(1) : [];
+  ok(it[menor] === "v" + segundo && it[maior] === "v" + primeiro, `lista atualizada depois da troca: "${lst}"`);
+  ws.send("px 0\npx 1");
+  await sleep(1200);
 
   console.log("4) Conexão termina: nenhum controle pode ficar ligado");
   ws.sock.destroy();

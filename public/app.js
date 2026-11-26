@@ -161,6 +161,9 @@ const V = {
   loop: null, statsTimer: null, ping: null, watching: new Set(), viewers: new Set(), focus: null,
   granted: new Map(),   // quem pode controlar meu PC: sock -> { uid, mode }
   padUsed: new Set(),   // vagas de controle virtual (0–3) ocupadas no meu PC
+  padPlayer: new Map(), // vaga -> número do jogador no Windows (1–4) que o controle virtual pegou
+  padBusy: null,        // vagas esperando resposta de "Aplicar ordem"
+  padOrder: [],         // ordem escolhida na aba Controles: "uid|nº do controle"
   controlling: null     // PC que eu controlo: { uid, sock, mode, kb }
 };
 
@@ -3412,6 +3415,9 @@ async function handleSignal(p, data) {
   if (data.ctrlReq) { askControl(p); return; }
   if (data.ctrlGrant) { onGranted(p, data.ctrlGrant, data.pad); return; }
   if (data.ctrlPad) { onCtrlPad(p, data.ctrlPad); return; }
+  if (data.ctrlPads) { onCtrlPads(p, data.ctrlPads); return; }
+  if (data.ctrlPadCfg) { onCtrlPadCfg(p, data.ctrlPadCfg); return; }
+  if (data.ctrlBuzz) { onCtrlBuzz(p, data.ctrlBuzz); return; }
   if (data.ctrlDeny) { toast(typeof data.ctrlDeny === "string" ? data.ctrlDeny : `${user(p.userId).username} recusou o pedido de controle.`, "warn", 4500); return; }
   if (data.ctrlEnd) { if (V.controlling && V.controlling.sock === p.sock) stopControlling(true, `${user(p.userId).username} encerrou o controle.`); endGrant(p.sock, true); return; }
   if (data.desc) {
@@ -3947,13 +3953,13 @@ function agentConnectRaw(code) {
         AG.ver = parseInt(line.split(" ")[1], 10) || 1;
         AG.pad = (/pad=(\w+)/.exec(line) || [])[1] || "";
         if (helloWait !== -1) done();
-      } else onAgentMsg(line);
+      } else for (const l of line.split("\n")) onAgentMsg(l);
     };
     ws.onerror = () => { clearTimeout(t); rej(new Error("Agente Auryx não encontrado ou código errado.")); };
     ws.onclose = () => {
       if (AG.ws !== ws) return;
       AG.ws = null; AG.ver = 0;
-      V.padUsed.clear();
+      V.padUsed.clear(); V.padPlayer.clear(); V.padBusy = null; AG.list = null;
       if (V.granted.size) { for (const sock of [...V.granted.keys()]) endGrant(sock); toast("O Agente Auryx foi fechado — controle encerrado.", "warn"); }
     };
   });
@@ -3961,8 +3967,16 @@ function agentConnectRaw(code) {
 // respostas do agente sobre os controles virtuais: "pad <vaga> ok <jogador>" ou "pad <vaga> erro <motivo>"
 function onAgentMsg(line) {
   const a = line.split(" ");
+  // "pads a b c d": o que o Windows tem em cada número de jogador (agente v3, para a aba Controles)
+  if (a[0] === "pads") { AG.list = a.slice(1, 5); AG.listAt = Date.now(); padPanelDraw(); return; }
   if (a[0] !== "pad") return;
   const slot = +a[1];
+  const quiet = V.padBusy && V.padBusy.has(slot);          // resposta de "Aplicar ordem": sem avisos repetidos
+  if (quiet) V.padBusy.delete(slot);
+  const last = quiet && !V.padBusy.size;                   // última resposta: resumo depois de gravar o número
+  try { padReply(a, slot, quiet); } finally { if (last) padOrderDone(); }
+}
+function padReply(a, slot, quiet) {
   for (const [sock, g] of V.granted) {
     if (!g.pads) continue;
     for (const [i, s] of g.pads) {
@@ -3970,13 +3984,16 @@ function onAgentMsg(line) {
       const name = user(g.uid).username;
       if (a[2] === "ok") {
         const player = +a[3] >= 0 ? +a[3] + 1 : 0;
-        toast(`🎮 Controle de ${name} conectado no seu PC${player ? ` como Jogador ${player}` : ""}.`, "ok", 5000);
-        sig(sock, { ctrlPad: { i, ok: true, player } });
+        V.padPlayer.set(slot, player);
+        if (!quiet) toast(`🎮 Controle de ${name} conectado no seu PC${player ? ` como Jogador ${player}` : ""}. Veja em Controles.`, "ok", 5000);
+        sig(sock, { ctrlPad: { i, ok: true, player, quiet } });
       } else {
-        toast(`Não deu para criar o controle virtual de ${name}: ${a.slice(3).join(" ") || "erro"}. O controle dele vai virar teclado.`, "warn", 7000);
+        toast(`Não deu para criar o controle virtual de ${name}: ${a.slice(3).join(" ") || "erro"}. Reinstale o ViGEmBus e reinicie o PC.`, "warn", 7000);
         sig(sock, { ctrlPad: { i, ok: false } });
-        g.pads.delete(i); V.padUsed.delete(s);
+        g.pads.delete(i); V.padUsed.delete(s); V.padPlayer.delete(s);
       }
+      padPanelDraw();
+      renderCtrlBar();
       return;
     }
   }
@@ -3991,10 +4008,154 @@ function padSlot(g, i) {
 }
 function freePads(g) {
   if (!g || !g.pads) return;
-  for (const s of g.pads.values()) { agentSend(`px ${s}`); V.padUsed.delete(s); }
+  for (const s of g.pads.values()) { agentSend(`px ${s}`); V.padUsed.delete(s); V.padPlayer.delete(s); }
   g.pads.clear();
+  padPanelDraw();
 }
 const agentSend = line => { if (agentOk()) AG.ws.send(line); };
+
+/* --- Aba Controles (quem transmite): ver os controles, identificar e escolher Jogador 1, 2, 3… --- */
+// a pessoa que joga junto conta quais controles tem (nome e número)
+function onCtrlPads(p, list) {
+  const g = V.granted.get(p.sock);
+  if (!g || !Array.isArray(list)) return;
+  const prev = (g.info || []).length;
+  g.info = list.slice(0, 4).map(x => ({ i: Math.round(+x.i), name: String(x.name || "").slice(0, 48), std: !!x.std }))
+    .filter(x => x.i >= 0 && x.i <= 3);
+  if (g.pad && g.info.length > 1 && g.info.length > prev && !V.padPanel) toast(`${user(g.uid).username} tem ${g.info.length} controles. Em 🎮 Controles você escolhe quem é o Jogador 1, 2…`, "info", 7000);
+  padPanelDraw();
+}
+const padKey = e => `${e.g.uid}|${e.i}`;
+// todos os controles de quem joga junto, na ordem da aba (sem mexer: na ordem de jogador atual)
+function padEntries() {
+  const out = [];
+  for (const [sock, g] of V.granted) {
+    if (!g.pad) continue;
+    const seen = new Set();
+    for (const x of g.info || []) { out.push({ sock, g, i: x.i, name: x.name || `Controle ${x.i + 1}` }); seen.add(x.i); }
+    for (const i of (g.pads || new Map()).keys()) if (!seen.has(i)) { out.push({ sock, g, i, name: i === KB_PAD ? "Teclado usado como controle" : `Controle ${i + 1}` }); seen.add(i); }
+  }
+  const player = e => { const s = e.g.pads && e.g.pads.get(e.i); const n = s === undefined ? 0 : V.padPlayer.get(s) || 0; return n || 99; };
+  if (!V.padOrderTouched) out.sort((a, b) => player(a) - player(b) || V.padOrder.indexOf(padKey(a)) - V.padOrder.indexOf(padKey(b)));
+  for (const e of out) if (!V.padOrder.includes(padKey(e))) V.padOrder.push(padKey(e));
+  if (V.padOrderTouched) out.sort((a, b) => V.padOrder.indexOf(padKey(a)) - V.padOrder.indexOf(padKey(b)));
+  else V.padOrder = out.map(padKey).concat(V.padOrder.filter(k => !out.some(e => padKey(e) === k)));
+  return out;
+}
+function padPanelHTML() {
+  const now = Date.now();
+  const dot = on => `<i class="padp-dot${on ? " on" : ""}" title="${on ? "mexendo agora" : "parado"}"></i>`;
+  let h = `<span class="label">Neste PC (o seu)</span>`;
+  if (!agentOk()) h += `<div class="padp-empty">O Agente Auryx não está conectado.</div>`;
+  else if (AG.pad !== "ok") h += `<div class="padp-empty">⚠️ Driver ViGEmBus não encontrado: os controles de quem joga junto não funcionam. <a href="${VIGEM_URL}" target="_blank" rel="noopener">Baixar ViGEmBus</a> e reiniciar o PC.</div>`;
+  else if (AG.ver < 3) h += `<div class="padp-empty">Atualize o Agente Auryx (baixe de novo ou atualize o app de PC) para ver aqui os controles ligados neste PC e trocar a ordem dos jogadores.</div>`;
+  else {
+    const phys = (AG.list || []).map((v, n) => ({ v, n })).filter(x => x.v && x.v[0] === "f");
+    h += phys.length ? phys.map(x => `<div class="padp-row me">${dot(+x.v.slice(1) !== 0)}<b class="padp-pl">Jogador ${x.n + 1}</b><span><span><b>Seu controle</b><small>ligado neste PC (de quem transmite)</small></span></span></div>`).join("")
+      : `<div class="padp-empty">Nenhum controle ligado neste PC${AG.list ? "" : " (lendo…)"} — quem joga junto começa no Jogador 1.</div>`;
+  }
+  const ents = padEntries();
+  h += `<span class="label" style="margin-top:14px">Quem joga junto — ordem dos jogadores</span>`;
+  if (!ents.length) h += `<div class="padp-empty">Ninguém ligou um controle ainda. Quando a pessoa ligar o controle, ele aparece aqui.</div>`;
+  ents.forEach((e, n) => {
+    const s = e.g.pads && e.g.pads.get(e.i), off = e.g.off && e.g.off.has(e.i);
+    const pl = s === undefined ? 0 : V.padPlayer.get(s) || 0;
+    const busy = V.padBusy && s !== undefined && V.padBusy.has(s);
+    const st = off ? "Desligado" : busy ? "Trocando…" : pl ? `Jogador ${pl}` : s !== undefined ? "Conectando…" : "Esperando apertar um botão";
+    const u = user(e.g.uid), k = esc(padKey(e));
+    h += `<div class="padp-row${off ? " off" : ""}">${dot(!off && now - (e.g.act.get(e.i) || 0) < 400)}<b class="padp-pl${pl && !off ? "" : " dim"}">${esc(st)}</b>
+      <span>${avatar(u, 22)}<span><b>${esc(u.username)} · ${e.i === KB_PAD ? "teclado" : `controle ${e.i + 1}`}</b><small>${esc(e.name)}</small></span></span>
+      <span class="padp-btns">
+        <button class="icon-btn sm" data-pp="up" data-k="${k}" ${n === 0 ? "disabled" : ""} data-tip="Subir (jogador antes)">${ic("arrowUp", "sm")}</button>
+        <button class="icon-btn sm" data-pp="down" data-k="${k}" ${n === ents.length - 1 ? "disabled" : ""} data-tip="Descer (jogador depois)">${ic("arrowDown", "sm")}</button>
+        ${e.i === KB_PAD ? "" : `<button class="btn sm" data-pp="buzz" data-k="${k}" data-tip="Faz o controle da pessoa vibrar">Identificar</button>`}
+        <button class="btn sm${off ? " primary" : ""}" data-pp="off" data-k="${k}">${off ? "Ligar" : "Desligar"}</button>
+      </span></div>`;
+  });
+  const can = agentOk() && AG.ver >= 3 && AG.pad === "ok" && ents.some(e => !e.g.off.has(e.i));
+  h += `<div class="padp-foot"><small class="padp-note">${V.padOrderTouched ? "⚠️ Ordem mudada — clique em <b>Aplicar ordem</b>." : "A bolinha acende quando o controle mexe."}</small><button class="btn primary" data-pp="apply" ${can && !V.padBusy ? "" : "disabled"}>${V.padBusy ? "Aplicando…" : "Aplicar ordem"}</button></div>`;
+  return h;
+}
+function padPanelDraw() {
+  const P = V.padPanel;
+  if (!P) return;
+  const h = padPanelHTML();
+  if (h !== P.last) { P.last = h; P.box.innerHTML = h; }
+}
+function padFind(k) { return padEntries().find(e => padKey(e) === k); }
+// religa os controles virtuais na ordem da lista: o Windows dá o menor número de jogador livre para cada um
+function padApply() {
+  if (!agentOk() || AG.ver < 3) return toast("Atualize o Agente Auryx para trocar a ordem dos jogadores.", "warn");
+  if (V.padBusy) return;
+  const slots = [];
+  for (const e of padEntries()) {
+    if (e.g.off.has(e.i)) continue;
+    const s = padSlot(e.g, e.i);
+    if (s >= 0) slots.push(s);
+  }
+  if (!slots.length) return;
+  V.padBusy = new Set(slots);
+  clearTimeout(V.padBusyT);
+  V.padBusyT = setTimeout(padOrderDone, 8000);
+  agentSend(`po ${slots.join(" ")}`);
+  padPanelDraw();
+}
+function padOrderDone() {
+  clearTimeout(V.padBusyT);
+  const fail = V.padBusy && V.padBusy.size;
+  V.padBusy = null;
+  V.padOrderTouched = false;
+  const names = padEntries().map(e => { const s = e.g.pads.get(e.i), pl = s === undefined ? 0 : V.padPlayer.get(s); return pl ? `Jogador ${pl}: ${user(e.g.uid).username}` : ""; }).filter(Boolean);
+  if (fail) toast("O agente não respondeu a tempo. Tente aplicar de novo.", "warn");
+  else toast(`🎮 Ordem aplicada — ${names.join(" · ")}. No jogo, pode ser preciso apertar Start de novo.`, "ok", 7000);
+  agentSend("pl");
+  padPanelDraw();
+  renderCtrlBar();
+}
+function openPadPanel() {
+  if (V.padPanel) return;
+  if (agentOk() && AG.ver >= 3) agentSend("pl");
+  modal({
+    title: "Controles do co-op", cls: "padp",
+    sub: "Veja cada controle, identifique qual é qual e escolha quem é o Jogador 1, 2, 3… Os controles chegam no seu PC como controles de Xbox de verdade — nunca como teclado.",
+    body: `<div data-pp-list></div><div class="hint" style="margin:10px 0 0">Os controles ligados neste PC vêm sempre primeiro. Para um amigo ser o <b>Jogador 1</b>: desligue o seu controle, clique em <b>Aplicar ordem</b> e ligue o seu de novo — ele vira o próximo jogador.</div>`,
+    onMount(m) {
+      V.padPanel = { box: m.querySelector("[data-pp-list]"), last: "" };
+      padPanelDraw();
+      let tick = 0;
+      V.padPanel.t = setInterval(() => { if (++tick % 4 === 0 && agentOk() && AG.ver >= 3 && !V.padBusy) agentSend("pl"); padPanelDraw(); }, 250);
+      m.addEventListener("click", ev => {
+        const b = ev.target.closest("[data-pp]");
+        if (!b || b.disabled) return;
+        const act = b.dataset.pp;
+        if (act === "apply") return padApply();
+        const e = padFind(b.dataset.k);
+        if (!e) return;
+        if (act === "up" || act === "down") {
+          const o = padEntries().map(padKey), at = o.indexOf(padKey(e)), to = at + (act === "up" ? -1 : 1);
+          if (to < 0 || to >= o.length) return;
+          [o[at], o[to]] = [o[to], o[at]];
+          V.padOrder = o.concat(V.padOrder.filter(k => !o.includes(k)));
+          V.padOrderTouched = true;
+        } else if (act === "buzz") {
+          sig(e.sock, { ctrlBuzz: { i: e.i } });
+          toast(`Pedimos para o controle ${e.i + 1} de ${user(e.g.uid).username} vibrar.`, "info", 3000);
+        } else if (act === "off") {
+          if (e.g.off.has(e.i)) e.g.off.delete(e.i);
+          else {
+            e.g.off.add(e.i);
+            const s = e.g.pads.get(e.i);
+            if (s !== undefined) { agentSend(`px ${s}`); e.g.pads.delete(e.i); V.padUsed.delete(s); V.padPlayer.delete(s); }
+          }
+          sig(e.sock, { ctrlPadCfg: { off: [...e.g.off] } });
+          renderCtrlBar();
+        }
+        padPanelDraw();
+      });
+    },
+    onClose() { if (V.padPanel) clearInterval(V.padPanel.t); V.padPanel = null; }
+  });
+}
 
 // KeyboardEvent.code -> [código virtual do Windows, tecla estendida]
 const VK = (() => {
@@ -4014,10 +4175,7 @@ const VK = (() => {
   for (let i = 1; i <= 12; i++) m["F" + i] = [111 + i];
   return m;
 })();
-const PAD_PRESETS = {
-  wasd: { name: "WASD + Espaço", dir: [87, 83, 65, 68], btn: { 0: 32, 1: 69, 2: 81, 3: 82, 4: 160, 5: 162, 6: 70, 7: 71, 8: 9, 9: 27 } },
-  setas: { name: "Setas + J K L", dir: [38, 40, 37, 39], btn: { 0: 75, 1: 76, 2: 74, 3: 73, 4: 85, 5: 79, 6: 89, 7: 80, 8: 8, 9: 13 } }
-};
+// (O controle NUNCA vira teclado: sem o driver de controle virtual no PC de quem transmite, ele simplesmente não é enviado.)
 const EXT_VK = new Set([33, 34, 35, 36, 37, 38, 39, 40, 45, 46, 91, 92, 93, 163, 165]);
 
 function setupDc(p, dc) {
@@ -4077,7 +4235,7 @@ function askControl(p) {
       <label class="radio-card on">${ic("gamepad", "lg")}<span><b>Co-op (jogar junto)</b><small>Só teclado e controle — ideal para co-op local. Mouse bloqueado.</small></span><input type="radio" name="cm" value="coop" checked></label>
       <label class="radio-card">${ic("pointer", "lg")}<span><b>Controle total</b><small>Mouse e teclado, como AnyDesk.${surface && surface !== "monitor" ? " <b style='color:var(--yellow)'>Transmita a tela inteira para o mouse cair no lugar certo.</b>" : ""}</small></span><input type="radio" name="cm" value="full"></label>
       <div class="hint" style="margin:10px 0 0">${DESKTOP || agentOk() ? "✅ Controle remoto pronto." : "⚠️ O Agente Auryx precisa estar aberto neste PC (Configurações › Controle remoto) — ou use o app de PC, que já vem com ele."} Você pode encerrar a qualquer momento.</div>
-      ${agentOk() && AG.pad && AG.pad !== "ok" ? `<div class="hint" style="margin:8px 0 0">🎮 Para o jogo reconhecer o controle dessa pessoa como <b>Jogador 2</b>, instale o driver gratuito <a href="${VIGEM_URL}" target="_blank" rel="noopener">ViGEmBus</a> (uma vez só). Sem ele, o controle vira teclado.</div>` : ""}
+      ${agentOk() && AG.pad && AG.pad !== "ok" ? `<div class="hint" style="margin:8px 0 0">🎮 Para o jogo reconhecer o controle dessa pessoa como <b>Jogador 2</b>, instale o driver gratuito <a href="${VIGEM_URL}" target="_blank" rel="noopener">ViGEmBus</a> (uma vez só). Sem ele, o controle dessa pessoa não funciona (ele nunca vira teclado).</div>` : ""}
       <div class="modal-foot"><button class="btn ghost" data-no>Recusar</button><button class="btn primary" data-yes>Permitir</button></div>`,
     onMount(m, close) {
       m.addEventListener("change", e => { if (e.target.name === "cm") { mode = e.target.value; $$(".radio-card", m).forEach(r => r.classList.toggle("on", r.querySelector("input").checked)); } });
@@ -4095,13 +4253,14 @@ function askControl(p) {
         close();
         if (!V.peers.has(p.sock) || !V.screen) return;
         const now = Date.now(), pad = padReady();
-        V.granted.set(p.sock, { uid: p.userId, mode, alt: false, since: now, last: now, logAt: now, pad, pads: new Map() });
+        // info = controles que a pessoa tem (nome), off = desligados na aba Controles, act = último movimento de cada um
+        V.granted.set(p.sock, { uid: p.userId, mode, alt: false, since: now, last: now, logAt: now, pad, pads: new Map(), info: [], off: new Set(), act: new Map() });
         ctrlLogAdd({ at: now, uid: p.userId, name: u.username, mode });
         ctrlWatch();
         // pad: 2 = este PC cria controles de Xbox virtuais (cada pessoa vira outro jogador no jogo)
         sig(p.sock, { ctrlGrant: mode, pad: pad ? 2 : 0 });
         toast(`${u.username} agora pode ${mode === "full" ? "controlar seu PC" : "jogar com você"}.`, "ok");
-        if (!pad && mode === "coop") toast(`Sem o driver ViGEmBus, o controle de ${u.username} vira teclado e o jogo pode achar que é o Jogador 1. Veja Configurações › Controle remoto.`, "warn", 9000);
+        if (!pad && mode === "coop") toast(`Sem o driver ViGEmBus neste PC, o controle de ${u.username} não funciona — só o teclado dele. Veja Configurações › Controle remoto.`, "warn", 9000);
         renderCtrlBar();
       };
     },
@@ -4141,8 +4300,13 @@ function onRemoteInput(p, data) {
       if (dx || dy) out.push(`r ${dx} ${dy}`);
     } else if (a[0] === "p" && g.pad) {
       // estado do controle: p <nº do controle> <botões> <LT> <RT> <LX> <LY> <RX> <RY>
+      // nº 0–3 = controles da pessoa; 4 = o teclado dela usado como controle
       const i = Math.round(+a[1]);
-      if (!(i >= 0 && i <= 3) || a.length < 9) continue;
+      if (!(i >= 0 && i <= KB_PAD) || a.length < 9) continue;
+      if (g.off && g.off.has(i)) continue;                 // desligado na aba Controles
+      if (V.padBusy && !g.pads.has(i)) continue;           // reordenando: nenhum controle novo entra no meio
+      if (V.padBusy && V.padBusy.has(g.pads.get(i))) continue;
+      if (g.act && a.slice(2, 9).join(" ") !== PAD_IDLE) g.act.set(i, Date.now());
       const slot = padSlot(g, i);
       if (slot < 0) continue;
       const n = (v, lo, hi) => Math.round(clamp(+v || 0, lo, hi));
@@ -4150,7 +4314,7 @@ function onRemoteInput(p, data) {
       out.push(`p ${slot} ${n(a[2], 0, 0xffff) & ~0x0400} ${n(a[3], 0, 255)} ${n(a[4], 0, 255)} ${n(a[5], -32768, 32767)} ${n(a[6], -32768, 32767)} ${n(a[7], -32768, 32767)} ${n(a[8], -32768, 32767)}`);
     } else if (a[0] === "px") {
       const i = Math.round(+a[1]), s = g.pads && g.pads.get(i);
-      if (s !== undefined) { out.push(`px ${s}`); g.pads.delete(i); V.padUsed.delete(s); }
+      if (s !== undefined) { out.push(`px ${s}`); g.pads.delete(i); V.padUsed.delete(s); V.padPlayer.delete(s); padPanelDraw(); }
     } else if (a[0] === "k") {
       const down = a[1] === "1", vk = Math.round(+a[2]);
       if (!(vk > 0 && vk < 255)) continue;
@@ -4173,14 +4337,15 @@ function requestControl(uid) {
 }
 function onGranted(p, mode, pad) {
   const prev = V.controlling && V.controlling.sock === p.sock ? V.controlling : null;
-  V.controlling = { uid: p.userId, sock: p.sock, mode: mode === "full" ? "full" : "coop", kb: false, keys: new Set(), padKeys: new Set(), preset: store.get("padPreset", "wasd"),
+  V.controlling = { uid: p.userId, sock: p.sock, mode: mode === "full" ? "full" : "coop", kb: false, keys: new Set(),
     // pad: o PC de quem transmite cria controles de Xbox virtuais (cada controle seu vira um jogador no jogo)
-    pad: +pad >= 2, kbPad: store.get("kbPad", false), padSent: new Map(), padFail: new Set(), player: {}, kbState: new Set() };
-  if (prev) { V.controlling.padSent = prev.padSent; V.controlling.player = prev.player; }
+    // off = controles desligados por quem transmite; mine = desligados por você; listKey = última lista de controles enviada
+    pad: +pad >= 2, kbPad: store.get("kbPad", false), padSent: new Map(), padFail: new Set(), player: {}, kbState: new Set(), off: new Set(), mine: new Set(), listKey: "" };
+  if (prev) { V.controlling.padSent = prev.padSent; V.controlling.player = prev.player; V.controlling.off = prev.off; V.controlling.mine = prev.mine; }
   V.focus = p.userId + ":screen";
   sfx("live");
-  const padTip = V.controlling.pad ? " Seu controle aparece no PC dele como um controle de Xbox (outro jogador) — no jogo, aperte Start para entrar." : "";
-  toast(mode === "full" ? `Você está controlando o PC de ${user(p.userId).username}. Clique na transmissão para usar mouse e teclado.${padTip}` : `Co-op liberado! Clique na transmissão e jogue com controle${V.controlling.pad ? "" : " ou teclado"}.${padTip}`, "ok", 7000);
+  const padTip = V.controlling.pad ? " Cada controle seu aparece no PC dele como um controle de Xbox de verdade (outro jogador) — no jogo, aperte Start para entrar." : " O PC dele não tem o driver de controle virtual: por enquanto só o teclado funciona.";
+  toast(mode === "full" ? `Você está controlando o PC de ${user(p.userId).username}. Clique na transmissão para usar mouse e teclado.${padTip}` : `Co-op liberado! Clique na transmissão para jogar.${padTip}`, "ok", 7000);
   if (S.view !== "stage" && V.channelId) openChannel(V.channelId, false);
   schedule("stage");
   renderCtrlBar();
@@ -4195,14 +4360,40 @@ function onCtrlPad(p, d) {
   const c = V.controlling;
   if (!c || c.sock !== p.sock || !d) return;
   const i = +d.i;
-  if (d.ok) { c.player[i] = +d.player || 0; toast(`🎮 Seu controle${i ? " " + (i + 1) : ""} está conectado${c.player[i] ? ` como Jogador ${c.player[i]}` : ""}. No jogo, aperte Start para entrar.`, "ok", 6000); }
-  else { c.padFail.add(i); toast("O PC de quem transmite não conseguiu criar o controle virtual. Seu controle vai virar teclado.", "warn", 7000); }
+  if (!(i >= 0 && i <= KB_PAD)) return;
+  if (d.ok) {
+    const was = c.player[i];
+    c.player[i] = +d.player || 0;
+    const nome = i === KB_PAD ? "Seu teclado (como controle)" : `Seu controle ${i + 1}`;
+    if (!d.quiet) toast(`🎮 ${nome} está conectado${c.player[i] ? ` como Jogador ${c.player[i]}` : ""}. No jogo, aperte Start para entrar.`, "ok", 6000);
+    else if (was !== c.player[i] && c.player[i]) toast(`🎮 ${user(c.uid).username} mudou a ordem: ${nome.toLowerCase()} agora é o Jogador ${c.player[i]}.`, "info", 6000);
+  } else { c.padFail.add(i); toast("O PC de quem transmite não conseguiu criar o controle virtual. Seu controle não vai funcionar até ele reinstalar o driver ViGEmBus.", "warn", 7000); }
   renderCtrlBar();
+}
+// quem transmite desligou/ligou controles seus na aba Controles
+function onCtrlPadCfg(p, d) {
+  const c = V.controlling;
+  if (!c || c.sock !== p.sock || !d || !Array.isArray(d.off)) return;
+  const off = new Set(d.off.map(Number).filter(i => i >= 0 && i <= KB_PAD));
+  for (const i of off) if (!c.off.has(i)) { c.padSent.delete(i); delete c.player[i]; toast(`${user(c.uid).username} desligou ${i === KB_PAD ? "seu teclado-controle" : `seu controle ${i + 1}`} no co-op.`, "info", 5000); }
+  for (const i of c.off) if (!off.has(i)) toast(`${user(c.uid).username} ligou ${i === KB_PAD ? "seu teclado-controle" : `seu controle ${i + 1}`} de novo.`, "info", 4000);
+  c.off = off;
+  renderCtrlBar();
+}
+// "Identificar": quem transmite pede para o seu controle vibrar (assim cada um sabe qual é qual)
+function onCtrlBuzz(p, d) {
+  const c = V.controlling;
+  if (!c || c.sock !== p.sock || !d) return;
+  const i = +d.i;
+  const gp = navigator.getGamepads ? [...navigator.getGamepads()].find(g => g && g.index === i) : null;
+  const va = gp && gp.vibrationActuator;
+  if (va && va.playEffect) va.playEffect("dual-rumble", { duration: 600, strongMagnitude: 1, weakMagnitude: 1 }).catch(() => {});
+  toast(`🎮 ${user(c.uid).username} está identificando ${i === KB_PAD ? "seu teclado-controle" : `o seu controle ${i + 1}`}${c.player[i] ? ` (Jogador ${c.player[i]})` : ""}${va ? " — ele vai vibrar" : ""}.`, "info", 5000);
 }
 function stopControlling(silent, msg) {
   const c = V.controlling;
   if (!c) return;
-  const ups = [...c.keys, ...c.padKeys].map(vk => `k 0 ${vk} 0`);
+  const ups = [...c.keys].map(vk => `k 0 ${vk} 0`);
   if (ups.length) dcSend(ups.join("\n"));
   if (c.pad) { const px = [...c.padSent.keys()].map(i => `px ${i}`); if (px.length) dcSend(px.join("\n")); }
   if (document.pointerLockElement) document.exitPointerLock();
@@ -4243,7 +4434,7 @@ const KBPAD = {
   Digit1: 0x0100, Digit3: 0x0200, KeyZ: "lt", KeyC: "rt", Enter: 0x0010, Tab: 0x0020, KeyF: 0x0040, KeyH: 0x0080
 };
 const KBPAD_HELP = [["W A S D", "analógico esquerdo"], ["I J K L", "analógico direito"], ["Setas", "direcional"], ["Espaço", "A"], ["E", "B"], ["Q", "X"], ["R", "Y"], ["1 / 3", "LB / RB"], ["Z / C", "LT / RT"], ["Enter", "Start"], ["Tab", "Back"], ["F / H", "L3 / R3"]];
-const KB_PAD = 3;
+const KB_PAD = 4;   // nº reservado ao teclado-controle (os controles de verdade usam 0–3, como no navegador)
 function kbPadState(set) {
   let btn = 0, lt = 0, rt = 0;
   const ax = { lx: 0, ly: 0, rx: 0, ry: 0 };
@@ -4356,45 +4547,42 @@ function padState(gp) {
   // no navegador "para cima" é negativo; no controle de Xbox é positivo
   return `${btn} ${trig(6)} ${trig(7)} ${ax(0)} ${-ax(1) || 0} ${ax(2)} ${-ax(3) || 0}`;
 }
-// Controle (gamepad) de quem controla -> controle de Xbox virtual no PC de quem transmite
-// (ou, se ele não tiver o driver, -> teclas, como antes)
+// nome curto do controle para mostrar na aba Controles ("Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e…)" -> "Xbox Wireless Controller")
+const padName = gp => String(gp.id || "").replace(/\s*\(.*$/, "").replace(/^[0-9a-f]{4}-[0-9a-f]{4}-/i, "").trim().slice(0, 48) || `Controle ${gp.index + 1}`;
+// Controle (gamepad) de quem controla -> controle de Xbox virtual no PC de quem transmite.
+// O controle NUNCA vira teclado: sem o driver no PC de quem transmite, ele não é enviado.
 function padLoop(ref) {
   const c = V.controlling;
   if (!c || (ref && ref !== c) || (!ref && c.looping)) return;
   c.looping = true;
-  const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [];
-  const asKeys = [];
+  const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter(g => g && g.connected !== false && g.index <= 3) : [];
+  // conta para quem transmite quais controles você tem (nome e número), para a aba Controles dele
+  const key = pads.map(g => g.index + ":" + g.id).join("|");
+  if (key !== c.listKey) {
+    c.listKey = key;
+    const p = V.peers.get(c.sock);
+    if (p) sig(p.sock, { ctrlPads: pads.map(g => ({ i: g.index, name: padName(g), std: g.mapping === "standard" })) });
+    renderCtrlBar();
+  }
   for (const gp of pads) {
     const i = gp.index;
-    if (!c.pad || i > 2 || c.padFail.has(i)) { asKeys.push(gp); continue; }
+    if (!c.pad || c.padFail.has(i) || c.off.has(i) || c.mine.has(i)) continue;
     sendPad(c, i, padState(gp));
     if (!c.padSeen) { c.padSeen = true; renderCtrlBar(); }
     if (gp.mapping !== "standard" && !c.padOdd) { c.padOdd = true; toast("Esse controle não usa o mapeamento padrão do navegador: alguns botões podem ficar trocados.", "warn", 6000); }
   }
   // controle desconectado deste lado: solta tudo no controle virtual (a vaga continua dele)
   for (const [i, st] of c.padSent) if (i !== KB_PAD && st !== PAD_IDLE && !pads.some(gp => gp.index === i)) sendPad(c, i, PAD_IDLE);
-  const gp = asKeys[0];
-  if (gp) {
-    const pr = PAD_PRESETS[c.preset] || PAD_PRESETS.wasd;
-    const want = new Set();
-    const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0, b = i => gp.buttons[i] && gp.buttons[i].pressed;
-    if (ay < -0.5 || b(12)) want.add(pr.dir[0]);
-    if (ay > 0.5 || b(13)) want.add(pr.dir[1]);
-    if (ax < -0.5 || b(14)) want.add(pr.dir[2]);
-    if (ax > 0.5 || b(15)) want.add(pr.dir[3]);
-    for (const [i, vk] of Object.entries(pr.btn)) if (b(+i)) want.add(vk);
-    const lines = [];
-    for (const vk of want) if (!c.padKeys.has(vk)) lines.push(`k 1 ${vk} ${EXT_VK.has(vk) ? 1 : 0}`);
-    for (const vk of c.padKeys) if (!want.has(vk)) lines.push(`k 0 ${vk} ${EXT_VK.has(vk) ? 1 : 0}`);
-    if (lines.length) dcSend(lines.join("\n"));
-    c.padKeys = want;
-    if (!c.padSeen) { c.padSeen = true; renderCtrlBar(); }
-  } else if (c.padKeys.size) {                    // controle tirado no meio: solta as teclas que ele segurava
-    dcSend([...c.padKeys].map(vk => `k 0 ${vk} ${EXT_VK.has(vk) ? 1 : 0}`).join("\n"));
-    c.padKeys = new Set();
-  }
   if (pads.length) requestAnimationFrame(() => padLoop(c));   // controle ligado: lê a cada quadro
   else setTimeout(() => padLoop(c), 500);                       // sem controle: verifica de vez em quando (economiza CPU)
+}
+// você mesmo liga/desliga um controle seu (ex.: o DS4Windows faz o mesmo controle aparecer 2 vezes)
+function padMine(i, on) {
+  const c = V.controlling;
+  if (!c) return;
+  if (on) c.mine.delete(i);
+  else { c.mine.add(i); if (c.padSent.has(i)) { dcSend(`px ${i}`); c.padSent.delete(i); delete c.player[i]; } }
+  renderCtrlBar();
 }
 function renderCtrlBar() {
   const el = $("#ctrlBar");
@@ -4402,13 +4590,14 @@ function renderCtrlBar() {
   let h = "";
   for (const [sock, g] of V.granted) {
     const n = g.pads ? g.pads.size : 0;
-    h += `<div class="cb-row host">${ic(g.mode === "full" ? "pointer" : "gamepad", "sm")}<span><b>${esc(user(g.uid).username)}</b> ${g.mode === "full" ? "está controlando seu PC" : "está jogando com você (co-op)"}${n ? ` · 🎮 ${n} ${n === 1 ? "controle virtual" : "controles virtuais"}` : ""}</span><button class="btn danger sm" data-act="ctrl-revoke" data-sock="${esc(sock)}">Encerrar</button></div>`;
+    const players = [...(g.pads || new Map()).values()].map(s => V.padPlayer.get(s)).filter(Boolean).sort();
+    h += `<div class="cb-row host">${ic(g.mode === "full" ? "pointer" : "gamepad", "sm")}<span><b>${esc(user(g.uid).username)}</b> ${g.mode === "full" ? "está controlando seu PC" : "está jogando com você (co-op)"}${n ? ` · 🎮 ${players.length ? `Jogador ${players.join(", ")}` : `${n} ${n === 1 ? "controle" : "controles"}`}` : ""}</span><button class="btn sm" data-act="pad-panel" data-tip="Controles: ver, identificar e escolher Jogador 1, 2…">${ic("gamepad", "sm")}Controles</button><button class="btn danger sm" data-act="ctrl-revoke" data-sock="${esc(sock)}">Encerrar</button></div>`;
   }
   if (c) {
-    const pr = PAD_PRESETS[c.preset] || PAD_PRESETS.wasd;
-    const players = Object.values(c.player || {}).filter(Boolean);
-    const padTxt = c.pad ? ` · 🎮 controle de Xbox virtual${players.length ? ` (Jogador ${players.join(", ")})` : ""}${c.kbPad ? " · teclado = controle" : ""}` : c.padSeen ? ` · 🎮 ${pr.name}` : "";
-    h += `<div class="cb-row">${ic(c.mode === "full" ? "pointer" : "gamepad", "sm")}<span>${c.mode === "full" ? "Controlando" : "Co-op com"} <b>${esc(user(c.uid).username)}</b> · clique na tela para usar o teclado${padTxt}</span>${c.mode === "full" ? `<button class="btn sm" data-act="ctrl-lock" data-tip="${document.pointerLockElement ? "Soltar o mouse (Esc)" : "Travar o mouse no jogo (jogos 3D)"}">${ic("pointer", "sm")}</button>` : ""}<button class="btn sm" data-act="pad-preset" data-tip="Controle e teclado">${ic("gamepad", "sm")}</button><button class="btn sm" data-act="ctrl-stop">Parar</button></div>`;
+    const players = Object.entries(c.player || {}).filter(([, v]) => v).map(([i, v]) => `${+i === KB_PAD ? "teclado" : `controle ${+i + 1}`} = Jogador ${v}`);
+    const padTxt = c.pad ? ` · 🎮 ${players.length ? players.join(", ") : "aperte um botão do controle para entrar"}`
+      : c.listKey ? ` · <b style="color:var(--yellow)">🎮 seu controle não é enviado: o PC dele não tem o driver ViGEmBus</b>` : "";
+    h += `<div class="cb-row">${ic(c.mode === "full" ? "pointer" : "gamepad", "sm")}<span>${c.mode === "full" ? "Controlando" : "Co-op com"} <b>${esc(user(c.uid).username)}</b> · clique na tela para usar o teclado${padTxt}</span>${c.mode === "full" ? `<button class="btn sm" data-act="ctrl-lock" data-tip="${document.pointerLockElement ? "Soltar o mouse (Esc)" : "Travar o mouse no jogo (jogos 3D)"}">${ic("pointer", "sm")}</button>` : ""}<button class="btn sm" data-act="pad-preset" data-tip="Meus controles">${ic("gamepad", "sm")}</button><button class="btn sm" data-act="ctrl-stop">Parar</button></div>`;
   }
   el.innerHTML = h;
   el.classList.toggle("hidden", !h);
@@ -6246,7 +6435,7 @@ function remotePads() {
     : st === "erro" ? `<small style="color:var(--yellow)">⚠️ O driver respondeu com erro. Reinstale o ViGEmBus e reinicie o PC.</small>`
     : agentOk() && AG.ver < 2 ? `<small style="color:var(--yellow)">⚠️ Seu Agente Auryx é antigo: baixe de novo (ou atualize o app de PC).</small>` : "";
   return `<span class="label" style="margin-top:18px;display:block">Co-op com controle (Jogador 2, 3, 4)</span>
-    <div class="steps"><div class="step"><b>${ic("gamepad", "sm")}</b><div><b>Driver de controle virtual (ViGEmBus)</b><small>Para o jogo reconhecer cada amigo como um controle diferente (LEGO, luta, corrida em tela dividida…), instale uma vez neste PC o driver gratuito ViGEmBus. Sem ele, o controle do amigo vira teclado e o jogo acha que é o Jogador 1.</small>${status}<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><a class="btn sm" href="${VIGEM_URL}" target="_blank" rel="noopener">${ic("arrowDown", "sm")}Baixar ViGEmBus</a><button class="btn sm" data-pad-check>Verificar driver</button></div><small>Depois de instalar, reinicie o PC. Quem joga de longe pode usar controle de Xbox, PlayStation, genérico ou o teclado (opção "Teclado como controle").</small></div></div></div>`;
+    <div class="steps"><div class="step"><b>${ic("gamepad", "sm")}</b><div><b>Driver de controle virtual (ViGEmBus)</b><small>Para o jogo reconhecer cada amigo como um controle diferente (LEGO, luta, corrida em tela dividida…), instale uma vez neste PC o driver gratuito ViGEmBus. Sem ele, o controle do amigo não funciona (ele nunca vira teclado). Durante o co-op, clique em 🎮 <b>Controles</b> na barra para ver cada controle e escolher quem é o Jogador 1, 2, 3…</small>${status}<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><a class="btn sm" href="${VIGEM_URL}" target="_blank" rel="noopener">${ic("arrowDown", "sm")}Baixar ViGEmBus</a><button class="btn sm" data-pad-check>Verificar driver</button></div><small>Depois de instalar, reinicie o PC. Quem joga de longe pode usar controle de Xbox, PlayStation, genérico ou o teclado (opção "Teclado como controle").</small></div></div></div>`;
 }
 // Segurança e histórico do controle remoto (vale para o app de PC e para o Agente Auryx)
 function remoteSafety() {
@@ -6910,9 +7099,14 @@ const ACTIONS = {
   "pad-preset": a => {
     const c = V.controlling;
     if (!c) return;
-    // PC de quem transmite com controle virtual: o controle vai inteiro (analógicos e gatilhos); o teclado pode virar controle também
-    if (c.pad) return menu(a, [
-      { label: "Controle → controle de Xbox (outro jogador)", icon: "check", run: () => toast("Seu controle aparece no PC de quem transmite como um controle de Xbox. No jogo, aperte Start para entrar como outro jogador.", "info", 6000) },
+    // Meus controles: cada um vira um controle de Xbox separado no PC de quem transmite (nunca vira teclado)
+    if (!c.pad) return menu(a, [{ label: "O PC de quem transmite não tem o driver ViGEmBus: controles não são enviados", icon: "info", run: () => toast("Peça para quem transmite instalar o ViGEmBus (Configurações › Controle remoto) e reiniciar o PC. Seu controle nunca vira teclado.", "info", 8000) }]);
+    const mine = navigator.getGamepads ? [...navigator.getGamepads()].filter(g => g && g.index <= 3) : [];
+    return menu(a, [
+      ...(mine.length ? mine.map(g => {
+        const i = g.index, on = !c.mine.has(i) && !c.off.has(i);
+        return { label: `Controle ${i + 1}: ${padName(g)}${c.off.has(i) ? " (desligado por quem transmite)" : c.player[i] ? ` · Jogador ${c.player[i]}` : ""}`, icon: on ? "check" : null, run: () => { if (c.off.has(i)) return toast("Quem transmite desligou esse controle na aba Controles dele.", "info"); padMine(i, c.mine.has(i)); } };
+      }) : [{ label: "Nenhum controle encontrado — ligue e aperte um botão", icon: "info", run: () => {} }]),
       { label: c.kbPad ? "Teclado como controle: ligado" : "Teclado como controle: desligado", icon: c.kbPad ? "check" : null, run: () => {
         releaseKeys();
         c.kbPad = !c.kbPad; store.set("kbPad", c.kbPad);
@@ -6922,8 +7116,8 @@ const ACTIONS = {
       } },
       { label: "Ver teclas do teclado-controle", icon: "info", run: kbPadHelp }
     ]);
-    menu(a, Object.entries(PAD_PRESETS).map(([k, p]) => ({ label: p.name, icon: c.preset === k ? "check" : null, run: () => { c.preset = k; store.set("padPreset", k); renderCtrlBar(); } })));
   },
+  "pad-panel": () => openPadPanel(),
   discover: goDiscover,
   "add-server": addServerModal,
   "create-server": createServerModal,
