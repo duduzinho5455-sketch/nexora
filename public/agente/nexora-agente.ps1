@@ -422,6 +422,11 @@ try {
                 }
               }
               "pl" { Enviar ([NxPad]::List()) }
+              # confere o driver de novo (depois do "Ativar controles" no app, sem derrubar o co-op)
+              "pc" {
+                $st = if ([NxPad]::Open()) { "ok" } elseif ([NxPad]::Error -eq "sem driver") { "nodriver" } else { "erro" }
+                Enviar "padst $st"
+              }
               "po" {
                 $resp = [NxPad]::Order([string[]]$p)
                 if ($resp) {

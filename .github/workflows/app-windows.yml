@@ -33,6 +33,19 @@ jobs:
           Copy-Item ../public/agente/nexora-agente.ps1 agente/ -Force
           npm version "3.0.${{ github.run_number }}" --no-git-tag-version --allow-same-version
 
+      # Driver de controles virtuais (ViGEmBus, licença BSD-3): vai dentro do app para o botão "Ativar controles".
+      # Versão e SHA-256 fixos: se o arquivo baixado for diferente, o build para.
+      - name: Embutir o instalador do ViGEmBus
+        shell: pwsh
+        run: |
+          $url = "https://github.com/nefarius/ViGEmBus/releases/download/v1.22.0/ViGEmBus_1.22.0_x64_x86_arm64.exe"
+          $out = "vigem/ViGEmBus-Setup.exe"
+          Invoke-WebRequest $url -OutFile $out
+          $h = (Get-FileHash $out -Algorithm SHA256).Hash
+          if ($h -ne "89220A7865076B342892F98865F3499FB7C4CFD673159E89D352C360FD014C6A") { throw "SHA-256 do ViGEmBus diferente: $h" }
+          $sig = Get-AuthenticodeSignature $out
+          if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notlike "*Nefarius Software Solutions*") { throw "Assinatura do ViGEmBus inválida: $($sig.Status)" }
+
       - name: Instalar dependências
         run: npm install --no-audit --no-fund
 

@@ -3921,6 +3921,47 @@ const AG = { ws: null, ver: 0, pad: "" };
 const agentOk = () => !!(AG.ws && AG.ws.readyState === 1);
 const VIGEM_URL = "https://github.com/nefarius/ViGEmBus/releases/latest";
 const padReady = () => agentOk() && AG.pad === "ok";
+// App de PC novo: o driver de controles (ViGEmBus) vem dentro do app — "Ativar controles" instala com um clique
+const padCanInstall = () => !!(DESKTOP && DESKTOP.installPadDriver);
+const padDriverBtn = (cls = "btn sm primary") => padCanInstall()
+  ? `<button class="${cls}" data-act="pad-install">${ic("gamepad", "sm")}Ativar controles</button>`
+  : `<a class="${cls}" href="${VIGEM_URL}" target="_blank" rel="noopener">${ic("arrowDown", "sm")}Baixar ViGEmBus</a>`;
+async function padInstall() {
+  if (!padCanInstall()) { window.open(VIGEM_URL, "_blank", "noopener"); return; }
+  if (V.padInstalling) return;
+  V.padInstalling = true;
+  $('[data-act="pad-install"]').forEach(b => b.classList.add("loading"));
+  toast("Ativando os controles… se o Windows perguntar se pode fazer alterações, clique em Sim.", "info", 9000);
+  let r;
+  // já instalado e rodando: não roda o instalador de novo, só faz o agente enxergar
+  const ja = DESKTOP.padDriverState ? await DESKTOP.padDriverState().catch(() => "") : "";
+  if (ja === "ok") r = { ok: true, reboot: false };
+  else try { r = await DESKTOP.installPadDriver(); } catch (e) { r = { ok: false, msg: e.message }; }
+  V.padInstalling = false;
+  $('[data-act="pad-install"]').forEach(b => b.classList.remove("loading"));
+  if (r.cancelled) return toast("Não ativou: o Windows precisa do seu Sim para instalar o driver. Clique em Ativar controles de novo quando quiser.", "warn", 8000);
+  if (!r.ok) return toast(`Não deu para ativar os controles (${r.msg || "código " + r.code}). Tente de novo ou reinicie o PC.`, "error", 9000);
+  if (r.reboot) return toast("Driver instalado! Reinicie o PC uma vez e os controles do co-op passam a funcionar.", "ok", 12000);
+  // driver pronto: o agente confere de novo, sem derrubar quem já está jogando
+  if (agentOk()) {
+    agentSend("pc");
+    for (let i = 0; i < 20 && AG.pad !== "ok"; i++) await new Promise(res => setTimeout(res, 150));
+  } else { try { await agentConnect(); } catch {} }
+  if (AG.pad === "ok") padDriverReady();
+  const good = AG.pad === "ok" || !agentOk();
+  toast(good ? "🎮 Controles ativados! Cada amigo vai aparecer no jogo como um controle de Xbox (Jogador 2, 3…)." : "Driver instalado, mas o agente ainda não enxergou. Reinicie o PC se não funcionar.", good ? "ok" : "warn", 8000);
+  if (V.remoteRerender && $("[data-pad-check]")) V.remoteRerender();   // tela Configurações › Controle remoto aberta
+}
+// quem já está jogando sem controle passa a ter controle de verdade na hora
+function padDriverReady() {
+  for (const [sock, g] of V.granted) {
+    if (g.pad) continue;
+    g.pad = true;
+    sig(sock, { ctrlGrant: g.mode, pad: 2 });
+  }
+  padPanelDraw();
+  renderCtrlBar();
+}
 // No app de PC o agente já vem embutido: o app abre ele sozinho, escondido.
 async function agentConnect(code) {
   if (agentOk()) return;
@@ -3968,6 +4009,7 @@ function agentConnectRaw(code) {
 function onAgentMsg(line) {
   const a = line.split(" ");
   // "pads a b c d": o que o Windows tem em cada número de jogador (agente v3, para a aba Controles)
+  if (a[0] === "padst") { AG.pad = a[1] || ""; if (AG.pad === "ok") padDriverReady(); return; }
   if (a[0] === "pads") { AG.list = a.slice(1, 5); AG.listAt = Date.now(); padPanelDraw(); return; }
   if (a[0] !== "pad") return;
   const slot = +a[1];
@@ -4047,7 +4089,7 @@ function padPanelHTML() {
   const dot = on => `<i class="padp-dot${on ? " on" : ""}" title="${on ? "mexendo agora" : "parado"}"></i>`;
   let h = `<span class="label">Neste PC (o seu)</span>`;
   if (!agentOk()) h += `<div class="padp-empty">O Agente Auryx não está conectado.</div>`;
-  else if (AG.pad !== "ok") h += `<div class="padp-empty">⚠️ Driver ViGEmBus não encontrado: os controles de quem joga junto não funcionam. <a href="${VIGEM_URL}" target="_blank" rel="noopener">Baixar ViGEmBus</a> e reiniciar o PC.</div>`;
+  else if (AG.pad !== "ok") h += `<div class="padp-empty">⚠️ Os controles de quem joga junto ainda não estão ativados neste PC.${padCanInstall() ? " É um clique (o Windows pede um Sim, uma vez só)." : " Instale o driver gratuito ViGEmBus e reinicie o PC — ou use o app de PC, que ativa com um clique."}<div style="margin-top:8px">${padDriverBtn()}</div></div>`;
   else if (AG.ver < 3) h += `<div class="padp-empty">Atualize o Agente Auryx (baixe de novo ou atualize o app de PC) para ver aqui os controles ligados neste PC e trocar a ordem dos jogadores.</div>`;
   else {
     const phys = (AG.list || []).map((v, n) => ({ v, n })).filter(x => x.v && x.v[0] === "f");
@@ -4235,7 +4277,7 @@ function askControl(p) {
       <label class="radio-card on">${ic("gamepad", "lg")}<span><b>Co-op (jogar junto)</b><small>Só teclado e controle — ideal para co-op local. Mouse bloqueado.</small></span><input type="radio" name="cm" value="coop" checked></label>
       <label class="radio-card">${ic("pointer", "lg")}<span><b>Controle total</b><small>Mouse e teclado, como AnyDesk.${surface && surface !== "monitor" ? " <b style='color:var(--yellow)'>Transmita a tela inteira para o mouse cair no lugar certo.</b>" : ""}</small></span><input type="radio" name="cm" value="full"></label>
       <div class="hint" style="margin:10px 0 0">${DESKTOP || agentOk() ? "✅ Controle remoto pronto." : "⚠️ O Agente Auryx precisa estar aberto neste PC (Configurações › Controle remoto) — ou use o app de PC, que já vem com ele."} Você pode encerrar a qualquer momento.</div>
-      ${agentOk() && AG.pad && AG.pad !== "ok" ? `<div class="hint" style="margin:8px 0 0">🎮 Para o jogo reconhecer o controle dessa pessoa como <b>Jogador 2</b>, instale o driver gratuito <a href="${VIGEM_URL}" target="_blank" rel="noopener">ViGEmBus</a> (uma vez só). Sem ele, o controle dessa pessoa não funciona (ele nunca vira teclado).</div>` : ""}
+      ${agentOk() && AG.pad && AG.pad !== "ok" ? `<div class="hint" style="margin:8px 0 0">🎮 Para o jogo reconhecer o controle dessa pessoa como <b>Jogador 2</b>, ${padCanInstall() ? "ative os controles neste PC (um clique, uma vez só)" : `instale o driver gratuito <a href="${VIGEM_URL}" target="_blank" rel="noopener">ViGEmBus</a> (uma vez só)`}. Sem isso, o controle dessa pessoa não funciona (ele nunca vira teclado).${padCanInstall() ? `<div style="margin-top:8px">${padDriverBtn()}</div>` : ""}</div>` : ""}
       <div class="modal-foot"><button class="btn ghost" data-no>Recusar</button><button class="btn primary" data-yes>Permitir</button></div>`,
     onMount(m, close) {
       m.addEventListener("change", e => { if (e.target.name === "cm") { mode = e.target.value; $$(".radio-card", m).forEach(r => r.classList.toggle("on", r.querySelector("input").checked)); } });
@@ -6435,7 +6477,7 @@ function remotePads() {
     : st === "erro" ? `<small style="color:var(--yellow)">⚠️ O driver respondeu com erro. Reinstale o ViGEmBus e reinicie o PC.</small>`
     : agentOk() && AG.ver < 2 ? `<small style="color:var(--yellow)">⚠️ Seu Agente Auryx é antigo: baixe de novo (ou atualize o app de PC).</small>` : "";
   return `<span class="label" style="margin-top:18px;display:block">Co-op com controle (Jogador 2, 3, 4)</span>
-    <div class="steps"><div class="step"><b>${ic("gamepad", "sm")}</b><div><b>Driver de controle virtual (ViGEmBus)</b><small>Para o jogo reconhecer cada amigo como um controle diferente (LEGO, luta, corrida em tela dividida…), instale uma vez neste PC o driver gratuito ViGEmBus. Sem ele, o controle do amigo não funciona (ele nunca vira teclado). Durante o co-op, clique em 🎮 <b>Controles</b> na barra para ver cada controle e escolher quem é o Jogador 1, 2, 3…</small>${status}<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><a class="btn sm" href="${VIGEM_URL}" target="_blank" rel="noopener">${ic("arrowDown", "sm")}Baixar ViGEmBus</a><button class="btn sm" data-pad-check>Verificar driver</button></div><small>Depois de instalar, reinicie o PC. Quem joga de longe pode usar controle de Xbox, PlayStation, genérico ou o teclado (opção "Teclado como controle").</small></div></div></div>`;
+    <div class="steps"><div class="step"><b>${ic("gamepad", "sm")}</b><div><b>Driver de controle virtual (ViGEmBus)</b><small>Para o jogo reconhecer cada amigo como um controle diferente (LEGO, luta, corrida em tela dividida…), ${padCanInstall() ? "ative uma vez os controles neste PC — o app já traz o driver (ViGEmBus), é só clicar e dizer Sim para o Windows" : "instale uma vez neste PC o driver gratuito ViGEmBus (ou use o app de PC, que ativa com um clique)"}. Sem isso, o controle do amigo não funciona (ele nunca vira teclado). Durante o co-op, clique em 🎮 <b>Controles</b> na barra para ver cada controle e escolher quem é o Jogador 1, 2, 3…</small>${status}<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">${st === "ok" ? "" : padDriverBtn()}<button class="btn sm" data-pad-check>Verificar driver</button></div><small>${padCanInstall() ? "Só quem transmite precisa. Se o Windows pedir, reinicie o PC uma vez." : "Depois de instalar, reinicie o PC."} Quem joga de longe pode usar controle de Xbox, PlayStation, genérico ou o teclado (opção "Teclado como controle").</small></div></div></div>`;
 }
 // Segurança e histórico do controle remoto (vale para o app de PC e para o Agente Auryx)
 function remoteSafety() {
@@ -6463,6 +6505,7 @@ function renderRemote() {
     <div class="hint" style="margin-top:16px">Para jogar co-op: transmita no modo <b>Movimento</b> com <b>720p ou 1080p 60 FPS</b>. Quem joga pode usar controle ou teclado — com o driver ViGEmBus (abaixo), cada controle vira um jogador separado no jogo.</div>${remotePads()}${remoteSafety()}`;
 }
 function mountRemote(p, rerender) {
+  V.remoteRerender = rerender;
   bindToggles(p, (k, on) => { if (k === "noCtrl" && on) toast("Pedidos de controle bloqueados.", "ok"); });
   const chk = p.querySelector("[data-pad-check]");
   if (chk) chk.onclick = async () => {
@@ -7118,6 +7161,7 @@ const ACTIONS = {
     ]);
   },
   "pad-panel": () => openPadPanel(),
+  "pad-install": () => padInstall(),
   discover: goDiscover,
   "add-server": addServerModal,
   "create-server": createServerModal,

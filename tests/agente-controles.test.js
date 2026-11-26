@@ -39,6 +39,9 @@ const waitMsg = async (ws, re, ms = 8000) => { for (let t = 0; t < ms; t += 100)
   ok(!!ws, "página conectou no agente");
   const hello = await waitMsg(ws, /^hello /);
   ok(hello === "hello 3 pad=ok", `agente encontrou o driver: "${hello}"`);
+  ws.send("pc");
+  const pc = await waitMsg(ws, /^padst /);
+  ok(pc === "padst ok", `"pc" confere o driver de novo sem desconectar (depois do Ativar controles): "${pc}"`);
 
   console.log("1) Amigo 1: X apertado, RT pela metade, analógico esquerdo para a direita e para cima");
   ws.send("p 0 16384 0 128 20000 15000 0 0");

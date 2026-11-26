@@ -201,6 +201,61 @@ ipcMain.handle("agent:start", e => {
   proc.on("exit", () => { if (agent === proc) { agent = null; agentCode = null; } });
   return agentCode;
 });
+/* ---------- Driver de controles virtuais (ViGEmBus) embutido: "Ativar controles" com um clique ---------- */
+// Só quem transmite precisa. O Windows pede "Sim" (administrador) uma vez; nada é baixado na hora.
+let padInstalling = false;
+function padSetupPath() {
+  const packed = path.join(process.resourcesPath || "", "vigem", "ViGEmBus-Setup.exe");
+  return app.isPackaged ? packed : path.join(__dirname, "vigem", "ViGEmBus-Setup.exe");
+}
+// "ok" = driver rodando · "parado" = instalado mas parado (normalmente pede reiniciar) · "nao" = não instalado
+function padDriverState() {
+  return new Promise(res => {
+    const p = spawn("sc.exe", ["query", "ViGEmBus"], { windowsHide: true });
+    let out = "";
+    p.stdout.on("data", d => { out += d; });
+    p.on("error", () => res("nao"));
+    // o texto do sc muda com o idioma do Windows ("ESTADO"/"STATE"), mas RUNNING e o código 1060 (não existe) não
+    p.on("close", code => res(/\bRUNNING\b/.test(out) ? "ok" : code === 0 ? "parado" : "nao"));
+  });
+}
+// roda o instalador como administrador; devolve o código de saída (1223 = a pessoa não clicou em "Sim")
+function runElevated(file, args) {
+  return new Promise(res => {
+    const ps = "$ErrorActionPreference='Stop'; try { $a = @{ FilePath = $env:NX_SETUP; Verb = 'RunAs'; Wait = $true; PassThru = $true }; " +
+      "if ($env:NX_ARGS) { $a.ArgumentList = $env:NX_ARGS }; $p = Start-Process @a; exit $p.ExitCode } catch { exit 1223 }";
+    const p = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", ps],
+      { windowsHide: true, stdio: "ignore", env: { ...process.env, NX_SETUP: file, NX_ARGS: args || "" } });
+    p.on("error", () => res(-1));
+    p.on("exit", code => res(code === null ? -1 : code));
+  });
+}
+ipcMain.handle("pad:state", async e => {
+  if (process.platform !== "win32" || !win || e.sender !== win.webContents) return "nao";
+  return padDriverState();
+});
+ipcMain.handle("pad:install", async e => {
+  if (process.platform !== "win32") throw new Error("Os controles virtuais funcionam só no Windows.");
+  if (!win || e.sender !== win.webContents) throw new Error("Pedido inválido.");
+  if (padInstalling) throw new Error("A instalação já está em andamento.");
+  const setup = padSetupPath();
+  if (!fs.existsSync(setup)) throw new Error("O instalador do driver não veio com este app. Atualize o app de PC.");
+  padInstalling = true;
+  try {
+    const cancel = c => c === 1223 || c === 1602;
+    // 1º sem janelas (Advanced Installer: /exenoui = sem tela do instalador, /qn = MSI silencioso)
+    let code = await runElevated(setup, "/exenoui /qn /norestart");
+    if (cancel(code)) return { ok: false, cancelled: true, code };
+    let st = await padDriverState();
+    // não deu sem janelas: abre o instalador normal (Avançar, Avançar…)
+    if (st !== "ok" && code !== 0 && code !== 3010) {
+      code = await runElevated(setup, "");
+      if (cancel(code)) return { ok: false, cancelled: true, code };
+      st = await padDriverState();
+    }
+    return { ok: st === "ok" || code === 0 || code === 3010, reboot: st !== "ok", code, state: st };
+  } finally { padInstalling = false; }
+});
 ipcMain.handle("agent:stop", e => { if (win && e.sender === win.webContents) stopAgent(); return true; });
 function stopAgent() { if (agent) { try { agent.kill(); } catch {} agent = null; agentCode = null; } }
 

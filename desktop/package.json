@@ -38,6 +38,11 @@
       {
         "from": "agente/nexora-agente.ps1",
         "to": "agente/nexora-agente.ps1"
+      },
+      {
+        "from": "vigem",
+        "to": "vigem",
+        "filter": ["ViGEmBus-Setup.exe", "LICENCA-ViGEmBus.txt"]
       }
     ],
     "win": {
